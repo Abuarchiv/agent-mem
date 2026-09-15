@@ -4,45 +4,78 @@ import { createConnection } from "node:net";
 import { assertPrivatePath } from "./private-files.js";
 
 /** Single local owner; a dead process's private lock can be recovered after a crash. */
-export function acquireOwnerLock(directory: string, installationId: string, fileName: "owner.lock" | "config.lock" = "owner.lock"): () => void {
-  assertPrivatePath(directory, undefined, "owner_lock_unverified");
+export type V1LockFileName = "owner.lock" | "config.lock" | "install.lock";
+
+function lockBusyError(fileName: V1LockFileName): string {
+  if (fileName === "config.lock") return "configuration_busy_retry";
+  if (fileName === "install.lock") return "install_busy_retry";
+  return "v1_backend_already_running";
+}
+
+function lockUnverifiedError(fileName: V1LockFileName): string {
+  if (fileName === "install.lock") return "install_lock_unverified";
+  return "owner_lock_unverified";
+}
+
+function lockChangedError(fileName: V1LockFileName): string {
+  if (fileName === "install.lock") return "install_lock_changed";
+  return "owner_lock_changed";
+}
+
+export function acquireOwnerLock(directory: string, installationId: string, fileName: V1LockFileName = "owner.lock"): () => void {
+  assertPrivatePath(directory, undefined, lockUnverifiedError(fileName));
   const path = join(directory, fileName);
   let fd: number;
   try { fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600); }
   catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+    const busyError = lockBusyError(fileName);
+    const unverifiedError = lockUnverifiedError(fileName);
+    const changedError = lockChangedError(fileName);
     const reader = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     let info: ReturnType<typeof fstatSync>;
     try {
       info = fstatSync(reader);
-      if (!info.isFile() || info.size > 1024) throw new Error("owner_lock_unverified");
-      assertPrivatePath(path, info, "owner_lock_unverified");
+      if (!info.isFile() || info.size > 1024) throw new Error(unverifiedError);
+      assertPrivatePath(path, info, unverifiedError);
       let lock: unknown;
       try { lock = JSON.parse(readFileSync(reader, "utf8")) as unknown; }
-      catch { throw new Error(fileName === "config.lock" ? "configuration_busy_retry" : "owner_lock_unverified"); }
-      if (!lock || typeof lock !== "object" || !("installation_id" in lock) || lock.installation_id !== installationId || !("pid" in lock) || typeof lock.pid !== "number" || !Number.isSafeInteger(lock.pid) || lock.pid <= 0) throw new Error("owner_lock_unverified");
+      catch { throw new Error(fileName === "owner.lock" ? unverifiedError : busyError); }
+      if (!lock || typeof lock !== "object" || !("installation_id" in lock) || lock.installation_id !== installationId || !("pid" in lock) || typeof lock.pid !== "number" || !Number.isSafeInteger(lock.pid) || lock.pid <= 0) throw new Error(unverifiedError);
       try { process.kill(lock.pid, 0); }
       catch (probeError) {
-        if (!(probeError instanceof Error && "code" in probeError && probeError.code === "ESRCH")) throw new Error("owner_lock_unverified");
+        if (!(probeError instanceof Error && "code" in probeError && probeError.code === "ESRCH")) throw new Error(unverifiedError);
         const current = lstatSync(path);
-        if (current.dev !== info.dev || current.ino !== info.ino) throw new Error("owner_lock_changed");
+        if (current.dev !== info.dev || current.ino !== info.ino) throw new Error(changedError);
         unlinkSync(path);
         return acquireOwnerLock(directory, installationId, fileName);
       }
-      throw new Error(fileName === "config.lock" ? "configuration_busy_retry" : "v1_backend_already_running");
+      throw new Error(busyError);
     } finally { closeSync(reader); }
   }
   let identity: ReturnType<typeof fstatSync>;
   try {
-    assertPrivatePath(path, fstatSync(fd), "owner_lock_unverified");
+    assertPrivatePath(path, fstatSync(fd), lockUnverifiedError(fileName));
     writeFileSync(fd, JSON.stringify({ installation_id: installationId, pid: process.pid }) + "\n");
     fsyncSync(fd); identity = fstatSync(fd);
   } finally { closeSync(fd); }
+  let released = false;
   return () => {
-    if (!existsSync(path)) return;
-    const current = lstatSync(path);
-    if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) throw new Error("owner_lock_changed");
-    unlinkSync(path);
+    if (released) return;
+    released = true;
+    let current: ReturnType<typeof lstatSync>;
+    try {
+      if (!existsSync(path)) return;
+      current = lstatSync(path);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    }
+    if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) throw new Error(lockChangedError(fileName));
+    try { unlinkSync(path); }
+    catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
   };
 }
 

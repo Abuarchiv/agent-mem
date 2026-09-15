@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$baseUrl = if ($env:AGENT_MEM_BASE_URL) { $env:AGENT_MEM_BASE_URL } elseif ($env:AGENT_MEMORY_V1_BASE_URL) { $env:AGENT_MEMORY_V1_BASE_URL } else { 'https://github.com/Abuarchiv/agent-mem/releases/latest/download' }
+$baseUrl = if ($env:AGENT_MEM_BASE_URL) { $env:AGENT_MEM_BASE_URL } elseif ($env:AGENT_MEMORY_V1_BASE_URL) { $env:AGENT_MEMORY_V1_BASE_URL } else { 'https://github.com/Abuarchiv/agent-memory-v1/releases/latest/download' }
 $version = if ($env:AGENT_MEM_VERSION) { $env:AGENT_MEM_VERSION } elseif ($env:AGENT_MEMORY_V1_VERSION) { $env:AGENT_MEMORY_V1_VERSION } else { 'latest' }
 if (-not $baseUrl.StartsWith('https://', [System.StringComparison]::OrdinalIgnoreCase)) { throw 'installer_requires_https' }
 if ($version -notmatch '^(latest|v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') { throw 'installer_version_invalid' }
@@ -41,6 +41,21 @@ try {
   $dataHome = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } elseif ($env:APPDATA) { $env:APPDATA } else { Join-Path $HOME 'AppData\Local' }
   if (-not [System.IO.Path]::IsPathRooted($dataHome)) { throw 'installer_data_path_invalid' }
   $installRoot = Join-Path $dataHome 'agent-mem'
+  $installMutexName = 'Global\AgentMemNativeInstall'
+  $installMutex = $null
+  $installMutexAcquired = $false
+  $projectExit = 0
+  try {
+    try { $installMutex = New-Object System.Threading.Mutex($false, $installMutexName) }
+    catch { throw 'native_install_lock_unverified' }
+    $installMutexDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not $installMutexAcquired) {
+      try { $installMutexAcquired = $installMutex.WaitOne(0) }
+      catch [System.Threading.AbandonedMutexException] { $installMutexAcquired = $true }
+      if ($installMutexAcquired) { break }
+      if ([DateTime]::UtcNow -ge $installMutexDeadline) { throw 'native_install_busy' }
+      Start-Sleep -Milliseconds 100
+    }
   $releaseRoot = Join-Path $installRoot 'releases'
   $release = Join-Path $releaseRoot "$target-$version"
   New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
@@ -70,8 +85,14 @@ try {
   if ($Project) {
     if ($Agents) { & $launcher install --project $Project --agents $Agents --yes }
     else { & $launcher install --project $Project --yes }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $projectExit = $LASTEXITCODE
   }
+  }
+  finally {
+    try { if ($installMutexAcquired -and $installMutex) { $installMutex.ReleaseMutex() } } catch { }
+    try { if ($installMutex) { $installMutex.Dispose() } } catch { }
+  }
+  if ($Project -and $projectExit -ne 0) { exit $projectExit }
 }
 finally {
   if (Test-Path $temp) { Remove-Item -LiteralPath $temp -Recurse -Force }

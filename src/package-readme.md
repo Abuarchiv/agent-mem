@@ -1,6 +1,6 @@
 # Agent Mem
 
-Agent Mem is a local service for retaining and retrieving source-backed context from Codex, OpenCode, and GitHub Copilot CLI/app worktrees. It stores original host events and provenance in SQLite and exposes bounded retrieval through stdio MCP and a local IPC broker.
+Agent Mem is a local service for retaining and retrieving source-backed context from Codex CLI, OpenCode CLI, and GitHub Copilot CLI worktrees. It stores original host events and provenance in SQLite and exposes bounded retrieval through stdio MCP and a local IPC broker. Codex Desktop and Copilot app surfaces are not V1 host targets yet.
 
 ## Start
 

@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { configureHost } from "../src/v1/connect.js";
-import { defaultDataDirectory, installJournalFile, loadConfig, runtimeDirectory, saveConfig, socketPath, V1_HOSTS } from "../src/v1/config.js";
+import { defaultDataDirectory, ensurePrivateDirectory, installJournalFile, loadConfig, runtimeDirectory, saveConfig, socketPath, V1_HOSTS } from "../src/v1/config.js";
 import { ensureRerankerExtra, installRerankerExtra, removeRerankerExtra, verifyRerankerExtra, RERANKER_EXTRA_ID } from "../src/v1/extras.js";
 import { createInstallJournal, readInstallJournal, resetInstallJournal, updateInstallJournal, writeInstallJournal } from "../src/v1/install-journal.js";
 import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, InstallError, parseInstallArgs, stopOwnedService, validateMcpToolList, type InstallOptions } from "../src/v1/install.js";
@@ -218,6 +218,13 @@ async function stopInstalledOwner(directory: string): Promise<void> {
   const result = await stopOwnedInstalledOwner(directory);
   console.log(json({ version: 1, ...result }));
 }
+
+/** Serializes concurrent install/repair commands; never collides with config.lock/owner.lock. */
+function acquireInstallCommandLock(directory: string): () => void {
+  ensurePrivateDirectory(resolve(directory));
+  ensurePrivateDirectory(runtimeDirectory(directory));
+  return acquireOwnerLock(runtimeDirectory(directory), "agent-mem-install", "install.lock");
+}
 function takeOption(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   if (index < 0) return undefined;
@@ -386,7 +393,13 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
       console.log("Agent Mem install\n  agent-mem install [--project PATH] [--agents auto|codex,opencode,copilot-cli]\n  --core-only | --no-rerank  Install only the V1 core\n  --yes | --non-interactive  Use detected/default choices without prompts");
       return;
     }
-    await runInstall(directory, parseInstallArgs(args));
+    const options = parseInstallArgs(args);
+    const releaseInstallLock = acquireInstallCommandLock(directory);
+    try {
+      await runInstall(directory, options);
+    } finally {
+      releaseInstallLock();
+    }
     return;
   }
   if (command === "stop") {
@@ -399,7 +412,12 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === "repair") {
-    await runRepair(directory, args);
+    const releaseInstallLock = acquireInstallCommandLock(directory);
+    try {
+      await runRepair(directory, args);
+    } finally {
+      releaseInstallLock();
+    }
     return;
   }
   if (command === "connect" || command === "disconnect") {

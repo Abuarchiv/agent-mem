@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-base_url=${AGENT_MEM_BASE_URL:-${AGENT_MEMORY_V1_BASE_URL:-https://github.com/Abuarchiv/agent-mem/releases/latest/download}}
+base_url=${AGENT_MEM_BASE_URL:-${AGENT_MEMORY_V1_BASE_URL:-https://github.com/Abuarchiv/agent-memory-v1/releases/latest/download}}
 version=${AGENT_MEM_VERSION:-${AGENT_MEMORY_V1_VERSION:-latest}}
 project=
 agents=
@@ -24,7 +24,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --help|-h)
-      printf '%s\n' 'Agent Mem native installer' '  curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh -s -- --project "$PWD"' '  --project PATH  Configure this project immediately after the verified package is installed' '  --agents LIST   auto or comma-separated codex,opencode,copilot-cli'
+      printf '%s\n' 'Agent Mem native installer' '  curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.sh | sh -s -- --project "$PWD"' '  --project PATH  Configure this project immediately after the verified package is installed' '  --agents LIST   auto or comma-separated codex,opencode,copilot-cli'
       exit 0
       ;;
     *)
@@ -69,8 +69,62 @@ if ! tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/agent-mem.XXXXXX"); then
   echo "native_temp_unavailable" >&2
   exit 1
 fi
-cleanup() { rm -rf "$tmp_dir"; }
+cleanup() {
+  rm -rf "$tmp_dir" || true
+  release_install_lock || true
+}
 trap cleanup EXIT HUP INT TERM
+
+install_lock=
+install_lock_acquired=
+
+release_install_lock() {
+  if [ -n "$install_lock_acquired" ]; then
+    if [ -n "$install_lock" ] && [ ! -L "$install_lock" ] && [ -f "$install_lock" ]; then
+      current_pid=$(cat "$install_lock" 2>/dev/null || true)
+      if [ "$current_pid" = "$$" ]; then rm -f "$install_lock" || true; fi
+    fi
+    install_lock_acquired=
+  fi
+}
+
+acquire_install_lock() {
+  install_lock=$install_root/install.lock
+  mkdir -p "$install_root" || { echo "native_install_path_unavailable" >&2; exit 1; }
+  if (set -C; printf '%s\n' "$$" > "$install_lock") 2>/dev/null; then
+    chmod 600 "$install_lock" 2>/dev/null || true
+    install_lock_acquired=1
+    return 0
+  fi
+  if [ -L "$install_lock" ]; then echo "native_install_lock_unverified" >&2; exit 1; fi
+  if [ ! -f "$install_lock" ]; then echo "native_install_busy" >&2; exit 1; fi
+  owner_pid=$(cat "$install_lock" 2>/dev/null || true)
+  case "$owner_pid" in
+    ""|*[!0-9]*) echo "native_install_lock_unverified" >&2; exit 1 ;;
+  esac
+  if [ "$owner_pid" = "$$" ]; then echo "native_install_busy" >&2; exit 1; fi
+  if kill -0 "$owner_pid" 2>/dev/null; then echo "native_install_busy" >&2; exit 1; fi
+  kill_detail=$(kill -0 "$owner_pid" 2>&1 || true)
+  case "$kill_detail" in
+    *[Pp]ermit*|*EPERM*) echo "native_install_busy" >&2; exit 1 ;;
+  esac
+  if command -v ps >/dev/null 2>&1; then
+    if ps -p "$owner_pid" -o pid= 2>/dev/null | grep -q "[0-9]"; then echo "native_install_busy" >&2; exit 1; fi
+  elif [ -d "/proc/$owner_pid" ]; then
+    echo "native_install_busy" >&2; exit 1
+  elif [ ! -d /proc ]; then
+    echo "native_install_lock_unverified" >&2; exit 1
+  fi
+  current_pid=$(cat "$install_lock" 2>/dev/null || true)
+  if [ "$current_pid" != "$owner_pid" ]; then echo "native_install_busy" >&2; exit 1; fi
+  rm -f "$install_lock" || { echo "native_install_lock_unverified" >&2; exit 1; }
+  if (set -C; printf '%s\n' "$$" > "$install_lock") 2>/dev/null; then
+    chmod 600 "$install_lock" 2>/dev/null || true
+    install_lock_acquired=1
+    return 0
+  fi
+  echo "native_install_busy" >&2; exit 1
+}
 
 download() {
   curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$1" -o "$2" \
@@ -93,6 +147,7 @@ package="$tmp_dir/unpacked/agent-mem-package"
 }
 
 install_root=$data_home/agent-mem
+acquire_install_lock
 release_root=$install_root/releases
 release="$release_root/$target-$version"
 mkdir -p "$release_root" || { echo "native_install_path_unavailable" >&2; exit 1; }
@@ -131,9 +186,13 @@ case ":${PATH:-}:" in
 esac
 
 if [ -n "$project" ]; then
+  project_status=0
   if [ -n "$agents" ]; then
-    "$launcher" install --project "$project" --agents "$agents" --yes
+    "$launcher" install --project "$project" --agents "$agents" --yes || project_status=$?
   else
-    "$launcher" install --project "$project" --yes
+    "$launcher" install --project "$project" --yes || project_status=$?
   fi
+  release_install_lock
+  exit "$project_status"
 fi
+release_install_lock

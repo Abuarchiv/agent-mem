@@ -1,6 +1,6 @@
 # Agent Mem
 
-Agent Mem is a local service for retaining and retrieving context from coding-agent sessions. It captures source events from configured Codex, OpenCode, and GitHub Copilot CLI/app worktrees, stores original text and provenance in SQLite, and exposes bounded retrieval through stdio MCP and a local IPC broker.
+Agent Mem is a local service for retaining and retrieving context from coding-agent sessions. V1 captures source events from configured Codex CLI, OpenCode CLI, and GitHub Copilot CLI worktrees, stores original text and provenance in SQLite, and exposes bounded retrieval through stdio MCP and a local IPC broker.
 
 ![Agent Mem architecture overview](assets/agent-mem-readme-hero.png)
 
@@ -34,20 +34,20 @@ The SQLite vault is not encrypted at rest. Anyone who can read the data director
 macOS and Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh -s -- --project "$PWD"
+curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.sh | sh -s -- --project "$PWD"
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1))) -Project (Get-Location)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.ps1))) -Project (Get-Location)
 ```
 
 The installer selects the OS/CPU bundle, verifies its SHA-256 checksum, installs it in user space, and with `--project` runs `agent-mem install`. The `memory` command remains a compatibility alias. Installation configures selected hosts, writes MCP and hook files, starts the owned broker, verifies `initialize` and `tools/list`, and records an install journal.
 
 The installer can use a bundled reranker or download the pinned local extra with a timeout. If the extra is unavailable, the E5/FTS core remains usable and reports `extra.state=unavailable`; retry it with `agent-mem extras install reranker`.
 
-The release workflow defines targets for macOS ARM64/x64, Linux x64, and Windows x64. Unsupported ARM targets fail explicitly instead of requesting an artifact that has not been released.
+The release workflow defines targets for macOS ARM64/x64, Linux x64, and Windows x64. Unsupported ARM targets fail explicitly instead of requesting an artifact that has not been released. Codex Desktop and Copilot app surfaces are not auto-configured by V1 until their native delivery is verified.
 
 ### Homebrew
 
