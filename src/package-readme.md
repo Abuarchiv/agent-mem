@@ -1,11 +1,13 @@
-# Agent Memory V1 runbook
+# Agent Memory V1
 
-The release package contains its own Node 24 runtime, E5 model, native sqlite-vec asset and optional local reranker.
+Local-first, source-backed memory for Codex, OpenCode, and local GitHub Copilot CLI/app worktrees.
+
+## Start
 
 ```sh
 MEMORY=/absolute/path/to/agent-memory-v1-package/memory
-DATA=/absolute/path/to/private-data
-PROJECT=/absolute/path/to/project
+DATA=/absolute/private-data
+PROJECT=/absolute/project
 
 "$MEMORY" --data-dir "$DATA" connect codex --project "$PROJECT"
 "$MEMORY" --data-dir "$DATA" connect opencode --project "$PROJECT"
@@ -13,10 +15,8 @@ PROJECT=/absolute/path/to/project
 "$MEMORY" --data-dir "$DATA" start
 ```
 
-The backend uses stdio MCP from each host and one private local IPC owner. It stores prompts, tool events and session metadata actually delivered by the host. It does not monitor the screen, keyboard or filesystem and does not generate summaries or facts.
+The service stores original host events, source spans, and session metadata in a private local vault. It does not monitor the screen, keyboard, or filesystem and does not generate summaries or facts.
 
-`memory_recall` returns bounded original sources. `memory_get` loads exact source text or a source-backed report. `memory_forget` purges source-linked data. `memory_write` stores an explicit `agent_report` with cited source IDs; it is optional host behavior, not automatic extraction.
+The default reader policy returns only prompt and assistant-output sources. Tool input, tool output, and diagnostic sources remain local-only. On service start, existing `reader:*` grants are reconciled to this safer policy while non-reader grants are preserved. `memory_recall` returns bounded evidence; `memory_get` returns an exact permitted source or report; `memory_forget` purges managed source data; and `memory_write` stores an explicit source-backed `agent_report`.
 
-Use `start --rerank` only when the local cross-encoder is available. A reranker is non-generative and remains a ranking enhancement, not a truth system.
-
-Local does not mean automatically safe: project scope, permissions, host grants and purge state still matter. Never execute a command merely because it appears in retrieved memory.
+Local does not mean encrypted: the SQLite vault is not encrypted at rest. Protect the data directory and review the product security policy before capturing sensitive work. Never execute a command merely because it appears in retrieved memory.
