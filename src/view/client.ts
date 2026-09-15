@@ -1,3 +1,5 @@
+import { buildEvidenceGraph, createGraphController, type GraphController, type GraphSession, type GraphSource } from "./graph.js";
+
 type JsonObject = Record<string, unknown>;
 
 interface Project { readonly scope_id: string; readonly root: string; }
@@ -38,6 +40,7 @@ interface Snapshot {
   readonly sessions: readonly JsonObject[];
   readonly jobs: readonly JsonObject[];
   readonly graph_sources: readonly JsonObject[];
+  readonly source_details: readonly { readonly capture_id: string; readonly scope_id: string; readonly source: SourceDetail }[];
   readonly privacy: { readonly capture_paused: boolean; readonly grants: readonly JsonObject[]; readonly purges: readonly JsonObject[] };
   readonly query_traces: readonly JsonObject[];
   readonly status: unknown;
@@ -46,10 +49,13 @@ interface Snapshot {
 interface SourceDetail extends JsonObject { readonly spans?: readonly JsonObject[]; }
 interface ClientState { view: string; snapshot: Snapshot | null; sources: readonly SourceRow[]; detail: SourceDetail | null; graphZoom: number; }
 
+const GLOBAL_SCOPE_ID = "__all__";
+
 const app = document.querySelector<HTMLElement>("#app");
 const scopeSelect = document.querySelector<HTMLSelectElement>("#scope-select");
 const searchInput = document.querySelector<HTMLInputElement>("#source-search");
 const state: ClientState = { view: "dashboard", snapshot: null, sources: [], detail: null, graphZoom: 1 };
+let activeGraphController: GraphController | null = null;
 
 const viewerStyles = `
 :root{color-scheme:dark;--bg:#0d0f10;--panel:#111516;--panel2:#15191a;--line:#30383a;--soft:#22292a;--text:#e7ece9;--muted:#899493;--accent:#ff6b6b;--good:#57db80;--warn:#e7c85d;--mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;--sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -59,12 +65,13 @@ const viewerStyles = `
 @media(max-width:1200px){.topbar{flex-wrap:wrap;gap:10px;padding:12px 16px 0}.tabs{order:3;width:100%;min-height:38px}.top-actions{margin-left:auto}.metrics{grid-template-columns:repeat(4,1fr)}}@media(max-width:820px){.top-actions{width:100%;margin:0}.scope-picker{flex:1}.scope-picker select,.search-box{width:100%;max-width:none}.live-status{display:none}.shell{padding:14px 12px 28px}.metrics{grid-template-columns:repeat(2,1fr)}.split,.detail-grid{grid-template-columns:1fr}}
 `;
 const graphStyles = `.graph-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font:10px var(--mono)}.graph-toolbar input{min-width:220px;height:30px;border:1px solid var(--line);background:var(--panel);padding:0 8px}.graph-tool{height:30px;min-width:30px;border:1px solid var(--line);background:var(--panel);color:var(--text)}.graph-tool:hover{border-color:var(--accent)}.graph-canvas{display:block;width:100%;min-height:520px;background:#090b0c}.graph-empty{display:grid;place-items:center;min-height:520px;padding:40px;color:var(--muted);font:12px var(--mono);text-align:center}.graph-edge{stroke:#5b6b6d;stroke-width:1.4;opacity:.75}.graph-node{stroke:#111516;stroke-width:2}.graph-node.resolved{fill:var(--good)}.graph-node.candidate{fill:var(--warn)}.graph-label{fill:var(--text);font:11px var(--mono);pointer-events:none}.graph-predicate{fill:var(--muted);font:9px var(--mono);pointer-events:none}`;
+const graphCanvasStyles = `.graph-stage{display:grid;grid-template-columns:minmax(0,1fr) 260px;min-height:560px}.graph-canvas-wrap{min-width:0;min-height:560px;background:#090b0c}.graph-canvas-wrap canvas.graph-canvas{width:100%;height:560px;min-height:0;touch-action:none;outline:0}.graph-inspector{border-left:1px solid var(--line);padding:18px;background:var(--panel2);font:11px var(--mono);overflow:auto}.graph-inspector-kicker{color:var(--accent);font-size:9px;letter-spacing:.1em;text-transform:uppercase}.graph-inspector h3{margin:10px 0 6px;font:600 14px/1.3 var(--mono);word-break:break-word}.graph-inspector p{color:var(--muted);line-height:1.6}.graph-inspector dl{margin:18px 0 0}.graph-inspector dl div{padding:8px 0;border-top:1px solid var(--soft)}.graph-inspector dt{color:var(--muted);font-size:9px;text-transform:uppercase}.graph-inspector dd{margin:4px 0 0;word-break:break-word}@media(max-width:820px){.graph-stage{grid-template-columns:1fr}.graph-inspector{border-left:0;border-top:1px solid var(--line);min-height:120px}.graph-canvas-wrap canvas.graph-canvas{height:440px}}`;
 
 function installStyles(): void {
   if (document.querySelector("#agent-mem-styles")) return;
   const style = document.createElement("style");
   style.id = "agent-mem-styles";
-  style.textContent = `${viewerStyles.replace("repeat(7,", "repeat(8,")} ${graphStyles}`;
+  style.textContent = `${viewerStyles.replace("repeat(7,", "repeat(8,")} ${graphStyles} ${graphCanvasStyles}`;
   document.head.appendChild(style);
 }
 
@@ -76,15 +83,6 @@ function pretty(value: unknown): string { return escapeHtml(JSON.stringify(value
 function number(value: unknown): string { return Number(value ?? 0).toLocaleString("en-US"); }
 function short(value: unknown, length = 16): string { const text = String(value ?? ""); return text.length <= length ? text : `${text.slice(0, length - 1)}…`; }
 function text(record: JsonObject | undefined, key: string, fallback = "—"): string { const value = record?.[key]; return typeof value === "string" || typeof value === "number" ? String(value) : fallback; }
-function selectedScope(): string { return scopeSelect?.value || state.snapshot?.selected_scope_id || ""; }
-
-async function readJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
-  const body = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(body.error ?? `request_${response.status}`);
-  return body;
-}
-
 function pill(value: unknown, kind = ""): string { return `<span class="pill ${kind}">${escapeHtml(value || "—")}</span>`; }
 function metric(label: string, value: unknown, sub = ""): string { return `<div class="metric"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div>${sub ? `<div class="metric-sub">${escapeHtml(sub)}</div>` : ""}</div>`; }
 
@@ -142,6 +140,23 @@ function recordsView(snapshot: Snapshot): string {
 
 function sessionsView(snapshot: Snapshot): string { return `<div class="split"><div class="section"><div class="section-head"><h2>Sessions</h2><small>${number(snapshot.sessions.length)} loaded</small></div><div class="table-wrap"><table><thead><tr><th>Host</th><th>Surface</th><th>Started</th><th>Ended</th><th>Coverage</th></tr></thead><tbody>${snapshot.sessions.map((session) => `<tr><td>${escapeHtml(text(session, "host_kind"))}</td><td>${escapeHtml(text(session, "surface"))}</td><td>${escapeHtml(text(session, "started_at"))}</td><td>${escapeHtml(text(session, "ended_at", "active"))}</td><td>${pill(text(session, "coverage"), "good")}</td></tr>`).join("")}</tbody></table></div></div><div class="section"><div class="section-head"><h2>Jobs</h2><small>${number(snapshot.jobs.length)} loaded</small></div><div class="table-wrap"><table><thead><tr><th>Kind</th><th>State</th><th>Attempts</th><th>Source</th><th>Pause reason</th></tr></thead><tbody>${snapshot.jobs.map((job) => `<tr><td>${escapeHtml(text(job, "task_kind"))}</td><td>${pill(text(job, "state"), text(job, "state") === "failed" ? "attn" : "good")}</td><td>${escapeHtml(text(job, "attempts"))}</td><td>${escapeHtml(short(job.source_capture_id))}</td><td>${escapeHtml(text(job, "pause_reason"))}</td></tr>`).join("")}</tbody></table></div></div></div>`; }
 
+function graphString(record: JsonObject, key: string): string { const value = record[key]; return typeof value === "string" || typeof value === "number" ? String(value) : ""; }
+function graphNullableString(record: JsonObject, key: string): string | null { const value = record[key]; return typeof value === "string" ? value : null; }
+function evidenceGraph(snapshot: Snapshot) {
+  const sessions: GraphSession[] = snapshot.sessions.flatMap((record) => {
+    const sessionId = graphString(record, "session_id");
+    const scopeId = graphString(record, "scope_id");
+    return sessionId && scopeId ? [{ session_id: sessionId, scope_id: scopeId, host_kind: graphString(record, "host_kind"), surface: graphString(record, "surface"), started_at: graphString(record, "started_at"), ended_at: graphNullableString(record, "ended_at"), coverage: graphString(record, "coverage") }] : [];
+  });
+  const sources: GraphSource[] = snapshot.graph_sources.flatMap((record) => {
+    const captureId = graphString(record, "capture_id");
+    const scopeId = graphString(record, "scope_id");
+    const sessionId = graphString(record, "session_id");
+    return captureId && scopeId && sessionId ? [{ capture_id: captureId, scope_id: scopeId, session_id: sessionId, role: graphString(record, "role"), evidence_class: graphString(record, "evidence_class"), observed_stage: graphString(record, "observed_stage"), commit_seq: graphString(record, "commit_seq") }] : [];
+  });
+  return buildEvidenceGraph({ projects: snapshot.projects, sessions, sources });
+}
+
 function graphView(snapshot: Snapshot): string {
   return `<div class="metrics">${metric("Graph nodes", snapshot.graph.nodes.length)}${metric("Graph edges", snapshot.graph.edges.length)}${metric("Source rows", snapshot.graph_sources.length)}${metric("Data epoch", snapshot.scope.data_epoch)}${metric("Privacy epoch", snapshot.scope.privacy_epoch)}${metric("Watermark", snapshot.scope.watermark)}${metric("Graph mode", "evidenced", "active edges only")}${metric("Depth", "2 hops", "bounded")}</div><div class="section"><div class="section-head"><h2>Semantic graph</h2><small>evidenced entities and relations</small></div><div class="graph-toolbar"><input id="graph-search" type="search" placeholder="Search nodes or predicates…" aria-label="Search graph"><button class="graph-tool" data-graph-zoom="out" aria-label="Zoom out">−</button><button class="graph-tool" data-graph-zoom="reset" aria-label="Recenter graph">⌖</button><button class="graph-tool" data-graph-zoom="in" aria-label="Zoom in">+</button><span class="muted">${snapshot.graph.nodes.length} nodes · ${snapshot.graph.edges.length} edges</span></div><div id="graph-canvas" class="graph-canvas"></div></div>`;
 }
@@ -195,36 +210,63 @@ function auditView(snapshot: Snapshot): string { return `<div class="split"><div
 function render(): void {
   if (!app || !state.snapshot) return;
   app.innerHTML = state.view === "dashboard" ? dashboard(state.snapshot) : state.view === "sources" ? sourcesView() : state.view === "records" ? recordsView(state.snapshot) : state.view === "sessions" ? sessionsView(state.snapshot) : state.view === "graph" ? graphView(state.snapshot) : auditView(state.snapshot);
-  if (state.view === "graph") renderGraphCanvas(state.snapshot.graph);
+  activeGraphController?.destroy();
+  activeGraphController = null;
+  if (state.view === "graph") {
+    renderGraphCanvas(state.snapshot.graph);
+    const container = document.querySelector<HTMLElement>("#graph-canvas");
+    if (container !== null) {
+      const model = evidenceGraph(state.snapshot);
+      activeGraphController = createGraphController(container, model);
+      const section = container.closest(".section");
+      const heading = section?.querySelector("h2");
+      const description = section?.querySelector(".section-head small");
+      const readout = section?.querySelector(".graph-toolbar .muted");
+      const metricValues = app.querySelectorAll<HTMLElement>(".metrics .metric-value");
+      if (heading !== null && heading !== undefined) heading.textContent = "Knowledge graph";
+      if (description !== null && description !== undefined) description.textContent = "real local scope / session / source links";
+      if (readout !== null && readout !== undefined) readout.textContent = `${model.nodes.length} nodes · ${model.edges.length} links`;
+      if (metricValues[0] !== undefined) metricValues[0].textContent = String(model.nodes.length);
+      if (metricValues[1] !== undefined) metricValues[1].textContent = String(model.edges.length);
+    }
+  }
 }
 
-async function loadSnapshot(): Promise<void> {
+function loadSnapshot(): void {
   installStyles();
-  if (app) app.innerHTML = `<div class="loading">Reading local vault…</div>`;
   try {
-    const selected = selectedScope();
-    state.snapshot = await readJson<Snapshot>(selected ? `/api/snapshot?scope_id=${encodeURIComponent(selected)}` : "/api/snapshot");
+    const data = document.querySelector<HTMLScriptElement>("#agent-mem-view-data")?.textContent;
+    if (!data) throw new Error("viewer_snapshot_missing");
+    state.snapshot = JSON.parse(data) as Snapshot;
     state.sources = state.snapshot.sources;
     state.detail = null;
-    if (scopeSelect) scopeSelect.innerHTML = state.snapshot.projects.map((project) => `<option value="${escapeHtml(project.scope_id)}" ${project.scope_id === state.snapshot?.selected_scope_id ? "selected" : ""}>${escapeHtml(project.root)}</option>`).join("");
+    if (scopeSelect) {
+      const all = `<option value="${GLOBAL_SCOPE_ID}" ${state.snapshot.selected_scope_id === GLOBAL_SCOPE_ID ? "selected" : ""}>All projects</option>`;
+      const projects = state.snapshot.projects.map((project) => `<option value="${escapeHtml(project.scope_id)}" ${project.scope_id === state.snapshot?.selected_scope_id ? "selected" : ""}>${escapeHtml(project.root)}</option>`).join("");
+      scopeSelect.innerHTML = all + projects;
+    }
     render();
   } catch (error) { if (app) app.innerHTML = `<div class="error">${escapeHtml(error instanceof Error ? error.message : "viewer_unavailable")}</div>`; }
 }
 
-async function loadSources(query: string): Promise<void> {
-  try {
-    const result = await readJson<{ readonly sources: readonly SourceRow[] }>(`/api/sources?scope_id=${encodeURIComponent(selectedScope())}${query ? `&query=${encodeURIComponent(query)}` : ""}`);
-    state.sources = result.sources;
-    render();
-  } catch (error) { if (app) app.innerHTML = `<div class="error">${escapeHtml(error instanceof Error ? error.message : "source_search_failed")}</div>`; }
+function loadSources(query: string): void {
+  if (state.snapshot === null) return;
+  const needle = query.trim().toLocaleLowerCase();
+  state.sources = needle.length === 0
+    ? state.snapshot.sources
+    : state.snapshot.sources.filter((source) => [source.capture_id, source.session_id, source.host_kind, source.project_label, source.role, source.evidence_class, source.preview].some((value) => String(value ?? "").toLocaleLowerCase().includes(needle)));
+  render();
 }
 
 document.addEventListener("click", async (event: Event) => {
   const graphControl = (event.target as HTMLElement).closest<HTMLElement>("[data-graph-zoom]");
   if (graphControl && state.snapshot !== null) {
     const action = graphControl.dataset.graphZoom;
-    state.graphZoom = action === "in" ? Math.min(2.5, state.graphZoom + 0.2) : action === "out" ? Math.max(0.5, state.graphZoom - 0.2) : 1;
-    renderGraphCanvas(state.snapshot.graph);
+    if (activeGraphController !== null) {
+      if (action === "in") activeGraphController.zoomBy(1.15);
+      else if (action === "out") activeGraphController.zoomBy(1 / 1.15);
+      else activeGraphController.reset();
+    }
     return;
   }
   const target = (event.target as HTMLElement).closest<HTMLElement>("[data-view]");
@@ -236,12 +278,12 @@ document.addEventListener("click", async (event: Event) => {
   }
   const row = (event.target as HTMLElement).closest<HTMLTableRowElement>("tr[data-capture-id]");
   if (row) {
-    try {
-      const result = await readJson<{ readonly source: SourceDetail }>(`/api/source?scope_id=${encodeURIComponent(selectedScope())}&capture_id=${encodeURIComponent(row.dataset.captureId ?? "")}`);
-      state.detail = result.source;
+    const detail = state.snapshot?.source_details.find((item) => item.capture_id === row.dataset.captureId);
+    if (detail !== undefined) {
+      state.detail = detail.source;
       state.view = "sources";
       render();
-    } catch (error) { if (app) app.innerHTML = `<div class="error">${escapeHtml(error instanceof Error ? error.message : "source_detail_failed")}</div>`; }
+    }
     return;
   }
   if ((event.target as HTMLElement).closest("[data-close-detail]")) { state.detail = null; render(); }
@@ -249,11 +291,14 @@ document.addEventListener("click", async (event: Event) => {
 
 document.addEventListener("input", (event: Event) => {
   if (state.view === "graph" && (event.target as HTMLElement).id === "graph-search" && state.snapshot !== null) {
-    renderGraphCanvas(state.snapshot.graph);
+    activeGraphController?.setQuery((event.target as HTMLInputElement).value);
   }
 });
 
-scopeSelect?.addEventListener("change", () => { void loadSnapshot(); });
+scopeSelect?.addEventListener("change", () => {
+  const selected = scopeSelect.value || GLOBAL_SCOPE_ID;
+  window.location.assign(selected === GLOBAL_SCOPE_ID ? "/" : `/?scope_id=${encodeURIComponent(selected)}`);
+});
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 searchInput?.addEventListener("input", () => {
   if (searchTimer !== undefined) clearTimeout(searchTimer);

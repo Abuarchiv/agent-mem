@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import { capture } from "../src/core/capture.js";
 import { createTrustedBinding } from "../src/host/contract.js";
 import { normalizeNativeEvent } from "../src/host/events.js";
 import { AgentMemoryDatabase } from "../src/store/database.js";
+import { buildViewSnapshot, GLOBAL_SCOPE_ID } from "../src/view/model.js";
+import { buildEvidenceGraph } from "../src/view/graph.js";
 
 const scopeId = "11111111-1111-4111-8111-111111111111";
 const bindingId = "22222222-2222-4222-8222-222222222222";
@@ -91,4 +93,132 @@ test("local UI exposes the complete read-only V1 data contract", () => {
     database.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("global local UI aggregates authorized data across projects", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-global-view-"));
+  const database = new AgentMemoryDatabase(join(directory, "vault.sqlite"), { extraction_enabled: false });
+  const secondScopeId = "77777777-7777-4777-8777-777777777777";
+  const binding = createTrustedBinding({
+    version: 1,
+    binding_id: "88888888-8888-4888-8888-888888888888",
+    host_kind: "codex",
+    surface: "codex_cli",
+    execution_domain: { kind: "local", id: "global-view-test" },
+    host_instance_id: "global-view-host",
+    host_session_id: "global-view-session",
+    allowed_scope_ids: [scopeId, secondScopeId],
+    egress: { reader_targets: ["reader:codex_cli"], provider_targets: [] },
+  });
+  const policy = createPolicySetupBinding({
+    version: 1,
+    setup_id: "99999999-9999-4999-8999-999999999999",
+    allowed_scope_ids: [scopeId, secondScopeId],
+    allowed_output_targets: ["local_ui", "reader:codex_cli"],
+  });
+  const localBindings = new Map<string, ReturnType<typeof createPolicyOutputBinding>>();
+  const readerBindings = new Map<string, ReturnType<typeof createPolicyOutputBinding>>();
+
+  try {
+    for (const [index, currentScopeId] of [scopeId, secondScopeId].entries()) {
+      database.registerScope({ scope_id: currentScopeId, kind: "project", owner_ref: `global-view-${index}`, created_at: "2026-09-15T20:00:00Z" });
+      database.registerSession(currentScopeId, binding, `2026-09-15T20:00:0${index + 1}Z`);
+      setScopeOutputGrants(database, policy, currentScopeId, [{ target: "reader:codex_cli", source_classes: ["prompt", "assistant_output"] }], `2026-09-15T20:00:1${index}Z`);
+      setLocalUiOutputGrants(database, policy, currentScopeId, allSourceClasses, `2026-09-15T20:00:2${index}Z`);
+      localBindings.set(currentScopeId, createPolicyOutputBinding(policy, {
+        version: 1,
+        output_binding_id: randomUUID(),
+        setup_id: policy.setup_id,
+        scope_id: currentScopeId,
+        target: "local_ui",
+      }));
+      readerBindings.set(currentScopeId, createPolicyOutputBinding(policy, {
+        version: 1,
+        output_binding_id: randomUUID(),
+        setup_id: policy.setup_id,
+        scope_id: currentScopeId,
+        target: "reader:codex_cli",
+      }));
+      const text = `global source ${index}`;
+      const normalized = normalizeNativeEvent({
+        version: 1,
+        capture_id: randomUUID(),
+        scope_id: currentScopeId,
+        adapter_version: "1.0.0",
+        stage: "prompt_submitted",
+        native_ids: { session_id: `global-native-${index}` },
+        text,
+        payload: { text },
+        captured_at: `2026-09-15T20:00:3${index}Z`,
+        coverage: { status: "complete" },
+      }, binding);
+      capture(normalized, binding, database);
+    }
+
+    const snapshot = buildViewSnapshot({
+      database,
+      projects: [
+        { scope_id: scopeId, root: "/repo/one" },
+        { scope_id: secondScopeId, root: "/repo/two" },
+      ],
+      status: () => ({ state: "core_ready" }),
+      localUiBindingFor: (currentScopeId) => localBindings.get(currentScopeId)!,
+      readerOutputBindingFor: (currentScopeId) => readerBindings.get(currentScopeId)!,
+      countUnits: (value) => value.length,
+    });
+
+    assert.equal(snapshot.selected_scope_id, GLOBAL_SCOPE_ID);
+    assert.equal(snapshot.projects.length, 2);
+    assert.equal(snapshot.counts.sources, "2");
+    assert.equal(snapshot.sources.length, 2);
+    assert.deepEqual(new Set(snapshot.sources.map((source) => source.scope_id)), new Set([scopeId, secondScopeId]));
+    assert.equal(snapshot.token_savings.status, "computed");
+    assert.equal(snapshot.token_savings.measured_sources, 2);
+    assert.equal(snapshot.graph_sources.length, 2);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("evidence graph connects real scopes, sessions, and source events", () => {
+  const graph = buildEvidenceGraph({
+    projects: [
+      { scope_id: scopeId, root: "/repo/one" },
+      { scope_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", root: "/repo/two" },
+    ],
+    sessions: [{
+      session_id: "session-one",
+      scope_id: scopeId,
+      host_kind: "codex",
+      surface: "codex_cli",
+      started_at: "2026-09-15T20:00:00Z",
+      ended_at: null,
+      coverage: "complete",
+    }],
+    sources: [{
+      capture_id: "source-one",
+      scope_id: scopeId,
+      session_id: "session-one",
+      role: "user",
+      evidence_class: "prompt",
+      observed_stage: "prompt_submitted",
+      commit_seq: "1",
+    }, {
+      capture_id: "source-two",
+      scope_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      session_id: "missing-session",
+      role: "assistant",
+      evidence_class: "assistant_output",
+      observed_stage: "assistant_final",
+      commit_seq: "2",
+    }],
+  });
+
+  assert.equal(graph.nodes.filter((node) => node.kind === "scope").length, 2);
+  assert.equal(graph.nodes.filter((node) => node.kind === "session").length, 1);
+  assert.equal(graph.nodes.filter((node) => node.kind === "source").length, 2);
+  assert.ok(graph.edges.some((edge) => edge.from === "scope:" + scopeId && edge.to === "session:" + scopeId + ":session-one"));
+  assert.ok(graph.edges.some((edge) => edge.from === "session:" + scopeId + ":session-one" && edge.to === "source:" + scopeId + ":source-one"));
+  assert.ok(graph.edges.some((edge) => edge.from === "scope:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" && edge.to === "source:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:source-two"));
 });
