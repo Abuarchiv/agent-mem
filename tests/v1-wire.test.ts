@@ -357,10 +357,9 @@ test("MCP recall exposes bounded omitted source refs for follow-up memory_get", 
       packet: { items: readonly unknown[] };
       omitted_sources?: readonly { capture_id: string; scope_id: string; [key: string]: unknown }[];
     };
-    assert.equal(recallPayload.packet.items.length, 0);
-    assert.deepEqual(recallPayload.omitted_sources, [{ capture_id: captureId, scope_id: scopeId }]);
-    assert.equal("quote" in (recallPayload.omitted_sources?.[0] ?? {}), false);
-    assert.equal("span_id" in (recallPayload.omitted_sources?.[0] ?? {}), false);
+    assert.equal(recallPayload.packet.items.length, 1);
+    assert.match(JSON.stringify(recallPayload.packet.items[0]), /OMITTED_SOURCE_MARKER/);
+    assert.equal(recallPayload.omitted_sources?.length ?? 0, 0);
 
     const get = await server.handleMessageObject({
       jsonrpc: "2.0",
@@ -401,7 +400,7 @@ test("MCP omitted source refs preserve candidate order and cap at ten", async ()
       packet: { delivery?: { injection_id: string }; items: readonly unknown[] };
       omitted_sources?: readonly { capture_id: string; scope_id: string }[];
     };
-    assert.equal(payload.packet.items.length, 0);
+    assert.ok(payload.packet.items.length > 0);
     const trace = fixture.database.getQueryTrace(payload.packet.delivery!.injection_id);
     assert.ok(trace);
     assert.equal(payload.omitted_sources?.length, 10);

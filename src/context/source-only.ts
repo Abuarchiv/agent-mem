@@ -409,6 +409,7 @@ export async function prepareSourceEvidencePacket(
           valid_until: context.deadline_at,
           scope_epochs: snapshot.scopes,
           requested_token_budget: request.token_budget,
+          query: request.query,
           mode: packetMode(context, request, queryVector, additionalDiagnostics.includes("projection_unavailable")).mode,
           atomic_source_groups: intelligence.atomic_groups,
           protected_source_ids: protectedIds,

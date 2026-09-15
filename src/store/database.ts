@@ -2132,12 +2132,15 @@ function uuidFromDigest(value: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function automaticEventSpan(
+const MAX_AUTOMATIC_EVENT_SPANS = 128;
+const AUTOMATIC_EVENT_SPAN_SIZE = 1_024;
+
+function automaticEventSpans(
   fingerprint: string,
   eventText: string | undefined,
   callerSpans: readonly NormalizedSourceSpan[],
-): NormalizedSourceSpan | undefined {
-  if (eventText === undefined || eventText.length === 0) return undefined;
+): NormalizedSourceSpan[] {
+  if (eventText === undefined || eventText.length === 0) return [];
   const eventDigest = sha256(eventText);
   const existing = callerSpans.some(
     (span) =>
@@ -2147,8 +2150,9 @@ function automaticEventSpan(
       span.end_utf16 === eventText.length &&
       span.digest === eventDigest,
   );
-  if (existing) return undefined;
-  return {
+  if (existing) return [];
+  const chunkLimit = MAX_AUTOMATIC_EVENT_SPANS - 1;
+  const fullSpan: NormalizedSourceSpan = {
     span_id: uuidFromDigest(sha256(`agent-memory:event-text\u0000${fingerprint}\u0000${eventDigest}`)),
     root: "event",
     path: "/text",
@@ -2156,6 +2160,43 @@ function automaticEventSpan(
     end_utf16: eventText.length,
     digest: eventDigest,
   };
+  if (eventText.length <= AUTOMATIC_EVENT_SPAN_SIZE) return [fullSpan];
+  const chunkSize = Math.max(AUTOMATIC_EVENT_SPAN_SIZE, Math.ceil(eventText.length / chunkLimit));
+  const spans: NormalizedSourceSpan[] = [fullSpan];
+  let start = 0;
+  let index = 0;
+  while (start < eventText.length) {
+    const desiredEnd = Math.min(eventText.length, start + chunkSize);
+    let end = desiredEnd;
+    if (desiredEnd < eventText.length) {
+      const minimumBoundary = start + Math.floor((desiredEnd - start) / 2);
+      for (let cursor = desiredEnd - 1; cursor >= minimumBoundary; cursor -= 1) {
+        if (eventText[cursor] === "\n" || eventText[cursor] === "\r" || eventText[cursor] === " ") {
+          end = cursor + 1;
+          break;
+        }
+      }
+    }
+    if (end > start && end < eventText.length) {
+      const endUnit = eventText.charCodeAt(end);
+      const previousUnit = eventText.charCodeAt(end - 1);
+      if (endUnit >= 0xdc00 && endUnit <= 0xdfff && previousUnit >= 0xd800 && previousUnit <= 0xdbff) end -= 1;
+    }
+    if (end <= start) end = desiredEnd;
+    const excerpt = eventText.slice(start, end);
+    const digest = sha256(excerpt);
+    spans.push({
+      span_id: uuidFromDigest(sha256(`agent-memory:event-text-chunk\u0000${fingerprint}\u0000${index}\u0000${start}\u0000${end}\u0000${digest}`)),
+      root: "event",
+      path: "/text",
+      start_utf16: start,
+      end_utf16: end,
+      digest,
+    });
+    start = end;
+    index += 1;
+  }
+  return spans;
 }
 
 function nextPrivacyEpoch(current: bigint): bigint {
@@ -2998,8 +3039,11 @@ export class AgentMemoryDatabase {
       }
 
       const eventText = typeof event.text === "string" ? event.text : undefined;
-      const derivedEventSpan = automaticEventSpan(fingerprint, eventText, spans);
-      if (derivedEventSpan !== undefined) {
+      const derivedEventSpans = automaticEventSpans(fingerprint, eventText, spans);
+      const derivedWholeSpanId = derivedEventSpans.length > 1
+        ? derivedEventSpans.find((span) => span.start_utf16 === 0 && span.end_utf16 === eventText?.length)?.span_id
+        : undefined;
+      for (const derivedEventSpan of derivedEventSpans) {
         spanInsert.run(
           derivedEventSpan.span_id,
           captureId,
@@ -3029,6 +3073,7 @@ export class AgentMemoryDatabase {
       for (const span of spans) {
         const excerpt = excerpts.get(span.span_id);
         if (excerpt === undefined) throw new StoreError("schema_migration_failed");
+        if (span.span_id === derivedWholeSpanId) continue;
         searchInsert.run(
           span.span_id,
           captureId,
@@ -9169,8 +9214,11 @@ export class AgentMemoryDatabase {
       // identity or make a legacy payload-root retry conflict.
       const persistedSpans: NormalizedSourceSpan[] = [...checked.source_spans];
       const eventText = "text" in event ? event.text : undefined;
-      const derivedEventSpan = automaticEventSpan(checked.fingerprint, eventText, checked.source_spans);
-      if (derivedEventSpan !== undefined) persistedSpans.push(derivedEventSpan);
+      const derivedEventSpans = automaticEventSpans(checked.fingerprint, eventText, checked.source_spans);
+      const derivedWholeSpanId = derivedEventSpans.length > 1
+        ? derivedEventSpans.find((span) => span.start_utf16 === 0 && span.end_utf16 === eventText?.length)?.span_id
+        : undefined;
+      persistedSpans.push(...derivedEventSpans);
 
       const spanInsert = this.database.prepare(
         `INSERT INTO source_span (span_id, source_id, scope_id, root, path, start_utf16, end_utf16, digest)
@@ -9205,7 +9253,7 @@ export class AgentMemoryDatabase {
           BigInt(span.end_utf16),
           span.digest,
         );
-        if (excerpt.length > 0) {
+        if (excerpt.length > 0 && span.span_id !== derivedWholeSpanId) {
           searchInsert.run(
             span.span_id,
             checked.envelope.capture_id,

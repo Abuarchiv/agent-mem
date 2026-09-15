@@ -218,6 +218,36 @@ test("anchor pass recovers a source when the primary candidate pass is empty", a
   }
 });
 
+test("automatically segments long event text without losing source provenance", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const original = `${"context line\n".repeat(260)}AXOLOTL_7421 exact decision\n${"tail line\n".repeat(80)}`;
+    capture(envelope(sourceId, original, "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    const snapshot = database.getRecallSnapshot([scopeId], binding);
+    const groups = database.getRecallSourceGroups([scopeId], binding, [sourceId], snapshot.watermark);
+    const spans = groups[0]?.spans ?? [];
+    const fullSpan = spans.find(span => span.start_utf16 === 0n && span.end_utf16 === BigInt(original.length));
+    const chunkSpans = spans.filter(span => span !== fullSpan);
+    assert.ok(fullSpan !== undefined && chunkSpans.length > 1);
+    assert.equal(fullSpan.quote, original);
+    assert.equal(chunkSpans.map(span => span.quote).join(""), original);
+    assert.ok(chunkSpans.some(span => span.quote.includes("AXOLOTL_7421 exact decision")));
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "AXOLOTL_7421 exact decision", scope_ids: [scopeId], mode: "current", token_budget: 4_000 },
+      binding,
+      createPreparationContext(binding, { version: 1, kind: "session_start", deadline_at: "2099-01-01T00:00:00Z", capture_status: { state: "not_attempted" }, budget: { profile: { unit: "utf8_bytes", limit: 4_000 } } }),
+    );
+    const item = packet.items[0];
+    assert.ok(item !== undefined && item.source_provenance !== undefined, JSON.stringify({ items: packet.items, diagnostics: packet.diagnostics, tokens: packet.tokens }));
+    assert.ok(item.source_provenance.length < chunkSpans.length, JSON.stringify({ spans: chunkSpans.length, provenance: item.source_provenance.length }));
+    assert.ok(item.content?.includes("AXOLOTL_7421 exact decision"), JSON.stringify(item));
+  } finally {
+    close(database, directory);
+  }
+});
+
 test("lexical fallback keeps a distinctive technical anchor ahead of question filler", async () => {
   const { database, binding, directory } = setup();
   try {

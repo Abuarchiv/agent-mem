@@ -233,6 +233,8 @@ export interface PacketBuildInput {
   readonly valid_until: string;
   readonly scope_epochs: readonly RecallScopeSnapshot[];
   readonly requested_token_budget: number;
+  /** Original user query used only to choose among already-authenticated source spans. */
+  readonly query?: string;
   readonly mode?: EvidencePacket["mode"];
   readonly diagnostics?: readonly ContextDiagnosticCode[];
   /** Source captures derived from trusted freshness/session/graph state. */
@@ -984,6 +986,34 @@ function groupFitsPacketContract(group: RecallSourceGroup): boolean {
   return group.spans.length > 0;
 }
 
+function selectBudgetedSourceSpans(group: RecallSourceGroup, query: string | undefined, byteBudget: number): RecallSourceGroup {
+  if (group.spans.length <= 1) return group;
+  const maxEnd = group.spans.reduce((max, span) => span.end_utf16 > max ? span.end_utf16 : max, 0n);
+  const wholeSpan = group.spans.find((span) => span.start_utf16 === 0n && span.end_utf16 === maxEnd && group.spans.some((other) => other.span_id !== span.span_id && other.end_utf16 < maxEnd));
+  const sourceSpans = wholeSpan === undefined ? group.spans : group.spans.filter((span) => span.span_id !== wholeSpan.span_id);
+  if (sourceSpans.length <= 1) return group;
+  const baseCap = Math.max(2_048, Math.min(8_192, Math.floor(byteBudget * 0.75)));
+  const cap = group.evidence_class === "assistant_output" ? Math.min(baseCap, 1_024) : baseCap;
+  const terms = query?.toLocaleLowerCase("und").match(/[\p{L}\p{N}_-]{3,}/gu) ?? [];
+  const ranked = sourceSpans.map((span, index) => {
+    const text = span.quote.toLocaleLowerCase("und");
+    const score = terms.reduce((sum, term) => sum + (text.includes(term) ? (/[_\d/-]/u.test(term) || term.length >= 12 ? 4 : 1) : 0), 0);
+    return { span, index, score };
+  }).sort((left, right) => right.score - left.score || left.index - right.index);
+  const selected: typeof ranked = [];
+  let bytes = 0;
+  for (const candidate of ranked) {
+    const nextBytes = Buffer.byteLength(candidate.span.quote, "utf8") + (selected.length === 0 ? 0 : 1);
+    if (selected.length > 0 && bytes + nextBytes > cap) continue;
+    if (selected.length === 0 && nextBytes > cap) return group;
+    selected.push(candidate);
+    bytes += nextBytes;
+  }
+  if (selected.length === 0 || selected.length === group.spans.length) return group;
+  const spans = selected.sort((left, right) => left.index - right.index).map(candidate => candidate.span);
+  return { ...group, spans };
+}
+
 function packetFor(
   input: PacketBuildInput,
   groups: readonly RecallSourceGroup[],
@@ -1120,6 +1150,10 @@ export function buildEvidencePacket(
   const atomicSourceGroups = (input.atomic_source_groups ?? [])
     .map((atomic) => [...new Set(atomic)])
     .filter((atomic) => atomic.length > 0);
+  const spanBudget = tokenizer === undefined ? unitBudget : byteBudget;
+  const selectedGroups = input.query === undefined
+    ? groups
+    : groups.map((group) => selectBudgetedSourceSpans(group, input.query, spanBudget));
   // Check both possible terminal forms, including the cursor. Measuring each
   // also handles tokenizers whose cost is not ordered by string byte length.
   const droppedInput: PacketBuildInput = {
@@ -1146,7 +1180,7 @@ export function buildEvidencePacket(
         return packetFits(packetFor(fitInput, sources, fitDiagnostics, 0, unitBudget, tokenizer === undefined ? "utf8_bytes" : "tokens", items), tokenizer, unitBudget, byteBudget).fits;
       });
     let accepted: RecallSourceGroup[] = [];
-    const byId = new Map(groups.map((group) => [group.capture_id, group]));
+    const byId = new Map(selectedGroups.map((group) => [group.capture_id, group]));
     const acceptedIds = new Set<string>();
     const graphMemberIds = new Set(atomicSourceGroups.flat());
     const processedAtomic = new Set<number>();
@@ -1155,7 +1189,7 @@ export function buildEvidencePacket(
     graphIncomplete ||= graphDropped;
     const hasBlockingInputDiagnostic = input.diagnostics?.some((code) => code !== "degraded_lexical") ?? false;
     const batches: { readonly groups: readonly RecallSourceGroup[]; readonly graph: boolean; readonly protected: boolean }[] = [];
-    for (const group of groups) {
+    for (const group of selectedGroups) {
     let graphBatch = false;
     let batch: RecallSourceGroup[];
     if (graphMemberIds.has(group.capture_id)) {
@@ -1224,8 +1258,8 @@ export function buildEvidencePacket(
   for (const sourceBatch of assistantProtectedBatches) processSourceBatch(sourceBatch, acceptedRecommendations);
 
   const recommendationFitDiagnostics = [
-    ...(accepted.length === 0 && groups.length > 0 && skippedForBudget ? ["budget_exhausted" as const] : []),
-    ...(groups.length === 0 && recommendations.length === 0 && !hasBlockingInputDiagnostic ? ["no_match" as const] : []),
+    ...(accepted.length === 0 && selectedGroups.length > 0 && skippedForBudget ? ["budget_exhausted" as const] : []),
+    ...(selectedGroups.length === 0 && recommendations.length === 0 && !hasBlockingInputDiagnostic ? ["no_match" as const] : []),
   ];
   for (const record of recordRecommendations) {
     if (fitsTerminalForms(accepted, recommendationFitDiagnostics, [...acceptedRecommendations, record])) acceptedRecommendations.push(record);
@@ -1253,8 +1287,8 @@ export function buildEvidencePacket(
   const finalDiagnostics = (): ContextDiagnosticCode[] => {
     const diagnostics = [...initialDiagnostics];
     if (finalGraphIncomplete) diagnostics.push("graph_incomplete");
-    if (finalAccepted.length === 0 && groups.length === 0 && recommendations.length === 0 && !hasBlockingInputDiagnostic) diagnostics.push("no_match");
-    if (finalAccepted.length === 0 && groups.length > 0 && skippedForBudget) diagnostics.push("budget_exhausted");
+    if (finalAccepted.length === 0 && selectedGroups.length === 0 && recommendations.length === 0 && !hasBlockingInputDiagnostic) diagnostics.push("no_match");
+    if (finalAccepted.length === 0 && selectedGroups.length > 0 && skippedForBudget) diagnostics.push("budget_exhausted");
     if (protectedEvidenceOmitted) diagnostics.push("budget_exhausted");
     if (recommendationOmitted) diagnostics.push("budget_exhausted");
     return uniqueDiagnostics(diagnostics);
