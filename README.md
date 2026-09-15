@@ -15,7 +15,7 @@ Local memory for Codex, OpenCode, and GitHub Copilot CLI/app worktrees.
 
 The V1 runtime makes no generative LLM or provider calls. It has no subscription login, extraction worker, summary generator, UI, or HTTP server. Old schema and validation code remains only to read and purge older vaults.
 
-Local storage is not encrypted. The SQLite vault is readable by anyone who can read the data directory or a backup. A host can also send recalled text to its own provider.
+The SQLite vault is not encrypted at rest. Anyone who can read the data directory or one of its backups can read the vault. A host can also send recalled text to its own provider.
 
 ## Requirements
 

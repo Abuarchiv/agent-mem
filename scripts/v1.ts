@@ -208,12 +208,12 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
   const args = [...input], directory = resolve(takeOption(args, "--data-dir") ?? defaultDataDirectory());
   const command = args.shift();
   if (!command || command === "--help" || command === "help") {
-    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, and verifies readiness.");
+    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures the selected hosts, starts the local broker, and checks that it is ready.");
     return;
   }
   if (command === "install") {
     if (args.includes("--help") || args.includes("-h")) {
-      console.log("V1 install\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli]\n  --core-only | --no-rerank  Install only the V1 core\n  --yes | --non-interactive  Use detected/default choices without prompts");
+      console.log("V1 install\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli]\n  --core-only | --no-rerank  Install only the V1 core\n  --yes | --non-interactive  Use detected defaults without prompting");
       return;
     }
     await runInstall(directory, parseInstallArgs(args));
