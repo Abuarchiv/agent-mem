@@ -9,6 +9,7 @@ import { defaultDataDirectory, installJournalFile, loadConfig, runtimeDirectory,
 import { installRerankerExtra, removeRerankerExtra, verifyRerankerExtra, RERANKER_EXTRA_ID } from "../src/v1/extras.js";
 import { createInstallJournal, readInstallJournal, updateInstallJournal, writeInstallJournal } from "../src/v1/install-journal.js";
 import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, InstallError, parseInstallArgs, stopOwnedService, type InstallOptions } from "../src/v1/install.js";
+import { verifyInstallBundle, type InstallBundleReport } from "../src/v1/preflight.js";
 import { assertPrivatePath } from "../src/v1/private-files.js";
 
 const json = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => typeof item === "bigint" ? item.toString() : item);
@@ -92,6 +93,7 @@ async function runInstall(directory: string, options: InstallOptions): Promise<v
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "detect", phases: { ...current.phases, detect: "completed" }, lastGoodPhase: "detect" }));
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "plan", phases: { ...current.phases, plan: "completed" }, lastGoodPhase: "plan" }));
 
+    const bundle: InstallBundleReport = await verifyInstallBundle(undefined, directory);
     const config = loadConfig(directory, true);
     config.reranker_enabled = plan.rerank;
     saveConfig(directory, config);
@@ -125,6 +127,7 @@ async function runInstall(directory: string, options: InstallOptions): Promise<v
     console.log(json({ version: 1, state: "installed", project, hosts: plan.hosts,
       detected_hosts: plan.detectedHosts, not_detected_hosts: plan.notDetectedHosts,
       rerank: plan.rerank, host_results: hostResults, mcp, service, backend,
+      bundle,
       journal: { path: journalPath, phase: journal.currentPhase, attempts: journal.attempts } }));
   } catch (error) {
     if (journalCreated) {
