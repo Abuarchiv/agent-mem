@@ -121,11 +121,12 @@ test("asset ACLs reject untrusted mutation, deletion, takeover and unknown right
   }
 });
 
-test("asset ACLs still require the current owner and a readable, verifiable ACL", () => {
+test("asset ACLs accept trusted owners and require a readable, verifiable ACL", () => {
   const user = "S-1-5-21-100-200-300-1001";
   const rule = { sid: user, allow: true, rights: 0x20089, inheritOnly: false };
   const acl = { owner: user, user, rules: [rule] };
-  for (const value of [null, {}, { ...acl, owner: "S-1-5-32-544" }, { ...acl, rules: [] },
+  assert.equal(isPrivateWindowsAcl({ ...acl, owner: "S-1-5-32-544" }, "asset"), true);
+  for (const value of [null, {}, { ...acl, owner: "S-1-1-0" }, { ...acl, rules: [] },
     { ...acl, rules: [{ ...rule, inheritOnly: true }] }, { ...acl, rules: [{ ...rule, allow: false }] },
     { ...acl, rules: [{ ...rule, rights: 0x20000 }] }, { ...acl, rules: [rule, { ...rule, sid: "Users" }] }]) {
     assert.equal(isPrivateWindowsAcl(value, "asset"), false);

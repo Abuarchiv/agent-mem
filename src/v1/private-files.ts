@@ -2,11 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 
-/** Private data excludes other users; assets permit only their known read/execute rights. */
+/** Private data excludes other users; assets permit trusted system owners and known read/execute rights. */
 export function isPrivateWindowsAcl(value: unknown, mode: "private" | "asset" = "private"): boolean {
   if (!value || typeof value !== "object" || !("owner" in value) || !("user" in value) || !("rules" in value)) return false;
-  if (typeof value.user !== "string" || !/^S-\d+(?:-\d+)+$/.test(value.user) || value.owner !== value.user || !Array.isArray(value.rules)) return false;
+  if (typeof value.user !== "string" || typeof value.owner !== "string" || !/^S-\d+(?:-\d+)+$/.test(value.user) || !/^S-\d+(?:-\d+)+$/.test(value.owner) || !Array.isArray(value.rules)) return false;
   const allowed = new Set([value.user, "S-1-5-18", "S-1-5-32-544"]);
+  if (mode === "private" ? value.owner !== value.user : !allowed.has(value.owner)) return false;
   const readExecute = 0x1200a9; // FileSystemRights.ReadAndExecute | Synchronize; no write/delete/ACL rights.
   const ownerRights = mode === "asset" ? 1 : 2032127; // ReadData/ListDirectory vs FullControl.
   let ownerAccess = false;
