@@ -32,6 +32,8 @@ npm run models:verify
 npm test
 ```
 
+`models:download`/`models:verify` default to the lean core profile (E5 only). Use `npm run models:download:all` and `npm run models:verify:all` for the full package (E5 plus optional reranker), or `npm run models:download:reranker` and `npm run models:verify:reranker` for the optional reranker only.
+
 `models:download` and `runtime:download` use the network. Capture and model loading do not.
 
 ## Package

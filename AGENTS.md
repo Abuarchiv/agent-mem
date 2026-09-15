@@ -20,4 +20,4 @@ V1 makes no generative model or provider call. It has no API-key login, subscrip
 
 ## Development
 
-Use Node 24.20.x for packaging. Run `npm test` after code changes. Before a release, run `npm run models:verify`, `npm run runtime:verify`, and the package probe. Verify Codex Desktop, Copilot, Windows, and Linux separately.
+Use Node 24.20.x for packaging. Run `npm test` after code changes. Before a release, run `npm run models:verify:all`, `npm run runtime:verify`, and the package probe (`models:verify` is core-only). Verify Codex Desktop, Copilot, Windows, and Linux separately.
