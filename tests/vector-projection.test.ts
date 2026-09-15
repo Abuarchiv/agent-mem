@@ -32,6 +32,7 @@ import {
   vectorInputDigest,
   type E5TokenizerLike,
 } from "../src/retrieval/vector.js";
+import { fuseRanks, hybridSearch } from "../src/retrieval/fusion.js";
 
 const scopeA = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1";
 const scopeB = "b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2";
@@ -247,6 +248,63 @@ function vectorRowCount(path: string): { readonly chunks: bigint; readonly embed
     raw.close();
   }
 }
+
+test("hybrid recall keeps one row per source and does not lose a source to chunk limits", () => {
+  const { directory, database, binding } = setup();
+  try {
+    const sourceA = "11111111-aaaa-4aaa-8aaa-111111111111";
+    const spanA = "11111111-bbbb-4bbb-8bbb-111111111111";
+    const chunksA = ["needle alpha ", "needle beta ", "needle gamma"];
+    const textA = chunksA.join("");
+    captureWithEmbed(database, binding, sourceA, scopeA, textA, spanA);
+    const claimA = database.jobs.claimNext(undefined, "embed");
+    assert.ok(claimA);
+    let offset = 0;
+    const projectionsA = chunksA.map((text, index) => {
+      const start = offset;
+      const end = start + text.length;
+      offset = end;
+      return projectionFor(database, scopeA, sourceA, spanA, text, basis(0), `a${String(index + 1).repeat(7)}-0000-4000-8000-000000000000`, {
+        chunk_index: index,
+        source_span_digest: digestText(textA),
+        start_utf16: start,
+        end_utf16: end,
+      });
+    });
+    assert.equal(database.completeVectorProjection(claimA, projectionsA, resultDigestFor(claimA.job_id)).status, "completed");
+
+    const sourceB = "22222222-aaaa-4aaa-8aaa-222222222222";
+    const spanB = "22222222-bbbb-4bbb-8bbb-222222222222";
+    const textB = "semantic-only source";
+    captureWithEmbed(database, binding, sourceB, scopeA, textB, spanB);
+    const claimB = database.jobs.claimNext(undefined, "embed");
+    assert.ok(claimB);
+    const vectorB = basis(0);
+    vectorB[1] = 0.1;
+    assert.equal(database.completeVectorProjection(
+      claimB,
+      [projectionFor(database, scopeA, sourceB, spanB, textB, vectorB, "b1111111-0000-4000-8000-000000000000")],
+      resultDigestFor(claimB.job_id),
+    ).status, "completed");
+
+    const request = { query: "needle", scope_ids: [scopeA], mode: "current" as const, token_budget: 200 };
+    const raw = vectorSearch(database, binding, basis(0), request, 2);
+    assert.deepEqual(raw.map((entry) => entry.source_id), [sourceA, sourceA]);
+
+    const fused = hybridSearch(database, binding, request, basis(0), 2, { per_signal_limit: 2 });
+    assert.deepEqual(fused.map((entry) => entry.source_id).sort(), [sourceA, sourceB].sort());
+    assert.equal(new Set(fused.map((entry) => entry.source_id)).size, fused.length);
+
+    const mergedRevision = fuseRanks(
+      [{ source_id: sourceA, revision_id: null }],
+      [{ source_id: sourceA, revision_id: "33333333-aaaa-4aaa-8aaa-333333333333" }],
+      2,
+    );
+    assert.equal(mergedRevision.length, 1);
+  } finally {
+    closeSetup(directory, database);
+  }
+});
 
 test("capture with embed creates both jobs atomically and projector completes fenced", () => {
   const { directory, path, database, binding } = setup();
