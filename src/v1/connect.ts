@@ -38,6 +38,63 @@ function objectJson(text: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function stripJsoncComments(text: string): string {
+  let output = "";
+  let quote = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const current = text[index]!;
+    const next = text[index + 1];
+    if (lineComment) {
+      if (current === "\n" || current === "\r") { lineComment = false; output += current; }
+      else output += " ";
+      continue;
+    }
+    if (blockComment) {
+      if (current === "*" && next === "/") { blockComment = false; output += "  "; index += 1; }
+      else output += current === "\n" || current === "\r" ? current : " ";
+      continue;
+    }
+    if (!quote && current === "/" && next === "/") { lineComment = true; output += "  "; index += 1; continue; }
+    if (!quote && current === "/" && next === "*") { blockComment = true; output += "  "; index += 1; continue; }
+    output += current;
+    if (current === "\\" && quote) { escaped = !escaped; continue; }
+    if (current === '"' && !escaped) quote = !quote;
+    escaped = false;
+  }
+  return output;
+}
+
+function stripJsoncTrailingCommas(text: string): string {
+  let output = "";
+  let quote = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const current = text[index]!;
+    if (!quote && current === ",") {
+      let next = index + 1;
+      while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+      if (text[next] === "}" || text[next] === "]") continue;
+    }
+    output += current;
+    if (current === "\\" && quote) { escaped = !escaped; continue; }
+    if (current === '"' && !escaped) quote = !quote;
+    escaped = false;
+  }
+  return output;
+}
+
+function objectJsonc(text: string): Record<string, unknown> {
+  if (!text.trim()) return {};
+  let value: unknown;
+  try { value = JSON.parse(stripJsoncTrailingCommas(stripJsoncComments(text))) as unknown; }
+  catch { throw new Error("host_config_invalid_jsonc"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("host_config_object_required");
+  return value as Record<string, unknown>;
+}
+
 function writeHostFile(path: string, before: string, after: string): void {
   if (before === after) return;
   if (readText(path) !== before) throw new Error("host_config_changed_concurrently");
@@ -190,9 +247,8 @@ function codexChanges(root: string, directory: string, entry: V1Connection, remo
 }
 
 function openCodeChanges(root: string, directory: string, entry: V1Connection, remove: boolean) {
-  const path = join(root, "opencode.json");
-  if (!existsSync(path) && existsSync(join(root, "opencode.jsonc"))) throw new Error("opencode_jsonc_requires_explicit_merge");
-  const before = readText(path), value = objectJson(before);
+  const path = existsSync(join(root, "opencode.json")) ? join(root, "opencode.json") : join(root, "opencode.jsonc");
+  const before = readText(path), value = path.endsWith(".jsonc") ? objectJsonc(before) : objectJson(before);
   const mcp = value.mcp === undefined ? {} : value.mcp;
   if (!mcp || typeof mcp !== "object" || Array.isArray(mcp)) throw new Error("opencode_mcp_invalid");
   const servers = mcp as Record<string, unknown>;

@@ -166,7 +166,10 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     };
   };
 
-  function status() {
+  function status(requestingBinding: TrustedBinding = operator) {
+    const visibleScopes = requestingBinding.binding_id === operator.binding_id
+      ? new Set(scopeIds)
+      : new Set(requestingBinding.allowed_scope_ids.filter(scopeId => scopeIds.includes(scopeId)));
     const intelligence = {
       search_state: searchState === undefined
         ? { state: "disabled" as const, reason: searchStateError }
@@ -180,7 +183,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     return {
       version: 1, running: !closing, state: indexState === "ready" ? "core_ready" : indexState, pid: process.pid,
       embedding: { state: indexState, model_state: state.semantic_search.state, reason: state.semantic_search.reason ?? (state.jobs.failed > 0 ? "index_jobs_failed" : state.jobs.paused > 0 ? "index_jobs_paused" : null), model: E5_MODEL_MANIFEST.model_id }, jobs: state.jobs,
-      projects: config.projects.map(p => ({ root: p.root, scope_id: p.scope_id, capture_paused: runtime!.database.isCapturePaused(p.scope_id) })),
+      projects: config.projects.filter(project => visibleScopes.has(project.scope_id)).map(p => ({ root: p.root, scope_id: p.scope_id, capture_paused: runtime!.database.isCapturePaused(p.scope_id) })),
       intelligence,
     };
   }
@@ -189,7 +192,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     const control = controlSchema.safeParse(payload);
     if (control.success) {
       const request = control.data;
-      if (request.operation === "status") return status();
+      if (request.operation === "status") return status(binding);
       if (binding.binding_id !== operator.binding_id) throw new Error("operator_binding_required");
       const owner = active();
       if (request.operation === "forget") {
