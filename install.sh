@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-base_url=${AGENT_MEM_BASE_URL:-${AGENT_MEMORY_V1_BASE_URL:-https://github.com/Abuarchiv/agent-memory-v1/releases/latest/download}}
+base_url=${AGENT_MEM_BASE_URL:-${AGENT_MEMORY_V1_BASE_URL:-https://github.com/Abuarchiv/agent-mem/releases/latest/download}}
 version=${AGENT_MEM_VERSION:-${AGENT_MEMORY_V1_VERSION:-latest}}
 project=
 agents=

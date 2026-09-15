@@ -32,6 +32,9 @@ jobs:
         run: npm run runtime:download
       - name: Build
         run: npm run build
+      - name: Validate native Unix bootstrap
+        shell: bash
+        run: sh -n install.sh
       - name: Run tests
         run: npm test
       - name: Audit production dependencies
@@ -67,5 +70,9 @@ jobs:
         run: npm run runtime:download
       - name: Build
         run: npm run build
+      - name: Validate native PowerShell bootstrap
+        shell: pwsh
+        run: |
+          [scriptblock]::Create((Get-Content -Raw install.ps1)) | Out-Null
       - name: Run Windows platform tests
         run: node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js
