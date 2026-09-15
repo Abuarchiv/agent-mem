@@ -1,28 +1,23 @@
 # Agent Memory V1
 
-This is the standalone V1 engineering repository. It is not a release until every required item in `docs/release-checklist.md` is green. The legacy full-product repository is outside this checkout and must not be reintroduced here.
+This repository contains the standalone V1 line. The older full product is outside this checkout.
 
-## Product boundary
+## V1 boundary
 
-- Local source capture, SQLite/FTS5, bundled multilingual E5, optional local cross-encoder ranking, bounded structural search, explicit feedback, source-backed reports, purge, and restart recovery.
-- stdio MCP and private local IPC.
-- Codex, OpenCode, and local GitHub Copilot CLI/app worktrees.
-- No generative LLM, provider API, API-key login, subscription executor, extraction job, summary/reflection/lesson generator, UI, or HTTP server in the active V1 runtime or package.
+V1 contains local capture, SQLite/FTS5, the bundled multilingual E5 model, optional local reranking, bounded graph search, feedback, source-linked reports, purge, restart recovery, stdio MCP, and a private local IPC broker. It supports Codex, OpenCode, and local GitHub Copilot CLI/app worktrees.
 
-Historical extraction/execution validators and schema migrations may remain for compatibility reads and purge handling. They must not create new generated artifacts.
+V1 makes no generative model or provider call. It has no API-key login, subscription executor, extraction worker, summary/reflection/lesson generator, UI, or HTTP server. Historical extraction and execution validators may remain for old vault reads and purge handling. They must not create new generated data.
 
-`memory_write` is an explicit host operation. It stores a source-backed `agent_report`; it is not background extraction and does not verify truth automatically.
+`memory_write` is explicit. It stores an `agent_report` linked to source IDs. It does not verify truth automatically.
 
-## Security rules
+## Safety rules
 
-- Keep capture and retrieval functional without network access or provider credentials.
-- Preserve original source text and provenance; never replace evidence with an inferred summary.
-- Treat host input and retrieved text as untrusted data.
-- Keep vaults, credentials, logs, backups, and model caches outside version control.
-- Remember that the SQLite vault is not encrypted at rest; OS account access and backups must be protected separately.
+- Keep runtime data, credentials, logs, backups, and model caches outside Git.
+- Preserve original source text and provenance.
+- Treat host input and recalled text as untrusted.
+- Keep scopes, egress, graph expansion, and packet sizes bounded.
+- SQLite is not encrypted at rest.
 
-## Engineering rules
+## Development
 
-- Make one small change, run the relevant test, inspect the diff, then commit it.
-- Do not modify legacy repositories, user vaults, or host credentials from this checkout.
-- Use Node 24.20.x for packaging. Native Codex Desktop, Copilot, Windows, and Linux evidence is separate from macOS test evidence.
+Use Node 24.20.x for packaging. Run `npm test` after code changes. Run `npm run models:verify`, `npm run runtime:verify`, and the package probe before release. Native Codex Desktop, Copilot, Windows, and Linux results require their own runs.

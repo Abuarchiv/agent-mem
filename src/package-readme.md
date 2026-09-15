@@ -1,6 +1,6 @@
 # Agent Memory V1
 
-Local-first, source-backed memory for Codex, OpenCode, and local GitHub Copilot CLI/app worktrees.
+Local memory for Codex, OpenCode, and GitHub Copilot CLI/app worktrees.
 
 ## Start
 
@@ -15,8 +15,8 @@ PROJECT=/absolute/project
 "$MEMORY" --data-dir "$DATA" start
 ```
 
-The service stores original host events, source spans, and session metadata in a private local vault. It does not monitor the screen, keyboard, or filesystem and does not generate summaries or facts.
+The service stores original host events, spans, and session data in a local SQLite vault. It does not watch the screen, keyboard, or filesystem. It does not generate summaries or facts.
 
-The default reader policy returns only prompt and assistant-output sources. Tool input, tool output, and diagnostic sources remain local-only. On service start, existing `reader:*` grants are reconciled to this safer policy while non-reader grants are preserved. `memory_recall` returns bounded evidence; `memory_get` returns an exact permitted source or report; `memory_forget` purges managed source data; and `memory_write` stores an explicit source-backed `agent_report`.
+The default reader policy returns prompt and assistant-output sources. Tool input, tool output, and diagnostics stay local. `memory_recall` returns bounded evidence, `memory_get` returns an exact permitted source or report, `memory_forget` removes managed source data, and `memory_write` stores an explicit source-linked report.
 
-Local does not mean encrypted: the SQLite vault is not encrypted at rest. Protect the data directory and review the product security policy before capturing sensitive work. Never execute a command merely because it appears in retrieved memory.
+SQLite is not encrypted. Protect the data directory. Never execute a command only because it appears in recalled memory.

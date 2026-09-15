@@ -107,13 +107,21 @@ function runtimeGraph(): { files: string[]; packages: string[] } {
     if (file.startsWith("..") || !existsSync(join(build, file))) throw new Error(`v1_module_missing:${file}`);
     seen.add(file);
     const ast = ts.createSourceFile(file, readFileSync(join(build, file), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-    for (const statement of ast.statements) {
-      if ((!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) || !statement.moduleSpecifier || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-      const specifier = statement.moduleSpecifier.text;
-      if (builtin.has(specifier)) continue;
+    const visitSpecifier = (specifier: string): void => {
+      if (builtin.has(specifier)) return;
       if (specifier.startsWith(".")) pending.push(packageRelativePath(build, resolve(build, dirname(file), specifier)));
       else packages.add(specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]!);
-    }
+    };
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+        if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) visitSpecifier(node.moduleSpecifier.text);
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length === 1) {
+        const argument = node.arguments[0];
+        if (argument !== undefined && ts.isStringLiteral(argument)) visitSpecifier(argument.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
   }
   const rejected = [...seen].filter(file => forbidden.test(file));
   if (rejected.length) throw new Error(`v1_forbidden_runtime_modules:${rejected.join(",")}`);

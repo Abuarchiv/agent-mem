@@ -2,22 +2,16 @@
 
 ## Unreleased
 
-### Security
-
-- Reject existing vault files that are not private, user-owned, regular files.
-- Limit default reader egress to prompt and assistant-output sources.
-- Reconcile existing reader grants at startup without overwriting non-reader grants.
-- Include the Copilot reader target in the V1 policy setup.
-- Document the distinction between local storage, provider context, and encryption at rest.
-
-### Documentation
-
-- Replace historical release claims with current, reproducible verification status.
-- Add repository security guidance and a CI quality gate.
+- Bundle the verified Node 24.20.0 runtime in packages.
+- Reject non-private vault files before opening them.
+- Limit default reader output to prompt and assistant-output sources.
+- Reconcile existing reader grants at startup.
+- Document the local storage and provider boundary.
 
 ## 1.0.0
 
-- Established the standalone local-first V1 line.
-- Added source-only capture and retrieval with SQLite/FTS5, multilingual E5, bounded metadata search, optional local reranking, stdio MCP, and authenticated local IPC.
+- Added local source capture and retrieval with SQLite/FTS5 and multilingual E5.
+- Added bounded graph search, optional local reranking, feedback, and source-linked reports.
+- Added stdio MCP and an authenticated local IPC broker.
 - Added Codex, OpenCode, and Copilot CLI/app local-worktree adapters.
-- Excluded generative provider execution, subscription login, UI, and HTTP entry points from the active V1 product path.
+- Excluded generative providers, subscription login, UI, and HTTP from the V1 runtime.

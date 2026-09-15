@@ -19,11 +19,19 @@ jobs:
         with:
           node-version: 24.20.x
           cache: npm
-      - name: Install dependencies without lifecycle scripts
+      - name: Install dependencies
         run: npm ci --ignore-scripts
+      - name: Download pinned models
+        run: npm run models:download
+      - name: Download pinned Node runtime
+        run: npm run runtime:download
       - name: Build
         run: npm run build
       - name: Run tests
         run: npm test
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=moderate
+      - name: Build and smoke-test package
+        run: |
+          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-package"
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-package" --no-rerank
