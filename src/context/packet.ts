@@ -991,6 +991,15 @@ function groupFitsPacketContract(group: RecallSourceGroup): boolean {
   return group.spans.length > 0;
 }
 
+function queryTerms(query: string | undefined): string[] {
+  return query?.toLocaleLowerCase("und").match(/[\p{L}\p{N}_-]{3,}/gu) ?? [];
+}
+
+function spanQueryScore(quote: string, terms: readonly string[]): number {
+  const text = quote.toLocaleLowerCase("und");
+  return terms.reduce((sum, term) => sum + (text.includes(term) ? (/[_\d/-]/u.test(term) || term.length >= 12 ? 8 : 1) : 0), 0);
+}
+
 function selectBudgetedSourceSpans(group: RecallSourceGroup, query: string | undefined, byteBudget: number): RecallSourceGroup {
   if (group.spans.length <= 1) return group;
   const wholeSpan = group.spans.find((span) => span.start_utf16 === 0n && group.spans.some((other) =>
@@ -1010,10 +1019,9 @@ function selectBudgetedSourceSpans(group: RecallSourceGroup, query: string | und
       ? { ...group, spans: [sourceSpans[0]!] }
       : { ...group, spans: [] };
   }
-  const terms = query?.toLocaleLowerCase("und").match(/[\p{L}\p{N}_-]{3,}/gu) ?? [];
+  const terms = queryTerms(query);
   const ranked = sourceSpans.map((span, index) => {
-    const text = span.quote.toLocaleLowerCase("und");
-    const score = terms.reduce((sum, term) => sum + (text.includes(term) ? (/[_\d/-]/u.test(term) || term.length >= 12 ? 4 : 1) : 0), 0);
+    const score = spanQueryScore(span.quote, terms);
     return { span, index, score };
   }).sort((left, right) => right.score - left.score || left.index - right.index);
   const selected: typeof ranked = [];
@@ -1029,6 +1037,18 @@ function selectBudgetedSourceSpans(group: RecallSourceGroup, query: string | und
   if (wholeSpan === undefined && selected.length === group.spans.length) return group;
   const spans = selected.sort((left, right) => left.index - right.index).map(candidate => candidate.span);
   return { ...group, spans };
+}
+
+function sourceBatchDensity(
+  batch: { readonly groups: readonly RecallSourceGroup[] },
+  query: string | undefined,
+): number {
+  const terms = queryTerms(query);
+  if (terms.length === 0) return 0;
+  const score = batch.groups.reduce((sum, group) => sum + group.spans.reduce((groupScore, span) => groupScore + spanQueryScore(span.quote, terms), 0), 0);
+  if (score === 0) return 0;
+  const serializedCost = Buffer.byteLength(JSON.stringify(batch.groups.map(packetItem)), "utf8");
+  return score / Math.max(1, serializedCost);
 }
 
 function packetFor(
@@ -1297,7 +1317,11 @@ export function buildEvidencePacket(
 
   // Optional relevance/timeline material fills only after protected evidence
   // and current recommendations have had a chance to fit.
-  for (const sourceBatch of batches.filter((batch) => !batch.protected)) processSourceBatch(sourceBatch, acceptedRecommendations);
+  const optionalBatches = batches
+    .map((batch, index) => ({ batch, index }))
+    .filter((entry) => !entry.batch.protected)
+    .sort((left, right) => sourceBatchDensity(right.batch, input.query) - sourceBatchDensity(left.batch, input.query) || left.index - right.index);
+  for (const entry of optionalBatches) processSourceBatch(entry.batch, acceptedRecommendations);
   let finalAccepted = accepted;
   let finalGraphDropped = graphDropped;
   let finalGraphIncomplete = graphIncomplete;
