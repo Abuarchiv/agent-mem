@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,8 @@ export interface RerankerExtraInstallOptions {
   readonly fetch?: typeof fetch;
   readonly manifest?: unknown;
   readonly baseUrl?: string;
+  /** Test/package override; null disables the bundled-source shortcut. */
+  readonly bundledRoot?: string | null;
 }
 
 function absoluteDataDirectory(dataDirectory: string): string {
@@ -50,7 +52,7 @@ export function rerankerModelRoot(dataDirectory: string, input: unknown = manife
 }
 
 function bundledModelRoot(input: RerankModelManifest): string {
-  const packageRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+  const packageRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
   return join(packageRoot, ".models", "rerank", input.model_id, input.revision);
 }
 
@@ -117,9 +119,21 @@ export async function installRerankerExtra(dataDirectory: string, options: Reran
   try {
     const fetcher = options.fetch ?? fetch;
     const baseUrl = options.baseUrl ?? "https://huggingface.co";
+    let bundledRoot: string | undefined;
+    if (options.bundledRoot !== null) {
+      try {
+        const candidate = options.bundledRoot ?? bundledModelRoot(parsed);
+        await verifyRerankArtifacts(candidate, parsed);
+        bundledRoot = candidate;
+      } catch { /* A core package may not contain the optional bundle. */ }
+    }
     for (const artifact of parsed.artifacts) {
       const target = artifactPath(stage, artifact.path);
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+      if (bundledRoot !== undefined) {
+        copyFileSync(join(bundledRoot, artifact.path), target);
+        continue;
+      }
       let response: Response;
       try { response = await fetcher(downloadUrl(parsed, artifact.path, baseUrl), { redirect: "follow" }); }
       catch (error) { throw new ExtraError("extra_download_failed", error); }

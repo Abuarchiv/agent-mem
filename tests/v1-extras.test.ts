@@ -31,10 +31,11 @@ test("reranker extra paths are absolute and scoped to the data directory", () =>
 test("missing and incomplete reranker artifacts are reported without network access", async () => {
   const data = fixture();
   try {
-    assert.deepEqual(await verifyRerankerExtra(data), { state: "unavailable", reason: "extra_not_installed" });
+    const bundledRoot = join(data, "not-bundled");
+    assert.deepEqual(await verifyRerankerExtra(data, bundledRoot), { state: "unavailable", reason: "extra_not_installed" });
     mkdirSync(rerankerModelRoot(data), { recursive: true, mode: 0o700 });
     writeFileSync(join(rerankerModelRoot(data), "config.json"), "{}", { mode: 0o600 });
-    const result = await verifyRerankerExtra(data);
+    const result = await verifyRerankerExtra(data, bundledRoot);
     assert.equal(result.state, "unavailable");
     if (result.state === "unavailable") assert.equal(result.reason, "extra_artifacts_invalid");
   } finally { rmSync(data, { recursive: true, force: true }); }
@@ -58,7 +59,7 @@ test("a failed reranker download reports a stable error and removes staging", as
   const data = fixture();
   try {
     await assert.rejects(
-      installRerankerExtra(data, { fetch: async () => new Response("not the pinned artifact", { status: 200 }) }),
+      installRerankerExtra(data, { bundledRoot: null, fetch: async () => new Response("not the pinned artifact", { status: 200 }) }),
       (error: unknown) => error instanceof ExtraError && error.code === "extra_download_hash_mismatch",
     );
     assert.deepEqual((await import("node:fs")).readdirSync(rerankerDataRoot(data)), []);
