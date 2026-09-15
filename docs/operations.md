@@ -29,3 +29,13 @@ Use the existing runtime backup operation only while the service is quiesced. Do
 - Reranker failure: baseline fusion continues.
 - Host/MCP failure: the host continues without memory; the event is a capture gap, not a fabricated success.
 - Network/provider credentials are not required and are not a fallback.
+
+## OpenCode concurrent sessions
+
+OpenCode `1.18.30` can race its shared Git snapshot garbage collection when
+multiple `opencode run` processes use the same worktree. This can produce a
+host-side `gc.pid.lock` error even while the Memory broker remains healthy.
+Until the upstream fix is available, run one OpenCode session at a time per
+worktree or use separate host snapshot/data roots. Track the issue at
+[#49190](https://github.com/anomalyco/opencode/issues/49190); this is a host
+limitation, not a Memory data-loss fallback.

@@ -26,6 +26,7 @@
 - [x] OpenCode capture and authenticated fresh-session recall trace (OpenCode `1.18.30`).
 - [ ] Copilot CLI/app local worktree MCP capture behavior.
 - [ ] Native Linux and Windows package smoke; do not infer them from macOS.
+- [ ] OpenCode concurrent-session snapshot lock issue is resolved upstream or the serial-session workaround is verified for the target release.
 
 ## Release discipline
 
