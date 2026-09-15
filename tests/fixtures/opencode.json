@@ -1,0 +1,49 @@
+{
+  "session_id": "opencode-reconcile-session",
+  "messages": [
+    {
+      "info": {
+        "id": "assistant-message-a",
+        "sessionID": "opencode-reconcile-session",
+        "role": "assistant",
+        "time": { "created": 1725729600000, "completed": 1725729601000 }
+      },
+      "parts": [
+        {
+          "id": "assistant-part-a",
+          "sessionID": "opencode-reconcile-session",
+          "messageID": "assistant-message-a",
+          "type": "text",
+          "text": "durable assistant history",
+          "time": { "start": 1725729600000, "end": 1725729601000 }
+        }
+      ]
+    },
+    {
+      "info": {
+        "id": "tool-message-a",
+        "sessionID": "opencode-reconcile-session",
+        "role": "assistant",
+        "time": { "created": 1725729602000, "completed": 1725729603000 }
+      },
+      "parts": [
+        {
+          "id": "tool-part-a",
+          "sessionID": "opencode-reconcile-session",
+          "messageID": "tool-message-a",
+          "type": "tool",
+          "callID": "tool-call-a",
+          "tool": "synthetic",
+          "state": {
+            "status": "completed",
+            "input": {},
+            "output": "durable tool history",
+            "title": "synthetic",
+            "metadata": {},
+            "time": { "start": 1725729602000, "end": 1725729603000 }
+          }
+        }
+      ]
+    }
+  ]
+}

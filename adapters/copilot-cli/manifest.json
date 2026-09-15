@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "adapter": "copilot-cli",
+  "status": "source_checked",
+  "native": {
+    "cliVersion": "1.0.83",
+    "cliVersionStatus": "registry_documentation_only",
+    "hookReferenceCheckedAt": "2026-09-07"
+  },
+  "sources": [
+    "https://docs.github.com/en/copilot/reference/hooks-reference"
+  ],
+  "admission": {
+    "default": "technical_only",
+    "nativeCanary": "required_before_live_use",
+    "e2eVerified": false,
+    "providerCallsMadeByThisSlice": false,
+    "hostConfigurationWrittenByThisSlice": false
+  },
+  "registration": {
+    "kind": "version1_command_bash_powershell",
+    "version": 1,
+    "recommendedLocation": ".github/hooks/agent-memory.json",
+    "eventArg": "--event",
+    "shellKeys": ["bash", "powershell"],
+    "eventsRendered": [
+      "sessionStart",
+      "userPromptSubmitted",
+      "userPromptTransformed",
+      "preToolUse",
+      "postToolUse",
+      "postToolUseFailure",
+      "agentStop",
+      "subagentStart",
+      "subagentStop",
+      "preCompact"
+    ],
+    "payloadFormat": "camelCase_with_fixed_event_argument",
+    "foreignHookOrdering": "unobservable_and_unclaimed"
+  },
+  "eventMapping": {
+    "sessionStart.startup": "session_start_then_600_token_recall",
+    "sessionStart.new": "session_start_then_600_token_recall",
+    "sessionStart.resume": "resume_then_600_token_recall",
+    "userPromptSubmitted": "prompt_submitted_capture_only_then_empty_object",
+    "userPromptTransformed": "prompt_transformed_capture_then_1500_token_recall_as_modifiedTransformedPrompt",
+    "preToolUse": "tool_started_capture_only",
+    "postToolUse": "tool_result_succeeded_capture_only",
+    "postToolUseFailure": "tool_result_failed_capture_only",
+    "agentStop": "stop_capture_only_transcript_path_metadata_only",
+    "subagentStart": "session_start_capture_then_600_token_recall",
+    "subagentStop": "stop_capture_only_with_response_text",
+    "preCompact": "compaction_capture_only"
+  },
+  "identity": {
+    "scopeAuthority": "explicit_setup_workspace_route",
+    "cwdRequired": true,
+    "sessionIdRequired": true,
+    "timestampFormat": "epoch_ms_preserved_as_occurred_at",
+    "nativeScopeFieldsAreAuthority": false,
+    "stableEventIds": "none_for_prompt_events",
+    "unknownCorrelation": "fresh_capture_id_and_correlation_unknown_missing_native_id",
+    "submittedAckNeverSatisfiesTransformedReadiness": true,
+    "transcriptPath": "preserved_as_metadata_only_never_read",
+    "foreignTransformationsPreserved": true
+  },
+  "contextOutput": {
+    "sessionStartFormat": "additionalContext",
+    "transformedFormat": "modifiedTransformedPrompt_preserving_native_prefix",
+    "transformedRecallExclusion": "exclude_current_session_prompts_via_authenticated_binding",
+    "allOtherEvents": "empty_object",
+    "deadlineFailure": "empty_object_preserving_native_content",
+    "rawIpcJsonReturnedToHost": false,
+    "emptyReplacementNeverEmitted": true
+  },
+  "coverageGaps": [
+    "no message/event ID in submitted/transformed payloads: session/text/time/FIFO never prove submitted-transformed correlation; both stay correlation_unknown with separate capture IDs and separate ACKs",
+    "transformed recall applies a narrow trusted-context exclusion for current native session user/prompt sources (server-derived from the authenticated binding, scope-bound, before candidate limits) so the unprovable original cannot echo as historical evidence; previous-session and parallel-session prompts remain eligible candidates, never independent support",
+    "configured userPromptSubmitted command-hook output is dropped including modifiedPrompt: submitted capture returns empty submitted object after its own ACK and never rewrites",
+    "agentStop supplies a transcript path not final response text: captured as stop with coverage_gap event_not_observed; transcript file is never read and its schema is not a pinned contract",
+    "native G1/G2 delivery unverified for pinned CLI 1.0.83: actual output consumption, resume replay, batched-message handling and transcript delivery require separate live canaries; PascalCase payloads and sessionEnd/errorOccurred/notification/permissionRequest are unsupported by this slice"
+  ],
+  "testBoundary": {
+    "transport": "synthetic_broker_backed_fixtures",
+    "nativeProviderOrModelCalls": false,
+    "nativeHostConfigurationChanges": false
+  }
+}

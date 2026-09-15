@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "adapter": "codex",
+  "status": "unverified",
+  "admission": {
+    "default": "technical_only",
+    "nativeCanary": "required_before_live_use",
+    "providerCallsMadeByThisSlice": false,
+    "hostConfigurationWrittenByThisSlice": false
+  },
+  "profiles": {
+    "cli": {
+      "surface": "codex_cli",
+      "observedVersion": "0.154.0",
+      "versionStatus": "verified",
+      "e2eVerified": true
+    },
+    "desktop": {
+      "surface": "codex_desktop",
+      "observedVersion": "0.153.4",
+      "versionStatus": "unverified",
+      "e2eVerified": false
+    }
+  },
+  "configuration": {
+    "source": "explicit_setup_owned_config",
+    "scopeSelection": "fixed_scope_workspace_route",
+    "credentialScopeSetMustEqualConfiguredProjectRoutes": true,
+    "cwdValidation": "canonical_realpath_containment_before_capture",
+    "executionDomain": "local_only",
+    "ambientCredentialDiscovery": false,
+    "eventChosenScopes": false,
+    "nativeSessionRegistration": {
+      "helloField": "native_session_id",
+      "capability": "allowNativeSessions",
+      "default": "disabled",
+      "effectiveBinding": "server_derived_from_installation_binding_and_native_session_id",
+      "registerBeforeReady": true,
+      "registeredSessionIds": "server_returned_store_ids"
+    }
+  },
+  "eventMapping": {
+    "SessionStart.startup": "session_start",
+    "SessionStart.resume": "resume",
+    "SessionStart.clear": "session_start",
+    "SessionStart.compact": "compaction",
+    "UserPromptSubmit": "prompt_submitted",
+    "PostToolUse": "tool_result",
+    "PreCompact": "compaction",
+    "PostCompact": "compaction",
+    "Compact": "compaction",
+    "Stop": "stop",
+    "stopText": "preserved_as_stop_text_when_present",
+    "missingStopText": "coverage_gap",
+    "assistantFinalFromStop": false,
+    "toolOutcome": "unknown_unless_explicit_native_outcome_contract_is_added"
+  },
+  "captureIdentity": {
+    "stableOnlyFrom": ["native event id", "native turn id where one prompt is defined", "native tool id"],
+    "sessionSourceTriggerCategoriesAreEventIds": false,
+    "unknownCorrelation": "fresh_capture_id_and_explicit_correlation_unknown"
+  },
+  "orderedHandler": {
+    "steps": [
+      "bounded_native_json_parse",
+      "fixed_canonical_workspace_route_check",
+      "installation_psk_handshake_and_native_session_ready",
+      "exact_whole_wrapper_recognition",
+      "normalize_and_capture",
+      "await_authenticated_capture_ack",
+      "prepare_current_scope_context_for_session_start_or_prompt",
+      "return_compact_model_context_wrapper"
+    ],
+    "ackBeforeRecall": true,
+    "retryOnTransportLoss": "same_immutable_normalized_envelope_once",
+    "unknownNativeReplayExactlyOnce": false,
+    "deadline": {
+      "startsBeforeNativeStdin": true,
+      "covers": ["stdin", "parse", "connect", "session_registration", "capture", "ack_retry", "recall", "output", "cleanup"],
+      "expiry": "close_owned_clients_and_emit_fallback_without_late_success_output"
+    }
+  },
+  "context": {
+    "budgetUnit": "utf8_bytes",
+    "sessionStartUtf8Budget": 4000,
+    "promptUtf8Budget": 8000,
+    "excludeCurrentSessionPrompts": true,
+    "sessionStartMaxUtf8Bytes": 24576,
+    "promptMaxUtf8Bytes": 65536,
+    "wrapper": "agent_memory_context_v1",
+    "rawIpcJsonReturnedToHost": false,
+    "ownPacketRecognition": "authenticated_persisted_trace_digest_binding_only",
+    "arbitraryMarkerSuppression": false
+  },
+  "coverageGaps": [
+    "native_desktop_end_to_end_delivery_unverified",
+    "foreign_concurrent_hook_handlers_not_observable",
+    "hosted_web_surface_not_targeted",
+    "transcript_format_is_not_used_as_a_stable_contract",
+    "Stop.last_assistant_message_nullable",
+    "compact_summary_not_available_from_hook_contract"
+  ],
+  "testBoundary": {
+    "transport": "synthetic_broker_backed_fixtures",
+    "nativeProviderOrModelCalls": false,
+    "nativeHostConfigurationChanges": false
+  }
+}

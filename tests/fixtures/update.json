@@ -1,0 +1,145 @@
+{
+ "version": 1,
+ "scenario": "deploy_window_correction",
+ "description": "Extraction outputs for the T12 correction flow. The __SPAN_ID__ placeholder is replaced with the real captured span id before createExtractionCandidates validates the output. The quote fields must exactly match the captured source text.",
+ "initial": {
+  "version": 1,
+  "status": "accepted",
+  "observations": [],
+  "claims": [
+   {
+    "source_span_ids": [
+     "__SPAN_ID__"
+    ],
+    "quote": "We deploy the service on Fridays.",
+    "text": "We deploy the service on Fridays.",
+    "attribution": "user",
+    "modality": "asserted",
+    "negated": false,
+    "claim": "We deploy the service on Fridays.",
+    "operation": "ADD",
+    "identity": {
+     "entity": {
+      "kind": "none"
+     },
+     "predicate": "deploy_window",
+     "qualifiers": [],
+     "cardinality": "multi"
+    },
+    "value": {
+     "type": "text",
+     "value": "We deploy the service on Fridays."
+    }
+   }
+  ],
+  "decisions": [],
+  "lesson_candidates": [],
+  "summary": null,
+  "entity_links": []
+ },
+ "supersede": {
+  "version": 1,
+  "status": "accepted",
+  "observations": [],
+  "claims": [
+   {
+    "source_span_ids": [
+     "__SPAN_ID__"
+    ],
+    "quote": "We actually deploy the service on Mondays.",
+    "text": "We actually deploy the service on Mondays.",
+    "attribution": "user",
+    "modality": "asserted",
+    "negated": false,
+    "claim": "We actually deploy the service on Mondays.",
+    "operation": "SUPERSEDE",
+    "identity": {
+     "entity": {
+      "kind": "none"
+     },
+     "predicate": "deploy_window",
+     "qualifiers": [],
+     "cardinality": "multi"
+    },
+    "value": {
+     "type": "text",
+     "value": "We actually deploy the service on Mondays."
+    }
+   }
+  ],
+  "decisions": [],
+  "lesson_candidates": [],
+  "summary": null,
+  "entity_links": []
+ },
+ "correct": {
+  "version": 1,
+  "status": "accepted",
+  "observations": [],
+  "claims": [
+   {
+    "source_span_ids": [
+     "__SPAN_ID__"
+    ],
+    "quote": "Correction: the deploy window is Monday, the Friday statement was wrong.",
+    "text": "Correction: the deploy window is Monday, the Friday statement was wrong.",
+    "attribution": "user",
+    "modality": "asserted",
+    "negated": false,
+    "claim": "Correction: the deploy window is Monday, the Friday statement was wrong.",
+    "operation": "CORRECT",
+    "identity": {
+     "entity": {
+      "kind": "none"
+     },
+     "predicate": "deploy_window",
+     "qualifiers": [],
+     "cardinality": "multi"
+    },
+    "value": {
+     "type": "text",
+     "value": "The deploy window is Monday."
+    }
+   }
+  ],
+  "decisions": [],
+  "lesson_candidates": [],
+  "summary": null,
+  "entity_links": []
+ },
+ "retract": {
+  "version": 1,
+  "status": "accepted",
+  "observations": [],
+  "claims": [
+   {
+    "source_span_ids": [
+     "__SPAN_ID__"
+    ],
+    "quote": "We retracted the Friday deploy window statement; no replacement is known.",
+    "text": "We retracted the Friday deploy window statement; no replacement is known.",
+    "attribution": "user",
+    "modality": "asserted",
+    "negated": false,
+    "claim": "We retracted the Friday deploy window statement; no replacement is known.",
+    "operation": "RETRACT",
+    "identity": {
+     "entity": {
+      "kind": "none"
+     },
+     "predicate": "deploy_window",
+     "qualifiers": [],
+     "cardinality": "multi"
+    },
+    "value": {
+     "type": "text",
+     "value": "We retracted the Friday deploy window statement; no replacement is known."
+    }
+   }
+  ],
+  "decisions": [],
+  "lesson_candidates": [],
+  "summary": null,
+  "entity_links": []
+ }
+}

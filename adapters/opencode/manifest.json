@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "adapter": "opencode",
+  "entry": "plugin.js",
+  "status": "unverified",
+  "nativeVersion": "1.18.30",
+  "sourceCheckedAt": "2026-09-15",
+  "source": "https://github.com/anomalyco/opencode/tree/v1.18.30/packages/plugin",
+  "admission": {
+    "default": "technical_only",
+    "nativeCanary": "required_before_live_use",
+    "nativeHookDelivery": "capture_and_authenticated_recall_trace_verified; model_echo_not_an_acceptance_signal",
+    "providerCallsMadeByThisSlice": false,
+    "hostConfigurationWrittenByThisSlice": false,
+    "nativeUserHistoryReadByThisSlice": false
+  },
+  "configuration": {
+    "source": "explicit_setup_owned_config",
+    "surface": "opencode_cli",
+    "scopeSelection": "fixed_scope_workspace_route",
+    "cwdValidation": "canonical_realpath_containment_before_capture",
+    "executionDomain": "local_only",
+    "ambientCredentialDiscovery": false,
+    "pluginRuntimeImportsBroker": false,
+    "pluginRuntimeImportsSQLiteOrORT": false,
+    "helper": {
+      "processesPerPluginInstallation": 1,
+      "multiplexingKey": "verified_native_session_id",
+      "absoluteNodeAndHelperPaths": true,
+      "environment": "allowlisted_PATH_only; no NODE_OPTIONS or provider secrets",
+      "actions": ["open_session", "capture", "observe", "reconcile", "recall", "recognize_context", "create_handoff", "close"],
+      "arbitraryCommandOrSql": false
+    },
+    "nativeSessionRegistration": {
+      "helloField": "native_session_id",
+      "capability": "allowNativeSessions",
+      "default": "disabled",
+      "effectiveBinding": "server_derived_from_installation_binding_and_native_session_id",
+      "registerBeforeReady": true,
+      "registeredSessionIds": "server_returned_store_ids"
+    }
+  },
+  "eventMapping": {
+    "session.created": "session_start_capture_only",
+    "chat.message": "prompt_submitted_capture; transform_reuses_ack",
+    "tool.execute.before": "tool_started_capture_only",
+    "tool.execute.after": "tool_result_unknown_capture; undefined output remains unknown",
+    "experimental.text.complete": "message_part_assistant_output_capture; not assistant_final",
+    "experimental.session.compacting": "capture_its_lifecycle_event_and_ACK_only",
+    "experimental.chat.messages.transform": "one_common_8000_utf8_byte_profile_after_exact_chat.message_ACK; no_mode_guess",
+    "session.idle": "stop_capture_without_invented_assistant_text",
+    "session.compacted": "compaction_capture_only",
+    "session.error": "error_capture_with_native_error_text_when_present",
+    "message.part.updated": "part_snapshot_reconciliation",
+    "message.part.removed": "explicit_history_gap_without_replay",
+    "toolResultOutcome": "unknown_without_documented_native_execution_outcome",
+    "generalEventAwaiting": "fire_and_forget_by_native_runtime; transform_is_model_barrier"
+  },
+  "identity": {
+    "sessionSource": "actual_message_info_sessionID_or_hook_sessionID",
+    "stableOnlyFrom": ["native message id", "native part id", "native tool call id"],
+    "sessionAndEventCategoriesAreEventIds": false,
+    "unknownCorrelation": "fresh_capture_id_and_explicit_correlation_unknown",
+    "firstObservedAt": "durable_receipt_time_with_head_generation_and_scan_watermark",
+    "transformPromptSource": "actual_chat.message_capture_only; generic_transform_user_text_is_search_hint",
+    "unknownNativeReplayExactlyOnce": "known_events_and_current_part_heads_only",
+    "foreignAgentIdsRemainPayloadProvenance": true
+  },
+  "orderedHandler": {
+    "steps": [
+      "derive_one_verified_session_id_from_native_message_metadata",
+      "fixed_canonical_workspace_route_check_in_node_helper",
+      "installation_psk_handshake_and_native_session_ready",
+      "exact_whole_wrapper_recognition_without_marker_substring_suppression",
+      "reuse_only_an_exact_chat_message_capture_ACK_without_generic_prompt_capture",
+      "await_authenticated_capture_ack",
+      "prepare_current_scope_context_with_explicit_8000_utf8_byte_bound",
+      "mutate_original_messages_array_in_place_with_one_synthetic_text_part"
+    ],
+    "ackBeforeRecall": true,
+    "retryOnTransportLoss": "same_immutable_event_once; no_timestamp_or_identity_regeneration",
+    "originalUserTextMutation": false,
+    "deadline": {
+      "covers": ["bridge_start", "session_registration", "capture", "ack_retry", "recognition", "recall", "output"],
+      "expiry": "leave_native_messages_untouched_and_close_owned_bridge"
+    }
+  },
+  "context": {
+    "transformBudgetProfile": {
+      "unit": "utf8_bytes",
+      "limit": 8000,
+      "stage": "development",
+      "includes": "complete serialized model wrapper",
+      "reserve": "1024 bytes inside existing host byte ceiling",
+      "legacyRequestField": "token_budget caps explicit profile units; not a model token count"
+    },
+    "excludeCurrentSessionPrompts": true,
+    "contextMaxUtf8Bytes": 24576,
+    "unqualifiedNativePromptBudget": "no separate normal/compaction budget until native correlation is verified",
+    "wrapper": "agent_memory_context_v1",
+    "rawIpcJsonReturnedToModel": false,
+    "ownPacketRecognition": "authenticated_persisted_trace_digest_binding_only",
+    "arbitraryMarkerSuppression": false,
+    "compactionInjection": "compacting_hook_captures_its_lifecycle_ACK_only; no ACK is consumable by messages.transform because no native run token is exposed; no mode classification or ignored-channel injection"
+  },
+  "coverageGaps": [
+    "native_OpenCode_model_visible_echo_unverified",
+    "provider_or_model_execution_unverified_and_not_called",
+    "tool.execute.after_undefined_failure_has_unknown_outcome",
+    "general_event_callback_order_is_native_runtime_defined",
+    "assistant_final_is_not_observed_by_pre_persistence_text_complete",
+    "native_compaction_vs_normal_transform_has_no_shared_invocation_token",
+    "generic_transform_without_matching_chat_message_ACK_is_not_attempted",
+    "1500_token_normal_prompt_path_remains_unqualified_until_native_correlation_exists",
+    "native_history_has_no_authoritative_resumable_sequence; application_cursor_is_bounded_and_gap_visible",
+    "assistant_final_requires_native_final_evidence; text.complete_and_part_snapshots_are_not_promoted",
+    "native_event_id_absence_yields_correlation_unknown",
+    "native_history_read_via_pinned_SDK_session_messages_after_server_scan_start; 128_message_bound; no_config_reads"
+  ],
+  "testBoundary": {
+    "transport": "synthetic_broker_backed_real_Node_bridge",
+    "nativeProviderOrModelCalls": false,
+    "nativeOpenCodeConfigurationChanges": false,
+    "credentialReads": false
+  }
+}

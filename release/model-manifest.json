@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "model_id": "Xenova/multilingual-e5-small",
+  "source_model_id": "intfloat/multilingual-e5-small",
+  "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+  "architecture": "XLM-RoBERTa",
+  "dimensions": 384,
+  "max_tokens": 512,
+  "dtype": "q8",
+  "device": "cpu",
+  "batch_strategy": "rowwise_batch1",
+  "runtime": {
+    "transformers_js": "4.2.0",
+    "onnxruntime_node": "1.24.3",
+    "dependency_overrides": {
+      "adm_zip": "0.6.0",
+      "sharp": "0.35.3"
+    }
+  },
+  "prefixes": {
+    "query": "query: ",
+    "passage": "passage: "
+  },
+  "pooling": "masked_mean",
+  "normalization": "l2",
+  "license": {
+    "spdx": "MIT",
+    "name": "MIT",
+    "source": "https://huggingface.co/intfloat/multilingual-e5-small"
+  },
+  "artifacts": [
+    {
+      "path": "config.json",
+      "bytes": 658,
+      "sha256": "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "bytes": 443,
+      "sha256": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b"
+    },
+    {
+      "path": "tokenizer.json",
+      "bytes": 17082730,
+      "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
+    },
+    {
+      "path": "onnx/model_quantized.onnx",
+      "bytes": 118308185,
+      "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193"
+    }
+  ]
+}

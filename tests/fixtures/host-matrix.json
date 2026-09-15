@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "scope_id": "11111111-1111-4111-8111-111111111111",
+  "profiles": [
+    {
+      "id": "HP1",
+      "host_kind": "codex",
+      "surface": "codex_cli",
+      "binding_id": "a1000000-0000-4000-8000-000000000001",
+      "host_instance_id": "matrix-codex",
+      "host_session_id": "matrix-codex-session",
+      "reader_target": "reader:codex_cli"
+    },
+    {
+      "id": "HP2",
+      "host_kind": "claude_code",
+      "surface": "claude_code_cli",
+      "binding_id": "a2000000-0000-4000-8000-000000000002",
+      "host_instance_id": "matrix-claude",
+      "host_session_id": "matrix-claude-session",
+      "reader_target": "reader:claude_code_cli"
+    },
+    {
+      "id": "HP3",
+      "host_kind": "opencode",
+      "surface": "opencode_cli",
+      "binding_id": "a3000000-0000-4000-8000-000000000003",
+      "host_instance_id": "matrix-opencode",
+      "host_session_id": "matrix-opencode-session",
+      "reader_target": "reader:opencode_cli"
+    },
+    {
+      "id": "HP4",
+      "host_kind": "copilot",
+      "surface": "copilot_cli",
+      "binding_id": "a4000000-0000-4000-8000-000000000004",
+      "host_instance_id": "matrix-copilot",
+      "host_session_id": "matrix-copilot-session",
+      "reader_target": "reader:copilot_cli"
+    }
+  ],
+  "surface_variants": [
+    {
+      "id": "HP1-desktop",
+      "host_kind": "codex",
+      "surface": "codex_desktop",
+      "binding_id": "a1000000-0000-4000-8000-000000000005",
+      "host_instance_id": "matrix-codex-desktop",
+      "host_session_id": "matrix-codex-desktop-session",
+      "reader_target": "reader:codex_desktop"
+    }
+  ]
+}
