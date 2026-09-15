@@ -23,7 +23,7 @@ function windowsAcl(path: string, initialize = false, mode: "private" | "asset" 
   const script = `$ErrorActionPreference = 'Stop'
 $sidType = [System.Security.Principal.SecurityIdentifier]
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-${initialize ? `# Only a newly created, empty application directory is changed.
+${initialize ? `# Only an empty application directory is changed; its ACL is set to the current user.
 $existing = Get-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH
 if (@(Get-ChildItem -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
