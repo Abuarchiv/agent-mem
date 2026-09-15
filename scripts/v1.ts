@@ -335,11 +335,24 @@ async function runExtras(directory: string, args: string[]): Promise<void> {
   throw new Error("extra_action_invalid");
 }
 
+async function runRepair(directory: string, args: string[]): Promise<void> {
+  const journal = readInstallJournal(installJournalFile(directory));
+  const project = takeOption(args, "--project") ?? journal.project;
+  if (args.length) throw new Error("repair_argument_unexpected");
+  if (journal.attempts >= 3) throw new InstallError("install_repair_action_required");
+  await runInstall(directory, {
+    project,
+    hosts: journal.hosts,
+    rerank: journal.rerank,
+    nonInteractive: true,
+  });
+}
+
 export async function main(input = process.argv.slice(2)): Promise<void> {
   const args = [...input], directory = resolve(takeOption(args, "--data-dir") ?? defaultDataDirectory());
   const command = args.shift();
   if (!command || command === "--help" || command === "help") {
-    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory extras list|install|remove reranker\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, verifies MCP readiness, and self-heals its owned broker once when a host starts.");
+    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory repair [--project PATH]\n  memory extras list|install|remove reranker\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, verifies MCP readiness, and self-heals its owned broker once when a host starts.");
     return;
   }
   if (command === "install") {
@@ -357,6 +370,10 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
   }
   if (command === "extras") {
     await runExtras(directory, args);
+    return;
+  }
+  if (command === "repair") {
+    await runRepair(directory, args);
     return;
   }
   if (command === "connect" || command === "disconnect") {
