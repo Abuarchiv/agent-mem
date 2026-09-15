@@ -4,7 +4,7 @@ Local memory for Codex, OpenCode, and GitHub Copilot CLI/app worktrees.
 
 ## What it does
 
-- Captures events received from a configured local host.
+- Stores events from a configured host.
 - Keeps the original text, spans, timestamps, scope, and provenance.
 - Searches with SQLite/FTS5 and a bundled multilingual E5 model.
 - Supports bounded graph search, feedback, and an optional local reranker.
@@ -13,7 +13,7 @@ Local memory for Codex, OpenCode, and GitHub Copilot CLI/app worktrees.
 
 ## What it does not do
 
-The V1 runtime makes no generative LLM or provider calls. It has no subscription login, extraction worker, summary generator, UI, or HTTP server. Old schema and validation code remains only for compatibility with older vaults.
+The V1 runtime makes no generative LLM or provider calls. It has no subscription login, extraction worker, summary generator, UI, or HTTP server. Old schema and validation code remains only to read and purge older vaults.
 
 Local storage is not encrypted. The SQLite vault is readable by anyone who can read the data directory or a backup. A host can also send recalled text to its own provider.
 
@@ -32,7 +32,7 @@ npm run models:verify
 npm test
 ```
 
-`models:download` and `runtime:download` use the network. Runtime capture and model loading do not.
+`models:download` and `runtime:download` use the network. Capture and model loading do not.
 
 ## Package
 
@@ -40,7 +40,7 @@ npm test
 npm run package -- --output /absolute/path/agent-memory-v1-package
 ```
 
-The command downloads and verifies the official Node 24.20.0 runtime when it is not cached. The package includes the launcher, local broker, E5 model, optional reranker, native sqlite-vec asset, and licenses.
+The command downloads and verifies the official Node 24.20.0 runtime when it is not cached. By default, the package contains the V1 core: the launcher, local broker, E5 model, native sqlite-vec asset, and licenses. Add `--with-reranker` to include the optional local reranker.
 
 ## Connect a host
 
@@ -55,4 +55,4 @@ Keep the data directory, vault, credentials, and IPC directory private. Cloud se
 
 ## Status
 
-The current checkout is an engineering preview. Build and tests pass. The package probe passes on macOS ARM64 with Node 24.20.0. Desktop Codex, native Copilot, Windows, Linux, and concurrent OpenCode runs still need separate verification.
+This checkout is an engineering preview. The local build, tests, and macOS ARM64 package probe pass with Node 24.20.0. The CI matrix runs on Linux, Windows, and macOS 14. Codex Desktop, native Copilot, and concurrent OpenCode runs still need direct verification.

@@ -6,7 +6,7 @@
 - Reject non-private vault files before opening them.
 - Limit default reader output to prompt and assistant-output sources.
 - Reconcile existing reader grants at startup.
-- Document the local storage and provider boundary.
+- Add clear warnings about local storage and provider data.
 
 ## 1.0.0
 
