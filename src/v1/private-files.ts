@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, mkdirSync, type Stats } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 
 /** Private data excludes other users; assets permit only their known read/execute rights. */
@@ -64,9 +64,10 @@ export function assertPrivatePath(path: string, opened?: Stats, errorCode = "pri
 }
 
 export function ensurePrivateDirectory(directory: string): void {
-  const created = mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const existed = existsSync(directory);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
   const info = lstatSync(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("data_directory_must_be_owned_and_private");
-  if (process.platform === "win32" && created !== undefined) windowsAcl(directory, true);
+  if (process.platform === "win32" && (!existed || readdirSync(directory).length === 0)) windowsAcl(directory, true);
   assertPrivatePath(directory, info, "data_directory_must_be_owned_and_private");
 }
