@@ -1,11 +1,114 @@
+import { closeSync, existsSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { defaultDataDirectory, loadConfig, V1_HOSTS } from "../src/v1/config.js";
+import { configureHost } from "../src/v1/connect.js";
+import { defaultDataDirectory, loadConfig, runtimeDirectory, V1_HOSTS } from "../src/v1/config.js";
+import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, parseInstallArgs, stopOwnedService, type InstallOptions } from "../src/v1/install.js";
+import { assertPrivatePath } from "../src/v1/private-files.js";
 
 const json = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => typeof item === "bigint" ? item.toString() : item);
+
+async function serviceState(directory: string): Promise<"ready" | "starting" | "stopped"> {
+  try {
+    const { operatorCall } = await import("../src/v1/service.js");
+    const value = await operatorCall(directory, { kind: "control", operation: "status" });
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return "stopped";
+    const state = value as { readonly running?: unknown; readonly state?: unknown };
+    if (state.running !== true) return "stopped";
+    return state.state === "starting" ? "starting" : "ready";
+  } catch {
+    return "stopped";
+  }
+}
+
+async function serviceIsReady(directory: string): Promise<boolean> {
+  return (await serviceState(directory)) === "ready";
+}
+
+async function serviceIsStarting(directory: string): Promise<boolean> {
+  return (await serviceState(directory)) === "starting";
+}
+
+function launchOwnedService(directory: string, options: InstallOptions): Promise<number> {
+  const logPath = join(runtimeDirectory(directory), "owner.log");
+  const logFd = openSync(logPath, "a", 0o600);
+  const entry = fileURLToPath(new URL("./v1.js", import.meta.url));
+  try {
+    const child = spawn(process.execPath, [
+      entry, "--data-dir", directory, "start", ...(options.rerank ? ["--rerank"] : []),
+    ], {
+      cwd: options.project,
+      env: { ...process.env, NODE_OPTIONS: undefined, NODE_PATH: undefined },
+      stdio: ["ignore", logFd, logFd],
+      detached: true,
+      windowsHide: true,
+    });
+    const pid = child.pid;
+    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) throw new Error("install_broker_pid_invalid");
+    child.unref();
+    return Promise.resolve(pid);
+  } finally {
+    closeSync(logFd);
+  }
+}
+
+async function runInstall(directory: string, options: InstallOptions): Promise<void> {
+  const project = realpathSync(options.project);
+  if (!lstatSync(project).isDirectory()) throw new Error("install_project_must_be_directory");
+  const plan = createInstallPlan(options, detectInstallHostProbe(project));
+  const config = loadConfig(directory, true);
+  const projectEntry = config.projects.find((entry) => entry.root === project);
+  const existingHosts = new Set(projectEntry === undefined
+    ? []
+    : config.connections.filter((entry) => entry.scope_id === projectEntry.scope_id).map((entry) => entry.host));
+  const hostResults: unknown[] = [];
+  for (const host of plan.hosts) {
+    if (existingHosts.has(host)) {
+      hostResults.push({ host, state: "already_configured" });
+      continue;
+    }
+    hostResults.push(configureHost(directory, host, project));
+  }
+  const service = await ensureOwnedService({
+    isRunning: () => serviceIsReady(directory),
+    isStarting: () => serviceIsStarting(directory),
+    start: () => launchOwnedService(directory, options),
+  });
+  const { operatorCall } = await import("../src/v1/service.js");
+  const backend = await operatorCall(directory, { kind: "control", operation: "status" });
+  console.log(json({ version: 1, state: "installed", project, hosts: plan.hosts,
+    detected_hosts: plan.detectedHosts, not_detected_hosts: plan.notDetectedHosts,
+    rerank: plan.rerank, host_results: hostResults, service, backend }));
+}
+
+function readOwnedOwner(directory: string): { readonly pid: number; readonly owned: boolean } | null {
+  const path = join(runtimeDirectory(directory), "owner.lock");
+  if (!existsSync(path)) return null;
+  const info = lstatSync(path);
+  assertPrivatePath(path, info, "install_owner_lock_unverified");
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(path, "utf8")) as unknown; } catch { throw new Error("install_owner_lock_invalid"); }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("install_owner_lock_invalid");
+  const record = value as { readonly installation_id?: unknown; readonly pid?: unknown };
+  const config = loadConfig(directory);
+  return { pid: typeof record.pid === "number" ? record.pid : -1, owned: record.installation_id === config.installation_id };
+}
+
+async function stopInstalledOwner(directory: string): Promise<void> {
+  const result = await stopOwnedService({
+    findOwner: async () => readOwnedOwner(directory),
+    isAlive: async (pid) => {
+      try { process.kill(pid, 0); return true; } catch (error) {
+        return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+      }
+    },
+    signal: (pid, signal) => { process.kill(pid, signal); },
+  });
+  console.log(json({ version: 1, ...result }));
+}
 function takeOption(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   if (index < 0) return undefined;
@@ -105,7 +208,20 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
   const args = [...input], directory = resolve(takeOption(args, "--data-dir") ?? defaultDataDirectory());
   const command = args.shift();
   if (!command || command === "--help" || command === "help") {
-    console.log("Agent Memory V1\n  memory [--data-dir PATH] connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory [--data-dir PATH] start [--rerank | --no-rerank]\n  memory [--data-dir PATH] status [--json]\n  memory [--data-dir PATH] pause|resume\n  memory [--data-dir PATH] forget CAPTURE_ID --project PATH\n  memory [--data-dir PATH] feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory [--data-dir PATH] procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nStart runs in the foreground; Ctrl+C stops it safely.");
+    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures the selected hosts, starts the local broker, and checks that it is ready.");
+    return;
+  }
+  if (command === "install") {
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log("V1 install\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli]\n  --core-only | --no-rerank  Install only the V1 core\n  --yes | --non-interactive  Use detected defaults without prompting");
+      return;
+    }
+    await runInstall(directory, parseInstallArgs(args));
+    return;
+  }
+  if (command === "stop") {
+    if (args.length) throw new Error("stop_takes_no_arguments");
+    await stopInstalledOwner(directory);
     return;
   }
   if (command === "connect" || command === "disconnect") {

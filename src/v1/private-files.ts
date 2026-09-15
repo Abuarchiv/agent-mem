@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, mkdirSync, type Stats } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 
 /** Private data excludes other users; assets permit only their known read/execute rights. */
@@ -23,9 +23,9 @@ function windowsAcl(path: string, initialize = false, mode: "private" | "asset" 
   const script = `$ErrorActionPreference = 'Stop'
 $sidType = [System.Security.Principal.SecurityIdentifier]
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-${initialize ? `# Only a newly created, empty application directory is changed.
+${initialize ? `# Only an empty application directory is changed; its ACL is set to the current user.
 $existing = Get-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH
-if ($existing.GetOwner($sidType).Value -ne $user.Value -or @(Get-ChildItem -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
+if (@(Get-ChildItem -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $acl.SetOwner($user)
 $acl.SetAccessRuleProtection($true, $false)
@@ -64,9 +64,10 @@ export function assertPrivatePath(path: string, opened?: Stats, errorCode = "pri
 }
 
 export function ensurePrivateDirectory(directory: string): void {
-  const created = mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const existed = existsSync(directory);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
   const info = lstatSync(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("data_directory_must_be_owned_and_private");
-  if (process.platform === "win32" && created !== undefined) windowsAcl(directory, true);
+  if (process.platform === "win32" && (!existed || readdirSync(directory).length === 0)) windowsAcl(directory, true);
   assertPrivatePath(directory, info, "data_directory_must_be_owned_and_private");
 }

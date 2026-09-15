@@ -14,7 +14,7 @@ const nativeAsset = process.platform === "darwin"
 const store = join(root, "src/store");
 const assets = readdirSync(store).filter(name => name.endsWith(".sql")).map(name => `src/store/${name}`);
 assets.push(...readdirSync(join(store, "migrations")).filter(name => name.endsWith(".sql")).map(name => `src/store/migrations/${name}`));
-assets.push(`src/native/${nativeAsset}`, "release/model-manifest.json", "release/rerank-manifest.json");
+assets.push(`src/native/${nativeAsset}`, "src/models/model-manifest.json", "src/models/rerank-manifest.json");
 assets.push("tests/fixtures/vault-v1.sql");
 for (const asset of assets) {
   const destination = join(root, "dist-v1", asset);

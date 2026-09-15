@@ -1,23 +1,40 @@
 # Agent Memory V1
 
-Standalone, local-first memory for Codex, OpenCode and local GitHub Copilot CLI/app worktrees.
+Local memory for Codex, OpenCode, and GitHub Copilot CLI/app worktrees.
 
-V1 stores original host events and returns source-backed context in later sessions. It uses SQLite/FTS5, bundled multilingual E5 embeddings and bounded deterministic search. A local cross-encoder can be enabled for ranking, but it is optional and non-generative.
+## What it does
 
-There is no background LLM, provider API, API-key login, subscription executor, extraction job, generated summary, reflection, lesson, UI or HTTP server in this repository.
+- Stores events from a configured host.
+- Keeps the original text, spans, timestamps, scope, and provenance.
+- Searches with SQLite/FTS5 and a bundled multilingual E5 model.
+- Supports bounded graph search, feedback, and an optional local reranker.
+- Provides four stdio MCP tools: `memory_recall`, `memory_get`, `memory_forget`, and `memory_write`.
+- Uses one authenticated local IPC broker.
 
-## Build and test
+## What it does not do
 
-Use Node 24.20.x and npm 11:
+The V1 runtime makes no generative LLM or provider calls. It has no subscription login, extraction worker, summary generator, UI, or HTTP server. Old schema and validation code remains only to read and purge older vaults.
+
+The SQLite vault is not encrypted at rest. Anyone who can read the data directory or one of its backups can read the vault. A host can also send recalled text to its own provider.
+
+## Requirements
+
+- Node.js 24.20.x and npm 11.
+- A local project or worktree for each connected host.
+- Pinned E5 artifacts. The reranker is optional.
+
+## Setup
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run models:download
 npm run models:verify
 npm test
 ```
 
-`models:download` is the only setup step that uses the network. It downloads the exact pinned public Hugging Face revisions and verifies every byte against the tracked manifests. Runtime capture/retrieval never downloads a model. Release packaging verifies the same manifests and bundles the model, native sqlite-vec asset and optional reranker.
+`models:download`/`models:verify` default to the lean core profile (E5 only). Use `npm run models:download:all` and `npm run models:verify:all` for the full package (E5 plus optional reranker), or `npm run models:download:reranker` and `npm run models:verify:reranker` for the optional reranker only.
+
+`models:download` and `runtime:download` use the network. Capture and model loading do not.
 
 ## Package
 
@@ -25,30 +42,19 @@ npm test
 npm run package -- --output /absolute/path/agent-memory-v1-package
 ```
 
-The destination must be new. The resulting package contains a self-contained `memory` launcher, `memory.cmd`/`memory.ps1` on Windows, stdio MCP, private local IPC, E5 and the optional reranker.
+The command downloads and verifies the official Node 24.20.0 runtime when it is not cached. By default, the package contains the V1 core: the launcher, local broker, E5 model, native sqlite-vec asset, and licenses. Add `--with-reranker` to include the optional local reranker.
 
-## Host connection
+## Connect a host
 
 ```sh
-memory --data-dir /absolute/data connect codex --project /absolute/project
-memory --data-dir /absolute/data connect opencode --project /absolute/project
-memory --data-dir /absolute/data connect copilot-cli --project /absolute/project
-memory --data-dir /absolute/data start
+memory --data-dir /absolute/private-data connect codex --project /absolute/project
+memory --data-dir /absolute/private-data connect opencode --project /absolute/project
+memory --data-dir /absolute/private-data connect copilot-cli --project /absolute/project
+memory --data-dir /absolute/private-data start
 ```
 
-Only local repository/worktree sessions are supported. Cloud-hosted sessions cannot reach the local vault.
+Keep the data directory, vault, credentials, and IPC directory private. Cloud sessions cannot access this local vault.
 
-## MCP contract
+## Status
 
-The V1 server exposes exactly four tools:
-
-- `memory_recall` — retrieve bounded, source-linked evidence.
-- `memory_get` — load an exact source or report by ID.
-- `memory_forget` — purge selected source data and indexes.
-- `memory_write` — persist an explicit source-backed `agent_report`.
-
-Recall results are evidence, not instructions. Stored reports remain agent statements and must be checked against their cited original sources.
-
-## Production status
-
-The repository is intentionally separate from the legacy implementation. See [`docs/release-checklist.md`](docs/release-checklist.md) for the gates that must be run on each target platform.
+This checkout is an engineering preview. The local build, tests, and macOS ARM64 package probe pass with Node 24.20.0. Full CI runs on Linux and macOS 14; a separate Windows job checks the build and platform code. The Windows private-data runtime, Codex Desktop, native Copilot, and concurrent OpenCode runs still need direct verification.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -13,7 +13,7 @@ import { fullPurge, type FullPurgeRequest, type FullPurgeResult } from "../core/
 import { createPreparationContext, type PreparationContext } from "../context/packet.js";
 import { prepareSourceEvidencePacket } from "../context/source-only.js";
 import { createJobScheduler, type InteractiveRunOptions } from "../worker/main.js";
-import { RuntimeCleanupWorker } from "../execution/cleanup.js";
+import { RuntimeCleanupWorker } from "../runtime/cleanup.js";
 import { E5ModelError, loadE5Embedder, type LocalE5Embedder } from "../models/embedding.js";
 import type { LocalReranker } from "../models/rerank.js";
 import { E5_MODEL_MANIFEST, ModelArtifactError } from "../models/manifest.js";
@@ -29,6 +29,7 @@ import {
 } from "../core/policy.js";
 import { createTrustedBinding, isTrustedBinding, type EvidencePacket, type TrustedBinding } from "../host/contract.js";
 import type { SearchState } from "../v1/search-state.js";
+import { assertPrivatePath, ensurePrivateDirectory } from "../v1/private-files.js";
 import type { BrokerOwner } from "../host/broker.js";
 
 const textSchema = z.string().trim().min(1).max(6_000).refine((text) => Buffer.byteLength(text, "utf8") <= 6_000, "text_exceeds_source_batch");
@@ -94,7 +95,8 @@ function lifecycleErrorCode(error: unknown, fallback: string): string {
 export async function createRuntime(options: RuntimeOwnerOptions) {
   validateOptions(options);
   const vaultPath = resolve(options.vaultPath ?? defaultVaultPath);
-  mkdirSync(dirname(vaultPath), { recursive: true, mode: 0o700 });
+  ensurePrivateDirectory(dirname(vaultPath));
+  if (existsSync(vaultPath)) assertPrivatePath(vaultPath, undefined, "vault_file_must_be_owned_and_private");
   if ((options.requireExisting ?? false) && !existsSync(vaultPath)) throw new StoreError("restore_quarantined");
   if (existsSync(vaultPath)) resumeRestoreActivation(vaultPath);
 

@@ -145,6 +145,17 @@ export function setScopeOutputGrants(
   return database.replaceScopeOutputGrants(binding, scopeId, parseScopeOutputGrants(grants), updatedAt);
 }
 
+/** Replace only reader grants while preserving local, export, and provider grants. */
+export function setReaderOutputGrants(
+  database: AgentMemoryDatabase,
+  binding: PolicySetupBinding,
+  scopeId: string,
+  grants: unknown,
+  updatedAt: string,
+): string {
+  return database.replaceReaderOutputGrants(binding, scopeId, parseScopeOutputGrants(grants), updatedAt);
+}
+
 export function setScopeCapturePolicy(
   database: AgentMemoryDatabase,
   binding: PolicySetupBinding,

@@ -29,7 +29,7 @@ if (packageArgument === undefined || !resolve(packageArgument).startsWith(sep)) 
 }
 
 const packageDirectory = realpathSync(resolve(packageArgument));
-const packageNode = realpathSync(join(packageDirectory, "runtime", "bin", "node"));
+const packageNode = realpathSync(join(packageDirectory, "runtime", "bin", process.platform === "win32" ? "node.exe" : "node"));
 const repoRoot = realpathSync(root);
 if (packageDirectory === repoRoot || packageDirectory.startsWith(`${repoRoot}${sep}`)) {
   throw new Error("package_must_be_outside_repository_ancestry");
@@ -404,6 +404,9 @@ for (const entry of directions) {
   const afterRecordPurge = await callTool("memory_recall", { query: "Kiebitz invoice storage", scope_ids: [scopeId], max_bytes: 8_000 });
   assert.ok(!afterRecordPurge.packet.items.some(item => item.kind === "record"), "purging latest report must not resurrect the superseded report");
   status = service.status();
+  if (!noRerank && status.intelligence?.reranker?.state !== "ready") {
+    gateFailures.push({ direction: "RERANKER", expected_source_id: "reranker", failure: `reranker_not_ready:${status.intelligence?.reranker?.state ?? "unknown"}` });
+  }
   console.log(json({
     version: 1,
     proof_scope: "technical_synthetic_capture_via_authenticated_v1_broker; not_native_host_proof",

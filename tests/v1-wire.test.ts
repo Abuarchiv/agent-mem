@@ -279,8 +279,8 @@ test("V1 MCP exposes four tools and forwards owner callbacks", async () => {
     assert.deepEqual(recallDescriptor?.inputSchema.required, ["query"]);
     assert.deepEqual(recallDescriptor?.annotations, { readOnlyHint: true, openWorldHint: false });
     assert.deepEqual(recallDescriptor?.inputSchema.properties["mode"], { enum: ["current", "historical", "timeline"], default: "current" });
-    assert.deepEqual(recallDescriptor?.inputSchema.properties["max_bytes"], { type: "integer", minimum: 1, maximum: 32000, default: 8000, description: "UTF-8 byte budget; max 32000." });
-    assert.equal((recallDescriptor?.inputSchema.properties["token_budget"] as { description?: string }).description, "Legacy alias for max_bytes, also measured in UTF-8 bytes.");
+    assert.deepEqual(recallDescriptor?.inputSchema.properties["max_bytes"], { type: "integer", minimum: 1, maximum: 32000, default: 8000, description: "UTF-8 byte limit; maximum 32000." });
+    assert.equal((recallDescriptor?.inputSchema.properties["token_budget"] as { description?: string }).description, "Legacy name for max_bytes; uses UTF-8 bytes.");
 
     const initialize = await server.handleMessageObject({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     const serverInfo = (initialize?.result as { serverInfo: { name: string; version: string } }).serverInfo;

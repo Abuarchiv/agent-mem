@@ -10,6 +10,7 @@ import { capture, observeNative, prepareCaptureInput } from "../src/core/capture
 import {
   createPolicySetupBinding,
   setCapturePaused,
+  setReaderOutputGrants,
   setScopeCapturePolicy,
   setScopeOutputGrants,
 } from "../src/core/policy.js";
@@ -164,6 +165,45 @@ test("enrollment starts deny-all, stores acceptance time, and exclusion markers 
       (error: unknown) => error instanceof StoreError && error.code === "capture_rejected",
     );
     assert.equal(fixture.db.getCaptureState(ack.capture_id)?.source_count, 1n);
+  } finally {
+    closeDatabase(fixture.dir, fixture.db);
+  }
+});
+
+test("reader grant hardening removes sensitive reader classes and preserves non-reader grants", () => {
+  const now = "2026-09-09T00:30:00Z";
+  const fixture = setupDatabase(() => now);
+  try {
+    setScopeOutputGrants(fixture.db, fixture.policy, scopeId, [
+      { target: "local_ui", source_classes: [...allClasses] },
+      { target: "reader:codex_cli", source_classes: [...allClasses] },
+    ], now);
+    const before = fixture.db.getScopePrivacyEpoch(scopeId);
+    const hardened = setReaderOutputGrants(fixture.db, fixture.policy, scopeId, [
+      { target: "reader:codex_cli", source_classes: ["prompt", "assistant_output"] },
+    ], "2026-09-09T00:31:00Z");
+    assert.equal(hardened, (BigInt(before) + 1n).toString());
+    const raw = new DatabaseSync(fixture.path, { readOnly: true });
+    try {
+      assert.deepEqual(raw.prepare("SELECT output_target, source_class FROM scope_output_grant WHERE scope_id = ? ORDER BY output_target, source_class").all(scopeId).map((row) => ({
+        output_target: String(row.output_target),
+        source_class: String(row.source_class),
+      })), [
+        { output_target: "local_ui", source_class: "assistant_output" },
+        { output_target: "local_ui", source_class: "diagnostic" },
+        { output_target: "local_ui", source_class: "lifecycle" },
+        { output_target: "local_ui", source_class: "prompt" },
+        { output_target: "local_ui", source_class: "tool_input" },
+        { output_target: "local_ui", source_class: "tool_output" },
+        { output_target: "reader:codex_cli", source_class: "assistant_output" },
+        { output_target: "reader:codex_cli", source_class: "prompt" },
+      ]);
+    } finally {
+      raw.close();
+    }
+    assert.equal(setReaderOutputGrants(fixture.db, fixture.policy, scopeId, [
+      { target: "reader:codex_cli", source_classes: ["prompt", "assistant_output"] },
+    ], "2026-09-09T00:32:00Z"), hardened);
   } finally {
     closeDatabase(fixture.dir, fixture.db);
   }

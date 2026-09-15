@@ -10,7 +10,7 @@ import { connect as tlsConnect } from "node:tls";
 import { IPC_PSK_CIPHER, IPC_TLS_VERSION } from "../src/host/ipc.js";
 
 import { createRuntime } from "../src/app/runtime.js";
-import { RuntimeCleanupWorker } from "../src/execution/cleanup.js";
+import { RuntimeCleanupWorker } from "../src/runtime/cleanup.js";
 import { createPolicyOutputBinding, createPolicySetupBinding, setScopeOutputGrants } from "../src/core/policy.js";
 import { E5_MODEL_MANIFEST } from "../src/models/manifest.js";
 import type { E5EmbedderReport, LocalE5Embedder } from "../src/models/embedding.js";

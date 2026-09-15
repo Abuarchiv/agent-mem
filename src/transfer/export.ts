@@ -38,7 +38,7 @@ import {
 import { resolveTextAtPath, validateSpanExcerpt } from "../core/capture.js";
 import type { AgentMemoryDatabase, TransferSnapshot } from "../store/database.js";
 import { StoreError } from "../store/errors.js";
-import { removeOwnedPath } from "../execution/owned-path.js";
+import { removeOwnedPath } from "../runtime/owned-path.js";
 import type { RegisteredBackupFile } from "../store/backup-inventory.js";
 
 export const TRANSFER_FORMAT = "agent-memory-transfer" as const;

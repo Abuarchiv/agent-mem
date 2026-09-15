@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
 
 import { z } from "zod";
 
@@ -38,12 +39,22 @@ import {
   type WallClockResolution,
 } from "../core/time.js";
 import { decideRevision, isResolverDecision, isVerifiedCorrectionOperation, isVerifiedEntailmentOperation, type ResolverCurrentState, type ResolverDecision, type ResolverSourceFact } from "../core/resolve.js";
-import { parseExtractionCandidate } from "../extraction/schema.js";
-import { extractionBatchResultDigest } from "../extraction/extract.js";
+import type { ExtractionCandidate } from "../extraction/schema.js";
 import { StoreError } from "./errors.js";
 import type { JobClaim } from "./job-repository.js";
 
 const MAX_INT64 = 9_223_372_036_854_775_807n;
+const requireCompat = createRequire(import.meta.url);
+
+function parseLegacyExtractionCandidate(input: unknown): ExtractionCandidate {
+  const { parseExtractionCandidate } = requireCompat("../extraction/schema.js") as typeof import("../extraction/schema.js");
+  return parseExtractionCandidate(input);
+}
+
+function legacyExtractionBatchResultDigest(batchId: string, extractionDigest: string | null, verificationDigest: string | null): string {
+  const { extractionBatchResultDigest } = requireCompat("../extraction/extract.js") as typeof import("../extraction/extract.js");
+  return extractionBatchResultDigest(batchId, extractionDigest, verificationDigest);
+}
 const MAX_RESOLVER_SOURCE_FACTS = 128;
 const memoryItemStatusSchema = z.enum(["candidate", "supported", "disputed", "superseded", "retracted"]);
 const resolverDispositionSchema = z.enum(["candidate", "ignored"]);
@@ -673,7 +684,7 @@ export class RevisionRepository {
       if (sqlInteger(rowValue(candidateCount, "count"), "verified-candidate-count") !== BigInt(mutations.length) || new Set(mutations.map((entry) => entry.candidate_id)).size !== mutations.length) throw new StoreError("revision_conflict");
       const extractionDigest = sqlText(rowValue(batchRow, "extraction_digest"), "verified-batch-extraction-digest");
       const verificationDigest = sqlText(rowValue(batchRow, "verification_digest"), "verified-batch-verification-digest");
-      const resultDigest = extractionBatchResultDigest(batchId, extractionDigest, verificationDigest);
+      const resultDigest = legacyExtractionBatchResultDigest(batchId, extractionDigest, verificationDigest);
       for (const entry of mutations) this.assertPersistedVerification(entry.mutation, { batch_id: batchId, candidate_id: entry.candidate_id });
       const results = mutations.map((entry) => this.applyInTransaction(binding, entry.mutation, true));
       const completedAt = this.readWallClock();
@@ -1339,8 +1350,8 @@ export class RevisionRepository {
       throw new StoreError("revision_conflict");
     }
     const candidateDigest = sqlText(rowValue(row, "candidate_digest"), "verified-candidate-digest");
-    let candidate: ReturnType<typeof parseExtractionCandidate>;
-    try { candidate = parseExtractionCandidate(JSON.parse(sqlText(rowValue(row, "candidate_json"), "verified-candidate-json")) as unknown); } catch (error: unknown) { throw new StoreError("revision_invalid", error); }
+    let candidate: ExtractionCandidate;
+    try { candidate = parseLegacyExtractionCandidate(JSON.parse(sqlText(rowValue(row, "candidate_json"), "verified-candidate-json")) as unknown); } catch (error: unknown) { throw new StoreError("revision_invalid", error); }
     const candidateQualifiers = candidate.identity.qualifiers.map((qualifier) => ({ key: qualifier.key, type: qualifier.type, value: qualifier.value }));
     const mutationTemporal = mutation.temporal_intent === undefined ? undefined : JSON.parse(mutation.temporal_intent.json) as unknown;
     let candidateTemporal: unknown;

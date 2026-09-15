@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { createRuntime, type RuntimeOwner } from "../app/runtime.js";
-import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
+import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setReaderOutputGrants, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
 import { AgentMemoryBroker, AgentMemoryBrokerClient } from "../host/broker.js";
 import { bindingOwnerId, validateBoundRecallRequest, type EvidencePacket, type TrustedBinding } from "../host/contract.js";
 import { createMemoryMcpServer, type MemoryMcpServer } from "../host/mcp.js";
@@ -27,6 +27,8 @@ const controlSchema = z.discriminatedUnion("operation", [
 ]);
 const mcpSchema = z.object({ kind: z.literal("mcp"), message: z.unknown() }).strict();
 const sourceClasses = ["prompt", "assistant_output", "tool_input", "tool_output", "lifecycle", "diagnostic"] as const;
+export const V1_OUTPUT_TARGETS = ["reader:codex_cli", "reader:opencode_cli", "reader:copilot_cli"] as const;
+export const V1_READER_SOURCE_CLASSES = ["prompt", "assistant_output"] as const;
 
 export interface V1ServiceOptions {
   readonly rerank?: boolean;
@@ -45,7 +47,8 @@ function pinnedRerankerFactory(update: (status: RerankerStatus) => void): () => 
     try {
       const root = fileURLToPath(new URL("../../../", import.meta.url));
       const base = join(root, ".models", "rerank", RERANK_MODEL_ID);
-      const manifest = parseRerankManifest(JSON.parse(readFileSync(join(root, "release", "rerank-manifest.json"), "utf8")) as unknown);
+      const manifestPath = fileURLToPath(new URL("../models/rerank-manifest.json", import.meta.url));
+      const manifest = parseRerankManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
       const reranker = await loadReranker({ modelRoot: join(base, manifest.revision), manifest });
       update({ state: "ready", reason: null });
       return reranker;
@@ -91,7 +94,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     ...config.connections.map(entry => ({ binding: bindingFor(config, entry), secret: Buffer.from(entry.secret_hex, "hex"), allowNativeSessions: true })),
   ];
   const scopeIds = config.projects.map(p => p.scope_id);
-  const targets = ["reader:codex_cli", "reader:opencode_cli"] as const;
+  const targets = V1_OUTPUT_TARGETS;
   const policy = createPolicySetupBinding({ version: 1, setup_id: config.installation_id, allowed_scope_ids: scopeIds, allowed_output_targets: targets });
   const first = config.projects[0]!;
   const output = createPolicyOutputBinding(policy, { version: 1, setup_id: policy.setup_id, output_binding_id: randomUUID(), scope_id: first.scope_id, target: "reader:codex_cli" });
@@ -258,8 +261,10 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
         for (const project of config.projects) {
           database.registerScope({ scope_id: project.scope_id, kind: "project", owner_ref: config.installation_id, created_at: project.created_at });
           if (!database.getScopeCapturePolicy(project.scope_id).enrolled) {
-            setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...sourceClasses] })), timestamp);
+            setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
             setScopeCapturePolicy(database, policy, project.scope_id, sourceClasses.map(source_class => ({ source_class, retention: { mode: "until_deleted" } })), timestamp);
+          } else {
+            setReaderOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
           }
         }
       },

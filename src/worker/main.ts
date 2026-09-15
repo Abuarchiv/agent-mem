@@ -19,7 +19,7 @@ import {
 } from "../retrieval/vector.js";
 import { z } from "zod";
 import type { JobRunnerHooks } from "./jobs.js";
-import type { RuntimeCleanupWorker } from "../execution/cleanup.js";
+import type { RuntimeCleanupWorker } from "../runtime/cleanup.js";
 
 export type SchedulerErrorCode = "scheduler_not_started" | "scheduler_closed" | "scheduler_queue_full" | "deadline" | "aborted";
 

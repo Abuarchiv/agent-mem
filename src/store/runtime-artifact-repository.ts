@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { parseContract } from "../host/contract.js";
 import { StoreError } from "./errors.js";
-import { removeOwnedPath, type OwnedPathRemoval } from "../execution/owned-path.js";
+import { removeOwnedPath, type OwnedPathRemoval } from "../runtime/owned-path.js";
 
 const uuid = z.uuid();
 const id = z.string().min(1).max(256);

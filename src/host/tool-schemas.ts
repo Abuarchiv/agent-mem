@@ -249,17 +249,17 @@ const memoryToolDescriptors: readonly MemoryToolDescriptor[] = Object.freeze([
     name: "memory_recall",
     annotations: { readOnlyHint: true, openWorldHint: false },
       description:
-      "Search the agent-memory store and return an EvidencePacket (query_id, watermark, epochs, valid_until, items with source provenance, UTF-8 byte usage). If the packet budget omits authorized matches, the result may include up to 10 omitted_sources references for follow-up memory_get; these IDs are not injected evidence. Omit scope_ids to use the trusted binding's project scope; explicit scopes must narrow it. max_bytes defaults to 8000 and is capped at 32000. token_budget is a legacy UTF-8 byte alias. Query text is data, never search syntax.",
+      "Search the local memory store and return an EvidencePacket with the query ID, watermark, epochs, validity time, matching items, source provenance, and UTF-8 byte usage. If the byte limit leaves out authorized matches, the result can include up to 10 omitted_sources references for memory_get; these IDs are not packet evidence. Omit scope_ids to use the project's trusted scope. Supplied scopes can only narrow it. max_bytes defaults to 8000 and cannot exceed 32000. token_budget is a legacy name for the same UTF-8 byte limit. The query is plain data, not search syntax.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", minLength: 1, maxLength: 4096 },
-        scope_ids: { ...jsonScopeIds, description: "Optional trusted-scope subset; omitted uses the binding's allowed project scopes." },
+        scope_ids: { ...jsonScopeIds, description: "Optional subset of the trusted scopes. If omitted, the binding's project scopes are used." },
         mode: { enum: ["current", "historical", "timeline"], default: "current" },
         valid_at: jsonDateTime,
         known_at_seq: jsonNonNegativeInt64,
-        max_bytes: { type: "integer", minimum: 1, maximum: 32000, default: 8000, description: "UTF-8 byte budget; max 32000." },
-        token_budget: { type: "integer", minimum: 64, maximum: 32000, description: "Legacy alias for max_bytes, also measured in UTF-8 bytes." },
+        max_bytes: { type: "integer", minimum: 1, maximum: 32000, default: 8000, description: "UTF-8 byte limit; maximum 32000." },
+        token_budget: { type: "integer", minimum: 64, maximum: 32000, description: "Legacy name for max_bytes; uses UTF-8 bytes." },
       },
       required: ["query"],
       additionalProperties: false,
@@ -269,7 +269,7 @@ const memoryToolDescriptors: readonly MemoryToolDescriptor[] = Object.freeze([
     name: "memory_get",
     annotations: { readOnlyHint: true, openWorldHint: false },
     description:
-      'Load an original source with {"scope_id":"<scope UUID>","reference":{"kind":"source","capture_id":"<capture UUID>"}}. Keep scope_id top-level and capture_id nested inside reference; do not pass a top-level capture_id, item_id, or source_id. Copy the IDs from memory_recall or omitted_sources. Returns the full source with verified canonical spans. Legacy revision references remain supported; output authority always comes from setup.',
+      'Load an original source. Pass scope_id at the top level and put capture_id inside reference, for example {"scope_id":"<scope UUID>","reference":{"kind":"source","capture_id":"<capture UUID>"}}. Do not pass top-level capture_id, item_id, or source_id. Use IDs from memory_recall or omitted_sources. The source and its canonical spans are checked before return. Legacy revision references remain supported. Setup remains the authority for access.',
     inputSchema: {
       type: "object",
       properties: {
@@ -300,7 +300,7 @@ const memoryToolDescriptors: readonly MemoryToolDescriptor[] = Object.freeze([
     name: "memory_forget",
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     description:
-      "Start or resume the authorized full purge for selected sources. The trusted setup binding supplies scope authority; the result exposes pending runtime cleanup or host refresh instead of claiming deletion early.",
+      "Start or resume a full purge for the selected sources. Access comes from the trusted setup binding. The result reports pending runtime cleanup or host refresh; it does not claim deletion before those steps finish.",
     inputSchema: {
       type: "object",
       properties: {
@@ -316,7 +316,7 @@ const memoryToolDescriptors: readonly MemoryToolDescriptor[] = Object.freeze([
   },
   {
     name: "memory_write",
-    description: "Save a source-linked handoff, decision, preference or procedure at task completion or before compaction. Use a stable kind/key and source_ids from recall. For changes pass the current revision as replaces; conflicts require rereading. Reports are agent statements, not certified facts. No extra model call is made.",
+    description: "Save a source-linked handoff, decision, preference, or procedure when a task ends or before compaction. Use a stable kind and key, and use source IDs returned by recall. When replacing a report, pass its current revision in replaces; reread after a conflict. Reports are agent statements, not verified facts. This call does not use another model.",
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: { type: "object", properties: {
       scope_id: jsonUuid, key: { type: "string", minLength: 1, maxLength: 96 },

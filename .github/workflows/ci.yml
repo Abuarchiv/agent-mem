@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.20.x
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Download pinned models
+        run: npm run models:download:all
+      - name: Download pinned Node runtime
+        run: npm run runtime:download
+      - name: Build
+        run: npm run build
+      - name: Run tests
+        run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Build and smoke-test core package
+        shell: bash
+        run: |
+          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-core-package"
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-core-package" --no-rerank
+      - name: Build and smoke-test full package
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-full-package" --with-reranker
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-full-package"
+
+  verify-windows-build:
+    timeout-minutes: 20
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.20.x
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Download pinned models
+        run: npm run models:download:all
+      - name: Download pinned Node runtime
+        run: npm run runtime:download
+      - name: Build
+        run: npm run build
+      - name: Run Windows platform tests
+        run: node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js
