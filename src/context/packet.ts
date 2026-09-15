@@ -945,7 +945,11 @@ export function recognizePersistedEvidencePacket(
 }
 
 function contextDigest(wrapper: EvidenceContextWrapper): string {
-  return digestPacket(serializeModelContextWrapper(wrapper));
+  // The session marker is transport metadata, not evidence. Excluding it from
+  // the durable digest keeps an authenticated status-bearing wrapper
+  // recognizable and prevents the marker from becoming a captured prompt.
+  const { status: _status, ...canonical } = wrapper;
+  return digestPacket(serializeModelContextWrapper(canonical));
 }
 
 function packetItem(group: RecallSourceGroup): EvidencePacketItem {
