@@ -411,10 +411,13 @@ export class SummaryRepository {
           throw new StoreError("read_failed", error);
         }
         if (sameSourceRecordContent(headRecord, parsed)) {
-          if (parsed.replaces !== undefined && parsed.replaces !== head.revision_id) throw new StoreError("revision_conflict");
           const sourceIds = [...new Set([...headRecord.source_ids, ...parsed.source_ids])];
           if (sourceIds.length > sourceRecordSourceLimit) throw new StoreError("revision_invalid");
+          // A retry may still carry the superseded revision in `replaces`.
+          // Once all requested citations are already on the active head, the
+          // write is idempotent and must not create another revision.
           if (sourceIds.length === headRecord.source_ids.length) return head;
+          if (parsed.replaces !== undefined && parsed.replaces !== head.revision_id) throw new StoreError("revision_conflict");
           record = { ...parsed, source_ids: sourceIds, replaces: head.revision_id };
           evidence = this.readSourceRecordEvidence(record.scope_id, record.source_ids);
           targets = this.sourceRecordEgress(record.scope_id, evidence.classes, readerTarget);

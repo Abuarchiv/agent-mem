@@ -232,7 +232,8 @@ test("merges new citations for same-content records while preserving immutable C
     const secondSource = source(value, scopeA, "second answer");
     const input = recordInput(scopeA, [firstSource.captureId]);
     const first = value.database.summaries.writeSourceRecord(value.binding, input);
-    const merged = value.database.summaries.writeSourceRecord(value.binding, recordInput(scopeA, [firstSource.captureId, secondSource.captureId]));
+    const mergeInput = recordInput(scopeA, [firstSource.captureId, secondSource.captureId], { replaces: first.revision_id });
+    const merged = value.database.summaries.writeSourceRecord(value.binding, mergeInput);
     assert.notEqual(merged.revision_id, first.revision_id);
     assert.deepEqual((JSON.parse(merged.content) as MemoryRecordInput).source_ids, [firstSource.captureId, secondSource.captureId]);
     assert.equal(merged.dependencies.filter((dependency) => dependency.parent_type === "source_span").length, 2);
@@ -241,7 +242,7 @@ test("merges new citations for same-content records while preserving immutable C
     assert.equal(value.database.summaries.read(output(value, scopeA), first.revision_id)?.status_reason, "record_superseded");
 
     const beforeRetry = scalar(value.path, "SELECT commit_seq AS count FROM vault_counter WHERE id = 1");
-    const retry = value.database.summaries.writeSourceRecord(value.binding, recordInput(scopeA, [firstSource.captureId, secondSource.captureId]));
+    const retry = value.database.summaries.writeSourceRecord(value.binding, mergeInput);
     assert.equal(retry.revision_id, merged.revision_id);
     assert.equal(scalar(value.path, "SELECT commit_seq AS count FROM vault_counter WHERE id = 1"), beforeRetry);
     assert.equal(errorCode(() => value.database.summaries.writeSourceRecord(value.binding, { ...input, summary: "Stale report" })), "revision_conflict");
