@@ -69,13 +69,16 @@ jobs:
         shell: pwsh
         run: |
           $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
-          $acl = Get-Acl -LiteralPath $modelRoot
           $sidType = [System.Security.Principal.SecurityIdentifier]
-          $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-          $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
-            @{ sid = $_.IdentityReference.Value; allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights; inheritOnly = (($_.PropagationFlags -band 2) -ne 0) }
-          })
-          @{ owner = $acl.GetOwner($sidType).Value; user = $user.Value; rules = $rules } | ConvertTo-Json -Depth 4 -Compress
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          $report = foreach ($path in $paths) {
+            $acl = Get-Acl -LiteralPath $path
+            $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
+              @{ sid = $_.IdentityReference.Value; allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights; inheritOnly = (($_.PropagationFlags -band 2) -ne 0) }
+            })
+            @{ path = $path; owner = $acl.GetOwner($sidType).Value; rules = $rules }
+          }
+          $report | ConvertTo-Json -Depth 4 -Compress
 
       - name: Build package (Windows)
         if: runner.os == 'Windows'
