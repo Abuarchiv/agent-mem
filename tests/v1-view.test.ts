@@ -11,7 +11,7 @@ import { createTrustedBinding } from "../src/host/contract.js";
 import { normalizeNativeEvent } from "../src/host/events.js";
 import { AgentMemoryDatabase } from "../src/store/database.js";
 import { buildViewSnapshot, GLOBAL_SCOPE_ID } from "../src/view/model.js";
-import { buildEvidenceGraph } from "../src/view/graph.js";
+import { buildEvidenceGraph, mergeSemanticGraph } from "../src/view/graph.js";
 
 const scopeId = "11111111-1111-4111-8111-111111111111";
 const bindingId = "22222222-2222-4222-8222-222222222222";
@@ -221,4 +221,34 @@ test("evidence graph connects real scopes, sessions, and source events", () => {
   assert.ok(graph.edges.some((edge) => edge.from === "scope:" + scopeId && edge.to === "session:" + scopeId + ":session-one"));
   assert.ok(graph.edges.some((edge) => edge.from === "session:" + scopeId + ":session-one" && edge.to === "source:" + scopeId + ":source-one"));
   assert.ok(graph.edges.some((edge) => edge.from === "scope:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" && edge.to === "source:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:source-two"));
+});
+
+test("knowledge graph keeps only active source-backed semantic relations", () => {
+  const graph = mergeSemanticGraph({ nodes: [], edges: [] }, {
+    nodes: [
+      { entity_id: "entity-a", label: "Agent Mem", resolution_state: "resolved", created_commit_seq: "1" },
+      { entity_id: "entity-b", label: "Codex", resolution_state: "candidate", created_commit_seq: "2" },
+    ],
+    edges: [{
+      edge_id: "edge-active",
+      source_entity: "entity-a",
+      target_entity: "entity-b",
+      predicate: "uses",
+      evidence_revision: "revision-1",
+      status: "active",
+      created_commit_seq: "2",
+    }, {
+      edge_id: "edge-purged",
+      source_entity: "entity-a",
+      target_entity: "entity-b",
+      predicate: "old_relation",
+      evidence_revision: "revision-0",
+      status: "purged",
+      created_commit_seq: "1",
+    }],
+  });
+
+  assert.deepEqual(graph.nodes.map((node) => node.entity_id), ["entity:entity-a", "entity:entity-b"]);
+  assert.equal(graph.edges.length, 1);
+  assert.equal(graph.edges[0]?.predicate, "uses");
 });

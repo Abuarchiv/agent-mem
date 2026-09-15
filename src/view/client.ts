@@ -1,4 +1,4 @@
-import { buildEvidenceGraph, createGraphController, type GraphController, type GraphSession, type GraphSource } from "./graph.js";
+import { buildEvidenceGraph, createGraphController, mergeSemanticGraph, type GraphController, type GraphSession, type GraphSource } from "./graph.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -47,14 +47,14 @@ interface Snapshot {
   readonly graph: GraphSnapshot;
 }
 interface SourceDetail extends JsonObject { readonly spans?: readonly JsonObject[]; }
-interface ClientState { view: string; snapshot: Snapshot | null; sources: readonly SourceRow[]; detail: SourceDetail | null; graphZoom: number; }
+interface ClientState { view: string; snapshot: Snapshot | null; sources: readonly SourceRow[]; detail: SourceDetail | null; }
 
 const GLOBAL_SCOPE_ID = "__all__";
 
 const app = document.querySelector<HTMLElement>("#app");
 const scopeSelect = document.querySelector<HTMLSelectElement>("#scope-select");
 const searchInput = document.querySelector<HTMLInputElement>("#source-search");
-const state: ClientState = { view: "dashboard", snapshot: null, sources: [], detail: null, graphZoom: 1 };
+const state: ClientState = { view: "dashboard", snapshot: null, sources: [], detail: null };
 let activeGraphController: GraphController | null = null;
 
 const viewerStyles = `
@@ -65,7 +65,7 @@ const viewerStyles = `
 @media(max-width:1200px){.topbar{flex-wrap:wrap;gap:10px;padding:12px 16px 0}.tabs{order:3;width:100%;min-height:38px}.top-actions{margin-left:auto}.metrics{grid-template-columns:repeat(4,1fr)}}@media(max-width:820px){.top-actions{width:100%;margin:0}.scope-picker{flex:1}.scope-picker select,.search-box{width:100%;max-width:none}.live-status{display:none}.shell{padding:14px 12px 28px}.metrics{grid-template-columns:repeat(2,1fr)}.split,.detail-grid{grid-template-columns:1fr}}
 `;
 const graphStyles = `.graph-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font:10px var(--mono)}.graph-toolbar input{min-width:220px;height:30px;border:1px solid var(--line);background:var(--panel);padding:0 8px}.graph-tool{height:30px;min-width:30px;border:1px solid var(--line);background:var(--panel);color:var(--text)}.graph-tool:hover{border-color:var(--accent)}.graph-canvas{display:block;width:100%;min-height:520px;background:#090b0c}.graph-empty{display:grid;place-items:center;min-height:520px;padding:40px;color:var(--muted);font:12px var(--mono);text-align:center}.graph-edge{stroke:#5b6b6d;stroke-width:1.4;opacity:.75}.graph-node{stroke:#111516;stroke-width:2}.graph-node.resolved{fill:var(--good)}.graph-node.candidate{fill:var(--warn)}.graph-label{fill:var(--text);font:11px var(--mono);pointer-events:none}.graph-predicate{fill:var(--muted);font:9px var(--mono);pointer-events:none}`;
-const graphCanvasStyles = `.graph-stage{display:grid;grid-template-columns:minmax(0,1fr) 260px;min-height:560px}.graph-canvas-wrap{min-width:0;min-height:560px;background:#090b0c}.graph-canvas-wrap canvas.graph-canvas{width:100%;height:560px;min-height:0;touch-action:none;outline:0}.graph-inspector{border-left:1px solid var(--line);padding:18px;background:var(--panel2);font:11px var(--mono);overflow:auto}.graph-inspector-kicker{color:var(--accent);font-size:9px;letter-spacing:.1em;text-transform:uppercase}.graph-inspector h3{margin:10px 0 6px;font:600 14px/1.3 var(--mono);word-break:break-word}.graph-inspector p{color:var(--muted);line-height:1.6}.graph-inspector dl{margin:18px 0 0}.graph-inspector dl div{padding:8px 0;border-top:1px solid var(--soft)}.graph-inspector dt{color:var(--muted);font-size:9px;text-transform:uppercase}.graph-inspector dd{margin:4px 0 0;word-break:break-word}@media(max-width:820px){.graph-stage{grid-template-columns:1fr}.graph-inspector{border-left:0;border-top:1px solid var(--line);min-height:120px}.graph-canvas-wrap canvas.graph-canvas{height:440px}}`;
+const graphCanvasStyles = `.graph-stage{display:grid;grid-template-columns:minmax(0,1fr) 286px;min-height:620px}.graph-canvas-wrap{min-width:0;min-height:620px;background:#090b0c;position:relative}.graph-canvas-wrap canvas.graph-canvas{width:100%;height:620px;min-height:0;touch-action:none;outline:0}.graph-inspector{border-left:1px solid var(--line);padding:18px;background:var(--panel2);font:11px var(--mono);overflow:auto}.graph-inspector-kicker{color:var(--accent);font-size:9px;letter-spacing:.1em;text-transform:uppercase}.graph-inspector h3{margin:10px 0 6px;font:600 14px/1.3 var(--mono);word-break:break-word}.graph-inspector p{color:var(--muted);line-height:1.6}.graph-inspector dl{margin:18px 0 0}.graph-inspector dl div{padding:8px 0;border-top:1px solid var(--soft)}.graph-inspector dt{color:var(--muted);font-size:9px;text-transform:uppercase}.graph-inspector dd{margin:4px 0 0;word-break:break-word}.graph-legend{margin-top:24px;padding-top:14px;border-top:1px solid var(--line)}.graph-legend-row{display:flex;align-items:center;gap:8px;padding:6px 0;color:var(--muted);font-size:10px}.graph-legend-row i{display:block;width:9px;height:9px;border-radius:50%;border:1px solid #111516}.graph-stat{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--soft);color:var(--muted)}.graph-stat strong{color:var(--text);font-size:14px}@media(max-width:820px){.graph-stage{grid-template-columns:1fr}.graph-inspector{border-left:0;border-top:1px solid var(--line);min-height:180px}.graph-canvas-wrap canvas.graph-canvas{height:440px}}`;
 
 function installStyles(): void {
   if (document.querySelector("#agent-mem-styles")) return;
@@ -154,55 +154,28 @@ function evidenceGraph(snapshot: Snapshot) {
     const sessionId = graphString(record, "session_id");
     return captureId && scopeId && sessionId ? [{ capture_id: captureId, scope_id: scopeId, session_id: sessionId, role: graphString(record, "role"), evidence_class: graphString(record, "evidence_class"), observed_stage: graphString(record, "observed_stage"), commit_seq: graphString(record, "commit_seq") }] : [];
   });
-  return buildEvidenceGraph({ projects: snapshot.projects, sessions, sources });
+  const evidence = buildEvidenceGraph({ projects: snapshot.projects, sessions, sources });
+  return mergeSemanticGraph(evidence, {
+    nodes: snapshot.graph.nodes.map((node) => ({
+      entity_id: node.entity_id,
+      label: node.label,
+      resolution_state: node.resolution_state,
+      created_commit_seq: node.created_commit_seq,
+    })),
+    edges: snapshot.graph.edges.map((edge) => ({
+      edge_id: edge.edge_id,
+      source_entity: edge.source_entity,
+      target_entity: edge.target_entity,
+      predicate: edge.predicate,
+      evidence_revision: edge.evidence_revision,
+      status: edge.status,
+      created_commit_seq: edge.created_commit_seq,
+    })),
+  });
 }
 
 function graphView(snapshot: Snapshot): string {
   return `<div class="metrics">${metric("Graph nodes", snapshot.graph.nodes.length)}${metric("Graph edges", snapshot.graph.edges.length)}${metric("Source rows", snapshot.graph_sources.length)}${metric("Data epoch", snapshot.scope.data_epoch)}${metric("Privacy epoch", snapshot.scope.privacy_epoch)}${metric("Watermark", snapshot.scope.watermark)}${metric("Graph mode", "evidenced", "active edges only")}${metric("Depth", "2 hops", "bounded")}</div><div class="section"><div class="section-head"><h2>Semantic graph</h2><small>evidenced entities and relations</small></div><div class="graph-toolbar"><input id="graph-search" type="search" placeholder="Search nodes or predicates…" aria-label="Search graph"><button class="graph-tool" data-graph-zoom="out" aria-label="Zoom out">−</button><button class="graph-tool" data-graph-zoom="reset" aria-label="Recenter graph">⌖</button><button class="graph-tool" data-graph-zoom="in" aria-label="Zoom in">+</button><span class="muted">${snapshot.graph.nodes.length} nodes · ${snapshot.graph.edges.length} edges</span></div><div id="graph-canvas" class="graph-canvas"></div></div>`;
-}
-
-function renderGraphCanvas(graph: GraphSnapshot): void {
-  const container = document.querySelector<HTMLElement>("#graph-canvas");
-  if (!container) return;
-  const query = document.querySelector<HTMLInputElement>("#graph-search")?.value.trim().toLocaleLowerCase() ?? "";
-  const nodeMatch = (node: GraphNode): boolean => query.length === 0 || node.label.toLocaleLowerCase().includes(query) || node.entity_id.includes(query);
-  const nodes = graph.nodes.filter(nodeMatch);
-  const nodeIds = new Set(nodes.map((node) => node.entity_id));
-  const edges = graph.edges.filter((edge) => {
-    if (!nodeIds.has(edge.source_entity) || !nodeIds.has(edge.target_entity)) return false;
-    if (query.length === 0 || edge.predicate.toLocaleLowerCase().includes(query)) return true;
-    const source = graph.nodes.find((node) => node.entity_id === edge.source_entity);
-    const target = graph.nodes.find((node) => node.entity_id === edge.target_entity);
-    return (source !== undefined && nodeMatch(source)) || (target !== undefined && nodeMatch(target));
-  });
-  if (nodes.length === 0) {
-    container.innerHTML = `<div class="graph-empty">No evidenced semantic graph data is available yet.<br>Graph nodes appear after source-backed memory relations are recorded.</div>`;
-    return;
-  }
-  const width = 960;
-  const height = 560;
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const radius = Math.min(220, Math.max(80, nodes.length * 16));
-  const positions = new Map<string, { readonly x: number; readonly y: number }>();
-  nodes.forEach((node, index) => {
-    const angle = nodes.length === 1 ? 0 : (Math.PI * 2 * index) / nodes.length - Math.PI / 2;
-    positions.set(node.entity_id, { x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius });
-  });
-  const lines = edges.map((edge) => {
-    const from = positions.get(edge.source_entity);
-    const to = positions.get(edge.target_entity);
-    if (from === undefined || to === undefined) return "";
-    const midpointX = (from.x + to.x) / 2;
-    const midpointY = (from.y + to.y) / 2;
-    return `<line class="graph-edge" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" marker-end="url(#arrow)"></line><text class="graph-predicate" x="${midpointX}" y="${midpointY}">${escapeHtml(short(edge.predicate, 22))}</text>`;
-  }).join("");
-  const circles = nodes.map((node) => {
-    const point = positions.get(node.entity_id);
-    if (point === undefined) return "";
-    return `<g><circle class="graph-node ${node.resolution_state}" cx="${point.x}" cy="${point.y}" r="18"></circle><text class="graph-label" x="${point.x + 25}" y="${point.y + 4}">${escapeHtml(short(node.label, 28))}</text></g>`;
-  }).join("");
-  container.innerHTML = `<svg class="graph-canvas" viewBox="0 0 ${width} ${height}" role="img" aria-label="Semantic graph"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#5b6b6d"></path></marker></defs><g transform="translate(${(1 - state.graphZoom) * centerX} ${(1 - state.graphZoom) * centerY}) scale(${state.graphZoom})">${lines}${circles}</g></svg>`;
 }
 
 function auditView(snapshot: Snapshot): string { return `<div class="split"><div class="section"><div class="section-head"><h2>Privacy grants</h2><small>${snapshot.privacy.capture_paused ? "capture paused" : "capture active"}</small></div><div class="table-wrap"><table><thead><tr><th>Target</th><th>Source class</th><th>Created</th></tr></thead><tbody>${snapshot.privacy.grants.map((grant) => `<tr><td>${escapeHtml(text(grant, "output_target"))}</td><td>${escapeHtml(text(grant, "source_class"))}</td><td>${escapeHtml(text(grant, "created_at"))}</td></tr>`).join("")}</tbody></table></div></div><div class="section"><div class="section-head"><h2>Query traces</h2><small>${number(snapshot.query_traces.length)} loaded</small></div><div class="table-wrap"><table><thead><tr><th>Created</th><th>Mode</th><th>Usage</th><th>Delivery</th></tr></thead><tbody>${snapshot.query_traces.map((trace) => `<tr><td>${escapeHtml(text(trace, "created_at"))}</td><td>${escapeHtml(text(trace, "mode"))}</td><td>${escapeHtml(text(trace, "tokens_used"))} / ${escapeHtml(text(trace, "token_budget"))} ${escapeHtml(text(trace, "token_unit"))}</td><td>${escapeHtml(text(trace, "delivery_state"))}</td></tr>`).join("")}</tbody></table></div></div></div>`; }
@@ -213,7 +186,6 @@ function render(): void {
   activeGraphController?.destroy();
   activeGraphController = null;
   if (state.view === "graph") {
-    renderGraphCanvas(state.snapshot.graph);
     const container = document.querySelector<HTMLElement>("#graph-canvas");
     if (container !== null) {
       const model = evidenceGraph(state.snapshot);
