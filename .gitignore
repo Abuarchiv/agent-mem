@@ -16,9 +16,9 @@ coverage/
 *.tmp
 *.bak
 .DS_Store
-.runtime/
-.models/
+.runtime
+.models
 artifacts/
 # Local planning and release notes are intentionally not published.
-/docs/
-/release/
+/docs
+/release
