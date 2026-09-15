@@ -28,6 +28,7 @@ const controlSchema = z.discriminatedUnion("operation", [
 const mcpSchema = z.object({ kind: z.literal("mcp"), message: z.unknown() }).strict();
 const sourceClasses = ["prompt", "assistant_output", "tool_input", "tool_output", "lifecycle", "diagnostic"] as const;
 export const V1_OUTPUT_TARGETS = ["reader:codex_cli", "reader:opencode_cli", "reader:copilot_cli"] as const;
+export const V1_READER_SOURCE_CLASSES = ["prompt", "assistant_output"] as const;
 
 export interface V1ServiceOptions {
   readonly rerank?: boolean;
@@ -259,7 +260,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
         for (const project of config.projects) {
           database.registerScope({ scope_id: project.scope_id, kind: "project", owner_ref: config.installation_id, created_at: project.created_at });
           if (!database.getScopeCapturePolicy(project.scope_id).enrolled) {
-            setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...sourceClasses] })), timestamp);
+            setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
             setScopeCapturePolicy(database, policy, project.scope_id, sourceClasses.map(source_class => ({ source_class, retention: { mode: "until_deleted" } })), timestamp);
           }
         }
