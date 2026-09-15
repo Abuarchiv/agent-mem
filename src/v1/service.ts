@@ -9,7 +9,7 @@ import { AgentMemoryBroker, AgentMemoryBrokerClient } from "../host/broker.js";
 import { bindingOwnerId, validateBoundRecallRequest, type EvidencePacket, type TrustedBinding } from "../host/contract.js";
 import { createMemoryMcpServer, type MemoryMcpServer } from "../host/mcp.js";
 import { E5_MODEL_MANIFEST } from "../models/manifest.js";
-import { loadReranker, parseRerankManifest, RERANK_MODEL_ID, type LocalReranker } from "../models/rerank.js";
+import { loadReranker, parseRerankManifest, type LocalReranker } from "../models/rerank.js";
 import { retrievalQuery } from "../retrieval/source-intelligence.js";
 import type { RecallSnapshot } from "../store/database.js";
 import { SearchState } from "./search-state.js";
@@ -48,7 +48,7 @@ function pinnedRerankerFactory(update: (status: RerankerStatus) => void, dataDir
     const root = fileURLToPath(new URL("../../../", import.meta.url));
     const manifestPath = fileURLToPath(new URL("../models/rerank-manifest.json", import.meta.url));
     const manifest = parseRerankManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
-    const bundledBase = join(root, ".models", "rerank", RERANK_MODEL_ID);
+    const bundledBase = join(root, ".models", "rerank");
     const candidates = dataDirectory === undefined
       ? [bundledBase]
       : [rerankerDataRoot(dataDirectory), bundledBase];
