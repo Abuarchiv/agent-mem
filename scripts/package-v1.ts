@@ -44,7 +44,7 @@ function nodeRuntimeRoot(): string {
 function copyNodeRuntime(output: string): string {
   const sourceRoot = nodeRuntimeRoot();
   const runtimeNode = process.platform === "win32" ? "node.exe" : "node";
-  const sourceNode = join(sourceRoot, "bin", runtimeNode);
+  const sourceNode = process.platform === "win32" ? join(sourceRoot, runtimeNode) : join(sourceRoot, "bin", runtimeNode);
   if (!existsSync(sourceNode)) throw new Error(`node_runtime_missing:${sourceRoot}`);
   const targetRoot = join(output, "runtime");
   const targetNode = join(targetRoot, "bin", runtimeNode);

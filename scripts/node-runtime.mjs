@@ -37,6 +37,10 @@ function runtimePath(currentTarget = target()) {
   return join(root, ".runtime", directoryName(currentTarget));
 }
 
+function executablePath(currentTarget, base) {
+  return join(base, currentTarget === "win-x64" ? "node.exe" : "bin", ...(currentTarget === "win-x64" ? [] : ["node"]));
+}
+
 function digest(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
@@ -79,7 +83,7 @@ function extractArchive(file, currentTarget) {
       }
     }
     const extracted = join(staging, directoryName(currentTarget));
-    const node = join(extracted, "bin", currentTarget === "win-x64" ? "node.exe" : "node");
+    const node = executablePath(currentTarget, extracted);
     if (!existsSync(node)) throw new Error("node_runtime_archive_invalid");
     rmSync(destination, { recursive: true, force: true });
     renameSync(extracted, destination);
@@ -89,7 +93,7 @@ function extractArchive(file, currentTarget) {
 }
 
 function verify(currentTarget) {
-  const node = join(runtimePath(currentTarget), "bin", currentTarget === "win-x64" ? "node.exe" : "node");
+  const node = executablePath(currentTarget, runtimePath(currentTarget));
   if (!existsSync(node)) throw new Error(`node_runtime_missing:${runtimePath(currentTarget)}`);
   const version = execFileSync(node, ["--version"], { encoding: "utf8", timeout: 10_000, env: { ...process.env, NODE_OPTIONS: undefined, NODE_PATH: undefined } }).trim();
   if (version !== `v${VERSION}`) throw new Error(`node_runtime_version_invalid:${version}`);
@@ -101,7 +105,7 @@ const command = process.argv[2] ?? "verify";
 const currentTarget = target();
 if (command === "download") {
   const state = await ensureArchive(currentTarget);
-  if (!existsSync(join(runtimePath(currentTarget), "bin", currentTarget === "win-x64" ? "node.exe" : "node"))) extractArchive(archivePath(currentTarget), currentTarget);
+  if (!existsSync(executablePath(currentTarget, runtimePath(currentTarget)))) extractArchive(archivePath(currentTarget), currentTarget);
   console.log(JSON.stringify({ status: "ready", state, ...verify(currentTarget) }));
 } else if (command === "verify") {
   console.log(JSON.stringify({ status: "verified", ...verify(currentTarget) }));
