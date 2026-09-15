@@ -15,6 +15,6 @@
     { "path": "config.json", "bytes": 891, "sha256": "cc2cfe51aa3fd759d21d21acf5dfd6994aa67a3c9210636d22e143699d336c77" },
     { "path": "tokenizer_config.json", "bytes": 435, "sha256": "e7fbfbfa6347b4e414c1cee50d142e2c2f9a895dad68b068ae83a8b564c3837e" },
     { "path": "tokenizer.json", "bytes": 17082660, "sha256": "62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626" },
-    { "path": "onnx/model_quantized.onnx", "bytes": 118620016, "sha256": "6c2513767fb63d008a4377bef7a7a3555433d9436342bb53e35a3a72ffc52d4b" }
+    { "path": "onnx/model_quint8_avx2.onnx", "bytes": 118620016, "sha256": "6c2513767fb63d008a4377bef7a7a3555433d9436342bb53e35a3a72ffc52d4b" }
   ]
 }
