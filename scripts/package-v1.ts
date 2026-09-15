@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { builtinModules, createRequire } from "node:module";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path, { dirname, join, resolve } from "node:path";
@@ -50,6 +51,102 @@ try {
 exit $exitCode
 `,
   };
+}
+
+function darwinDependencies(image: string): string[] {
+  const output = execFileSync("otool", ["-L", image], { encoding: "utf8" });
+  return output
+    .split("\n")
+    .slice(1)
+    .map((line) => line.trim().split(" (")[0])
+    .filter((value): value is string => value !== undefined && value.length > 0);
+}
+
+function darwinRpaths(image: string): string[] {
+  const output = execFileSync("otool", ["-l", image], { encoding: "utf8" });
+  return [...output.matchAll(/path (\S+) \(offset \d+\)/g)].map((match) => match[1]!).filter(Boolean);
+}
+
+function darwinDependencyPath(reference: string, owner: string, executable: string): string | undefined {
+  if (reference.startsWith("/")) {
+    if (reference.startsWith("/usr/lib/") || reference.startsWith("/System/Library/")) return undefined;
+    if (!existsSync(reference)) throw new Error(`darwin_runtime_dependency_missing:${reference}`);
+    return realpathSync(reference);
+  }
+  if (reference.startsWith("@rpath/")) {
+    const name = reference.slice("@rpath/".length);
+    const ownerDirectory = dirname(owner);
+    const candidates = [
+      join(ownerDirectory, name),
+      join(ownerDirectory, "..", "lib", name),
+      join(dirname(executable), "..", "lib", name),
+    ];
+    for (const candidate of candidates) if (existsSync(candidate)) return realpathSync(candidate);
+    throw new Error(`darwin_runtime_dependency_missing:${reference}`);
+  }
+  if (reference.startsWith("@loader_path/")) {
+    const candidate = join(dirname(owner), reference.slice("@loader_path/".length));
+    if (!existsSync(candidate)) throw new Error(`darwin_runtime_dependency_missing:${reference}`);
+    return realpathSync(candidate);
+  }
+  if (reference.startsWith("@executable_path/")) {
+    const candidate = join(dirname(executable), reference.slice("@executable_path/".length));
+    if (!existsSync(candidate)) throw new Error(`darwin_runtime_dependency_missing:${reference}`);
+    return realpathSync(candidate);
+  }
+  return undefined;
+}
+
+/** Make a Homebrew/macOS Node binary relocatable inside the release package. */
+function bundleDarwinRuntime(executable: string, runtimeDirectory: string): void {
+  if (process.platform !== "darwin") return;
+  const runtimeBinary = join(runtimeDirectory, "bin", "node");
+  const libraryDirectory = join(runtimeDirectory, "lib");
+  const queue: Array<{ readonly source: string; readonly target: string }> = [{ source: executable, target: runtimeBinary }];
+  const copied = new Map<string, string>();
+  const references = new Map<string, string>();
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const image = queue[index]!;
+    for (const reference of darwinDependencies(image.source)) {
+      const source = darwinDependencyPath(reference, image.source, executable);
+      if (source === undefined) continue;
+      references.set(reference, source);
+      if (copied.has(source)) continue;
+      const name = path.basename(source);
+      const target = join(libraryDirectory, name);
+      const collision = [...copied.entries()].find(([otherSource, otherTarget]) => path.basename(otherTarget) === name && otherSource !== source);
+      if (collision !== undefined) throw new Error(`darwin_runtime_library_collision:${name}`);
+      mkdirSync(libraryDirectory, { recursive: true, mode: 0o755 });
+      copyFileSync(source, target);
+      copied.set(source, target);
+      queue.push({ source, target });
+    }
+  }
+
+  if (copied.size === 0) return;
+  const installNameTool = (args: readonly string[]): void => {
+    execFileSync("install_name_tool", [...args], { stdio: "ignore" });
+  };
+  const sign = (image: string): void => {
+    execFileSync("codesign", ["--force", "--sign", "-", "--timestamp=none", image], { stdio: "ignore" });
+  };
+  for (const image of queue) {
+    for (const reference of darwinDependencies(image.source)) {
+      const source = references.get(reference);
+      if (source === undefined) continue;
+      const target = copied.get(source);
+      if (target === undefined) throw new Error(`darwin_runtime_dependency_unbundled:${source}`);
+      const replacement = `@rpath/${path.basename(target)}`;
+      if (reference !== replacement) installNameTool(["-change", reference, replacement, image.target]);
+    }
+    if (image.target !== runtimeBinary) {
+      installNameTool(["-id", `@rpath/${path.basename(image.target)}`, image.target]);
+    }
+    const requiredRpath = image.target === runtimeBinary ? "@loader_path/../lib" : "@loader_path";
+    if (!darwinRpaths(image.target).includes(requiredRpath)) installNameTool(["-add_rpath", requiredRpath, image.target]);
+    sign(image.target);
+  }
 }
 
 function runtimeGraph(): { files: string[]; packages: string[] } {
@@ -180,6 +277,7 @@ export async function packageV1(destination: string) {
   mkdirSync(join(output, "runtime/bin"), { recursive: true });
   copyFileSync(process.execPath, join(output, "runtime/bin", runtimeNode));
   if (process.platform !== "win32") chmodSync(join(output, "runtime/bin", runtimeNode), 0o755);
+  bundleDarwinRuntime(process.execPath, join(output, "runtime"));
   writeFileSync(join(output, "package.json"), JSON.stringify({ name: "agent-memory-v1", version: "1.0.0", type: "module", private: true }, null, 2) + "\n");
   const launcher = process.platform === "win32"
     ? windowsLaunchers().cmd
