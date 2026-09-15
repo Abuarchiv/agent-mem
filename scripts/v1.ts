@@ -5,8 +5,9 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { configureHost } from "../src/v1/connect.js";
-import { defaultDataDirectory, loadConfig, runtimeDirectory, V1_HOSTS } from "../src/v1/config.js";
-import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, parseInstallArgs, stopOwnedService, type InstallOptions } from "../src/v1/install.js";
+import { defaultDataDirectory, installJournalFile, loadConfig, runtimeDirectory, saveConfig, V1_HOSTS } from "../src/v1/config.js";
+import { createInstallJournal, readInstallJournal, updateInstallJournal, writeInstallJournal } from "../src/v1/install-journal.js";
+import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, InstallError, parseInstallArgs, stopOwnedService, type InstallOptions } from "../src/v1/install.js";
 import { assertPrivatePath } from "../src/v1/private-files.js";
 
 const json = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => typeof item === "bigint" ? item.toString() : item);
@@ -30,6 +31,10 @@ async function serviceIsReady(directory: string): Promise<boolean> {
 
 async function serviceIsStarting(directory: string): Promise<boolean> {
   return (await serviceState(directory)) === "starting";
+}
+
+function operationErrorCode(error: unknown, fallback = "install_failed"): string {
+  return error instanceof Error && /^[a-z][a-z0-9_]{1,127}$/.test(error.message) ? error.message : fallback;
 }
 
 function launchOwnedService(directory: string, options: InstallOptions): Promise<number> {
@@ -56,32 +61,114 @@ function launchOwnedService(directory: string, options: InstallOptions): Promise
 }
 
 async function runInstall(directory: string, options: InstallOptions): Promise<void> {
-  const project = realpathSync(options.project);
-  if (!lstatSync(project).isDirectory()) throw new Error("install_project_must_be_directory");
-  const plan = createInstallPlan(options, detectInstallHostProbe(project));
-  const config = loadConfig(directory, true);
-  const projectEntry = config.projects.find((entry) => entry.root === project);
-  const existingHosts = new Set(projectEntry === undefined
-    ? []
-    : config.connections.filter((entry) => entry.scope_id === projectEntry.scope_id).map((entry) => entry.host));
-  const hostResults: unknown[] = [];
-  for (const host of plan.hosts) {
-    if (existingHosts.has(host)) {
-      hostResults.push({ host, state: "already_configured" });
-      continue;
+  const journalPath = installJournalFile(directory);
+  let journalCreated = false;
+  try {
+    const project = realpathSync(options.project);
+    if (!lstatSync(project).isDirectory()) throw new InstallError("install_project_must_be_directory");
+    const plan = createInstallPlan(options, detectInstallHostProbe(project));
+    let journal;
+    try {
+      journal = readInstallJournal(journalPath);
+      if (journal.project !== project || journal.rerank !== plan.rerank || journal.hosts.length !== plan.hosts.length || journal.hosts.some((host, index) => host !== plan.hosts[index])) {
+        throw new InstallError("install_journal_plan_mismatch");
+      }
+      if (journal.currentPhase === "complete") journal = createInstallJournal({ project, hosts: plan.hosts, rerank: plan.rerank });
+      else if (journal.attempts >= 3) throw new InstallError("install_journal_attempts_exceeded");
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "install_journal_missing") throw error;
+      journal = createInstallJournal({ project, hosts: plan.hosts, rerank: plan.rerank });
     }
-    hostResults.push(configureHost(directory, host, project));
+    journal = writeInstallJournal(journalPath, journal);
+    journalCreated = true;
+    journal = updateInstallJournal(journalPath, current => ({
+      ...current,
+      attempts: current.attempts + 1,
+      currentPhase: "detect",
+      phases: { ...current.phases, detect: "running" },
+      lastErrorCode: null,
+    }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "detect", phases: { ...current.phases, detect: "completed" }, lastGoodPhase: "detect" }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "plan", phases: { ...current.phases, plan: "completed" }, lastGoodPhase: "plan" }));
+
+    const config = loadConfig(directory, true);
+    config.reranker_enabled = plan.rerank;
+    saveConfig(directory, config);
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "stage", phases: { ...current.phases, stage: "completed" }, lastGoodPhase: "stage" }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "verify", phases: { ...current.phases, verify: "completed" }, lastGoodPhase: "verify" }));
+
+    const projectEntry = config.projects.find((entry) => entry.root === project);
+    const existingHosts = new Set(projectEntry === undefined
+      ? []
+      : config.connections.filter((entry) => entry.scope_id === projectEntry.scope_id).map((entry) => entry.host));
+    const hostResults: unknown[] = [];
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "configure", phases: { ...current.phases, configure: "running" } }));
+    for (const host of plan.hosts) {
+      if (existingHosts.has(host)) hostResults.push({ host, state: "already_configured" });
+      else hostResults.push(configureHost(directory, host, project));
+    }
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "configure", phases: { ...current.phases, configure: "completed" }, lastGoodPhase: "configure" }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "start", phases: { ...current.phases, start: "running" } }));
+    const service = await ensureOwnedService({
+      isRunning: () => serviceIsReady(directory),
+      isStarting: () => serviceIsStarting(directory),
+      start: () => launchOwnedService(directory, options),
+    });
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "start", phases: { ...current.phases, start: "completed" }, lastGoodPhase: "start" }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "smoke", phases: { ...current.phases, smoke: "running" } }));
+    const mcp = await verifyMcpConnections(directory, project, plan.hosts);
+    const { operatorCall } = await import("../src/v1/service.js");
+    const backend = await operatorCall(directory, { kind: "control", operation: "status" });
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "smoke", phases: { ...current.phases, smoke: "completed" }, lastGoodPhase: "smoke" }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "complete", phases: { ...current.phases, complete: "completed" }, lastGoodPhase: "complete", lastErrorCode: null }));
+    console.log(json({ version: 1, state: "installed", project, hosts: plan.hosts,
+      detected_hosts: plan.detectedHosts, not_detected_hosts: plan.notDetectedHosts,
+      rerank: plan.rerank, host_results: hostResults, mcp, service, backend,
+      journal: { path: journalPath, phase: journal.currentPhase, attempts: journal.attempts } }));
+  } catch (error) {
+    if (journalCreated) {
+      try {
+        updateInstallJournal(journalPath, current => ({
+          ...current,
+          currentPhase: "failed",
+          phases: { ...current.phases, failed: "failed" },
+          lastErrorCode: operationErrorCode(error),
+        }));
+      } catch { /* Keep the original installation error. */ }
+    }
+    throw error;
   }
-  const service = await ensureOwnedService({
-    isRunning: () => serviceIsReady(directory),
-    isStarting: () => serviceIsStarting(directory),
-    start: () => launchOwnedService(directory, options),
-  });
-  const { operatorCall } = await import("../src/v1/service.js");
-  const backend = await operatorCall(directory, { kind: "control", operation: "status" });
-  console.log(json({ version: 1, state: "installed", project, hosts: plan.hosts,
-    detected_hosts: plan.detectedHosts, not_detected_hosts: plan.notDetectedHosts,
-    rerank: plan.rerank, host_results: hostResults, service, backend }));
+}
+
+async function verifyMcpConnections(directory: string, project: string, hosts: readonly string[]): Promise<readonly unknown[]> {
+  const { connectClient } = await import("../src/v1/service.js");
+  const config = loadConfig(directory);
+  const projectEntry = config.projects.find((entry) => entry.root === project);
+  if (projectEntry === undefined) throw new InstallError("install_project_scope_missing");
+  const results: unknown[] = [];
+  for (const host of hosts) {
+    const entry = config.connections.find(candidate => candidate.host === host && candidate.scope_id === projectEntry.scope_id);
+    if (entry === undefined) throw new InstallError(`install_${host.replaceAll("-", "_")}_connection_missing`);
+    const client = connectClient(directory, config, entry);
+    try {
+      await client.connect();
+      const initialize = await client.rpc({ kind: "mcp", message: { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "agent-memory-v1-installer", version: "1" } } } });
+      const initResult = mcpResult(initialize, "install_mcp_initialize_failed");
+      const tools = await client.rpc({ kind: "mcp", message: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } });
+      const toolResult = mcpResult(tools, "install_mcp_tools_failed");
+      const listed = toolResult.tools;
+      if (!Array.isArray(listed) || listed.length < 4) throw new InstallError("install_mcp_tools_failed");
+      results.push({ host, state: "verified", protocol: initResult.protocolVersion, tools: listed.length });
+    } finally { await client.close(); }
+  }
+  return results;
+}
+
+function mcpResult(value: unknown, errorCode: string): Record<string, any> {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !("result" in value)) throw new InstallError(errorCode);
+  const result = (value as { result?: unknown }).result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw new InstallError(errorCode);
+  return result as Record<string, any>;
 }
 
 function readOwnedOwner(directory: string): { readonly pid: number; readonly owned: boolean } | null {

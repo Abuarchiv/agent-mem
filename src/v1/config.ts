@@ -16,6 +16,7 @@ const connection = credential.extend({ host: z.enum(V1_HOSTS), scope_id: z.uuid(
 const schema = z.object({
   version: z.literal(1), installation_id: z.uuid(), created_at: z.iso.datetime({ offset: true }),
   vault_initialized: z.boolean(), operator: credential,
+  reranker_enabled: z.boolean().optional(),
   projects: z.array(project).max(32), connections: z.array(connection).max(64),
 }).strict();
 export type V1Config = z.infer<typeof schema>;
@@ -26,6 +27,7 @@ export const defaultDataDirectory = (): string => {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "Agent Memory V1");
 };
 export const configFile = (directory: string) => join(resolve(directory), "config.json");
+export const installJournalFile = (directory: string) => join(resolve(directory), "install.json");
 export const runtimeDirectory = (directory: string) => join(resolve(directory), "ipc");
 export const socketPath = (directory: string): string => ipcEndpointPath(runtimeDirectory(directory));
 export const vaultPath = (directory: string) => join(resolve(directory), "vault.sqlite");

@@ -52,6 +52,15 @@ function writeHostFile(path: string, before: string, after: string): void {
   renameSync(temporary, path);
 }
 
+function backupHostFile(directory: string, path: string, content: string): void {
+  if (content.length === 0) return;
+  writePrivateJson(join(resolve(directory), "backups", `${randomUUID()}.json`), {
+    version: 1,
+    original_path: path,
+    content,
+  });
+}
+
 function assertDirectoryPath(path: string, code: string): void {
   if (!existsSync(path)) return;
   const info = lstatSync(path);
@@ -229,19 +238,48 @@ export function configureHost(directory: string, host: V1Host, projectPath: stri
 function configureHostLocked(directory: string, host: V1Host, projectPath: string, remove: boolean) {
   if (existsSync(socketPath(directory)) || existsSync(join(runtimeDirectory(directory), "owner.lock"))) throw new Error("stop_backend_before_changing_connections");
   const config = loadConfig(directory, !remove);
+  const configBefore = structuredClone(config);
   const entry = remove
     ? config.connections.find(c => c.host === host && config.projects.some(p => p.scope_id === c.scope_id && p.root === realpathSync(resolve(projectPath))))
     : addConnection(config, host, projectPath);
   if (!entry) return { changed: false, host, state: "not_configured" };
   const project = config.projects.find(p => p.scope_id === entry.scope_id)!;
   const changes = host === "codex" ? codexChanges(project.root, directory, entry, remove) : host === "opencode" ? openCodeChanges(project.root, directory, entry, remove) : copilotChanges(project.root, directory, entry, remove);
-  if (!remove) {
-    ensurePrivateDirectory(join(resolve(directory), "connections"));
-    writePrivateJson(connectionFile(directory, entry.binding_id), adapterConfig(config, entry, directory));
-    // Save the stable identity first so a repeated connect can complete partial setup.
-    saveConfig(directory, config);
+  const written: typeof changes = [];
+  try {
+    if (!remove) {
+      ensurePrivateDirectory(join(resolve(directory), "connections"));
+      writePrivateJson(connectionFile(directory, entry.binding_id), adapterConfig(config, entry, directory));
+      // Save the stable identity first so a repeated connect can complete partial setup.
+      saveConfig(directory, config);
+    }
+    for (const change of changes) {
+      if (host === "codex") assertCodexDirectory(project.root);
+      if (change.before !== change.after) backupHostFile(directory, change.path, change.before);
+      writeHostFile(change.path, change.before, change.after);
+      written.push(change);
+    }
+    if (remove) {
+      config.connections = config.connections.filter(c => c.binding_id !== entry.binding_id);
+      saveConfig(directory, config);
+      const ownConfig = connectionFile(directory, entry.binding_id);
+      if (existsSync(ownConfig)) unlinkSync(ownConfig);
+    }
+    return { changed: changes.some(c => c.before !== c.after), host, project: project.root, scope_id: project.scope_id, state: remove ? "disconnected" : "configured", ...(host === "codex" && !remove ? { next: "Review and trust the project hooks with /hooks in Codex before native capture can run." } : {}), ...(host === "copilot-cli" && !remove ? { next: "Open the project in GitHub Copilot app or run Copilot CLI locally; confirm the project MCP server and hooks are trusted." } : {}) };
+  } catch (error) {
+    for (const change of written.toReversed()) {
+      try { writeHostFile(change.path, change.after, change.before); } catch { /* Preserve a concurrent host edit. */ }
+    }
+    try {
+      saveConfig(directory, configBefore);
+      if (!remove) {
+        const ownConfig = connectionFile(directory, entry.binding_id);
+        if (existsSync(ownConfig)) unlinkSync(ownConfig);
+      } else if (configBefore.connections.some(candidate => candidate.binding_id === entry.binding_id)) {
+        ensurePrivateDirectory(join(resolve(directory), "connections"));
+        writePrivateJson(connectionFile(directory, entry.binding_id), adapterConfig(configBefore, entry, directory));
+      }
+    } catch { /* The original error is more actionable than a best-effort rollback failure. */ }
+    throw error;
   }
-  for (const change of changes) { if (host === "codex") assertCodexDirectory(project.root); writeHostFile(change.path, change.before, change.after); }
-  if (remove) { config.connections = config.connections.filter(c => c.binding_id !== entry.binding_id); saveConfig(directory, config); }
-  return { changed: changes.some(c => c.before !== c.after), host, project: project.root, scope_id: project.scope_id, state: remove ? "disconnected" : "configured", ...(host === "codex" && !remove ? { next: "Review and trust the project hooks with /hooks in Codex before native capture can run." } : {}), ...(host === "copilot-cli" && !remove ? { next: "Open the project in GitHub Copilot app or run Copilot CLI locally; confirm the project MCP server and hooks are trusted." } : {}) };
 }
