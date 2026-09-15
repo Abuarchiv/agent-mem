@@ -7,7 +7,7 @@
 - [x] `npm test` passes with no skipped V1 tests.
 - [x] `npm run package -- --output <new-directory>` succeeds.
 - [x] Package manifest hashes, model manifests, and native sqlite-vec asset verify.
-- [ ] Package smoke passes with provider keys unset and runtime model downloads disabled; current macOS Homebrew Node runtime needs its external `libnode` dylib bundled.
+- [x] Package smoke passes with provider keys unset and runtime model downloads disabled; the package bundles and relinks the macOS Node runtime dependencies.
 - [ ] Select and include the project license before public publication.
 
 ## Functional gates
@@ -30,6 +30,6 @@
 
 ## Release discipline
 
-Current local verification: the self-contained macOS launcher smoke remains blocked because the Homebrew Node runtime requires its external `libnode` dylib to be bundled.
+Current local verification: the self-contained macOS launcher smoke passes; the optional reranker-enabled probe degrades to the documented baseline fallback on this ARM64 host.
 
 Tag only when every checklist item is green. Keep the legacy repository and old vaults unchanged. Do not publish or push this local-only build without a separate release decision.

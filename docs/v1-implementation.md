@@ -4,12 +4,12 @@ This is the standalone V1 line; the legacy full-product repository is separate a
 
 ## Verified local gates
 
-Current local verification: `npm test` passes 279/279; package construction and manifest verification pass, while the self-contained macOS launcher smoke remains blocked by the external Homebrew Node `libnode` dylib.
+Current local verification: `npm test` passes 279/279; package construction, manifest verification, and the self-contained macOS launcher smoke pass. The optional reranker-enabled probe uses the documented baseline fallback on this ARM64 host.
 
 - `npm run build` passes on the current checkout.
 - `npm test`: **279/279** focused V1 tests pass.
-- The current package build with Node `v24.19.0` contains 3,922 files, is 486,165,700 bytes, and has manifest SHA-256 `4e3e72cc8c7a0d82209c1e726ed77a4ff13f2f440eee8ffe88d867a7917ecdb5`.
-- Packaged retrieval probes remain blocked before startup by the macOS Homebrew Node `libnode` dylib dependency; the in-repository retrieval and host probes pass.
+- The current package build with Node `v24.19.0` contains 3,941 files, is 600,798,980 bytes, and has manifest SHA-256 `84db944f2d8c939b6061eee9818ae83bb0ffabc67075a4f5bb2c4f152b5a77f3`.
+- Packaged retrieval probes pass with reranking disabled; the reranker-enabled probe passes through the documented baseline fallback when the local model cannot load.
 - The package contains no generative provider SDK or UI runtime. Model artifacts are pinned and verified offline.
 
 ## Native host evidence (15 September 2026)
