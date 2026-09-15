@@ -262,12 +262,18 @@ export async function packageV1(destination: string, options: PackageV1Options =
     copyFileSync(join(root, "src/licenses", name), join(output, "licenses", name));
   }
   const runtimeNode = copyNodeRuntime(output);
-  writeFileSync(join(output, "package.json"), JSON.stringify({ name: "agent-memory-v1", version: "1.0.0", type: "module", private: true }, null, 2) + "\n");
+  writeFileSync(join(output, "package.json"), JSON.stringify({ name: "agent-mem", version: "1.0.0", description: "Local service for capturing and retrieving source-backed coding-agent context.", type: "module", private: true }, null, 2) + "\n");
   const launcher = process.platform === "win32"
     ? windowsLaunchers().cmd
     : `#!/usr/bin/env sh\nset -eu\nPACKAGE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nunset NODE_OPTIONS NODE_PATH\nexec "$PACKAGE_DIR/runtime/bin/${runtimeNode}" "$PACKAGE_DIR/dist-v1/scripts/v1.js" "$@"\n`;
-  writeFileSync(join(output, process.platform === "win32" ? "memory.cmd" : "memory"), launcher, process.platform === "win32" ? undefined : { mode: 0o755 });
-  if (process.platform === "win32") writeFileSync(join(output, "memory.ps1"), windowsLaunchers().powershell);
+  const launcherName = process.platform === "win32" ? "agent-mem.cmd" : "agent-mem";
+  const legacyLauncherName = process.platform === "win32" ? "memory.cmd" : "memory";
+  writeFileSync(join(output, launcherName), launcher, process.platform === "win32" ? undefined : { mode: 0o755 });
+  writeFileSync(join(output, legacyLauncherName), launcher, process.platform === "win32" ? undefined : { mode: 0o755 });
+  if (process.platform === "win32") {
+    writeFileSync(join(output, "agent-mem.ps1"), windowsLaunchers().powershell);
+    writeFileSync(join(output, "memory.ps1"), windowsLaunchers().powershell);
+  }
   const files: { path: string; bytes: number; sha256: string }[] = [];
   function inspect(directory: string): void {
     for (const name of readdirSync(directory).sort()) {

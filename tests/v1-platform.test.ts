@@ -150,7 +150,7 @@ test("the current checkout contains the selected sqlite-vec asset", () => {
 test("Windows uses a stable named pipe instead of a filesystem socket", () => {
   const first = ipcEndpointPath("/tmp/v1-platform-data", "win32");
   assert.equal(first, ipcEndpointPath("/tmp/v1-platform-data", "win32"));
-  assert.match(first, /^\\\\\.\\pipe\\agent-memory-v1-[a-f0-9]{32}$/);
+  assert.match(first, /^\\\\\.\\pipe\\agent-mem-[a-f0-9]{32}$/);
   assert.match(ipcEndpointPath("/tmp/v1-platform-data", "linux"), /broker\.sock$/);
 });
 

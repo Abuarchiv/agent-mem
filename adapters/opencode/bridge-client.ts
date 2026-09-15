@@ -62,6 +62,14 @@ export type OpenCodeBridgeRequest =
     }
   | {
       readonly version: 1;
+      readonly kind: "status";
+      readonly request_id: string;
+      readonly seq: number;
+      readonly native_session_id: string;
+      readonly cwd: string;
+    }
+  | {
+      readonly version: 1;
       readonly kind: "capture";
       readonly request_id: string;
       readonly seq: number;
@@ -151,6 +159,7 @@ export interface OpenCodeBridgeClientOptions {
 export interface OpenCodeBridge {
   beginReconcile?(nativeSessionId: string, cwd: string, options?: OpenCodeBridgeCallOptions): Promise<OpenCodeReconcileScan>;
   openSession(nativeSessionId: string, cwd: string, options?: OpenCodeBridgeCallOptions): Promise<void>;
+  status?(nativeSessionId: string, cwd: string, options?: OpenCodeBridgeCallOptions): Promise<unknown>;
   capture(nativeSessionId: string, cwd: string, event: OpenCodeBridgeEvent, options?: OpenCodeBridgeCallOptions): Promise<CaptureAck>;
   observeNative?(
     nativeSessionId: string,
@@ -323,6 +332,17 @@ export class OpenCodeBridgeClient implements OpenCodeBridge {
       ["session_ready"],
       options,
     );
+  }
+
+  async status(nativeSessionId: string, cwd: string, options?: OpenCodeBridgeCallOptions): Promise<unknown> {
+    opaqueIdSchema.parse(nativeSessionId);
+    pathSchema.parse(cwd);
+    const response = await this.request(
+      (seq, requestId) => ({ version: 1, kind: "status", request_id: requestId, seq, native_session_id: nativeSessionId, cwd }),
+      ["status_response"],
+      options,
+    );
+    return response.status;
   }
 
   async capture(

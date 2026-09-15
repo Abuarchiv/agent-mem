@@ -23,9 +23,25 @@ export interface RerankerExtraInstallOptions {
   readonly fetch?: typeof fetch;
   readonly manifest?: unknown;
   readonly baseUrl?: string;
+  /** Maximum wait for one remote artifact before the optional extra degrades. */
+  readonly timeoutMs?: number;
   /** Test/package override; null disables the bundled-source shortcut. */
   readonly bundledRoot?: string | null;
 }
+
+export interface RerankerExtraInstallResult {
+  readonly state: "existing" | "installed";
+  readonly model_root: string;
+}
+
+export interface RerankerActivationResult {
+  readonly enabled: boolean;
+  readonly state: "disabled" | "ready" | "unavailable";
+  readonly reason: string | null;
+  readonly model_root?: string;
+}
+
+export type RerankerExtraInstaller = (dataDirectory: string) => Promise<RerankerExtraInstallResult>;
 
 function absoluteDataDirectory(dataDirectory: string): string {
   if (typeof dataDirectory !== "string" || dataDirectory.length === 0 || dataDirectory.includes("\0") || !isAbsolute(dataDirectory)) {
@@ -101,9 +117,11 @@ function downloadUrl(parsed: RerankModelManifest, path: string, baseUrl: string)
   return `${baseUrl.replace(/\/$/u, "")}/${parsed.model_id}/resolve/${parsed.revision}/${upstreamPath}?download=true`;
 }
 
-export async function installRerankerExtra(dataDirectory: string, options: RerankerExtraInstallOptions = {}): Promise<{ readonly state: "existing" | "installed"; readonly model_root: string }> {
+export async function installRerankerExtra(dataDirectory: string, options: RerankerExtraInstallOptions = {}): Promise<RerankerExtraInstallResult> {
   const dataRoot = rerankerDataRoot(dataDirectory);
   const parsed = options.manifest === undefined ? manifest() : parseRerankManifest(options.manifest);
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 300_000) throw new ExtraError("extra_timeout_invalid");
   const destination = rerankerModelRoot(dataDirectory, parsed);
   try {
     if (existsSync(destination)) {
@@ -135,7 +153,7 @@ export async function installRerankerExtra(dataDirectory: string, options: Reran
         continue;
       }
       let response: Response;
-      try { response = await fetcher(downloadUrl(parsed, artifact.path, baseUrl), { redirect: "follow" }); }
+      try { response = await fetcher(downloadUrl(parsed, artifact.path, baseUrl), { redirect: "follow", signal: AbortSignal.timeout(timeoutMs) }); }
       catch (error) { throw new ExtraError("extra_download_failed", error); }
       if (!response.ok) throw new ExtraError(`extra_download_http_${response.status}`);
       let bytes: Buffer;
@@ -157,6 +175,26 @@ export async function installRerankerExtra(dataDirectory: string, options: Reran
     throw new ExtraError("extra_install_failed", error);
   } finally {
     if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+/** Install the recommended optional extra without making the V1 core fail closed. */
+export async function ensureRerankerExtra(
+  dataDirectory: string,
+  requested: boolean,
+  installer: RerankerExtraInstaller = installRerankerExtra,
+): Promise<RerankerActivationResult> {
+  if (!requested) return { enabled: false, state: "disabled", reason: null };
+  try {
+    const result = await installer(dataDirectory);
+    return { enabled: true, state: "ready", reason: null, model_root: result.model_root };
+  } catch (error) {
+    const reason = error instanceof ExtraError
+      ? error.code
+      : error instanceof Error && /^[a-z][a-z0-9_]{1,127}$/u.test(error.message)
+        ? error.message
+        : "extra_install_failed";
+    return { enabled: false, state: "unavailable", reason };
   }
 }
 

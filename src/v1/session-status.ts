@@ -47,12 +47,12 @@ export function sessionStatusFromBackend(host: SessionHost, backend: unknown): A
 }
 
 export function connectedSessionStatus(host: SessionHost): AgentMemorySessionStatus {
-  return { version: 1, state: "connected", host, core: "ready", e5: "ready", reranker: "disabled", mcp: "verified" };
+  return { version: 1, state: "degraded", host, core: "degraded", e5: "degraded", reranker: "disabled", mcp: "verified", reason: "status_unavailable" };
 }
 
 export function formatSessionStatus(status: AgentMemorySessionStatus): string {
   const lines = [
-    `Agent Memory V1: ${status.state}`,
+    `Agent Mem: ${status.state}`,
     `Host: ${status.host}`,
     `Core: ${status.core} · E5: ${status.e5} · Reranker: ${status.reranker}`,
     `MCP: ${status.mcp}`,

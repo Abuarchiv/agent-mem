@@ -8,7 +8,8 @@ import {
   detectInstallHosts,
   ensureOwnedService,
   parseInstallArgs,
-  stopOwnedService,
+ stopOwnedService,
+ validateMcpToolList,
   type InstallHostProbe,
 } from "../src/v1/install.js";
 
@@ -101,4 +102,15 @@ test("owned service stop is safe, bounded, and ownership-aware", async () => {
   await assert.rejects(stopOwnedService({
     findOwner: async () => owner, isAlive: async () => alive, signal: () => undefined,
   }, { timeoutMs: 2, pollMs: 1 }), (error: unknown) => error instanceof InstallError && error.code === "install_owner_not_owned");
+});
+test("MCP install smoke requires every V1 core tool", () => {
+ assert.equal(validateMcpToolList([
+  { name: "memory_recall" },
+  { name: "memory_get" },
+  { name: "memory_forget" },
+  { name: "memory_write" },
+  { name: "extra_tool" },
+ ]), 5);
+ assert.throws(() => validateMcpToolList([{ name: "memory_recall" }]), (error: unknown) => error instanceof InstallError && error.code === "install_mcp_tools_failed");
+ assert.throws(() => validateMcpToolList([{ name: "memory_recall" }, null]), (error: unknown) => error instanceof InstallError && error.code === "install_mcp_tools_failed");
 });

@@ -47,7 +47,7 @@ import {
 } from "./tool-schemas.js";
 
 /**
- * Stdio MCP adapter for the agent-memory domain core (plan §14 row T19).
+ * Stdio MCP adapter for the agent-mem domain core (plan §14 row T19).
  *
  * This adapter owns no domain rules of its own. Every tool calls the same
  * operations the harness adapters and UI use:

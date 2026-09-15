@@ -21,10 +21,17 @@ const schema = z.object({
 }).strict();
 export type V1Config = z.infer<typeof schema>;
 export type V1Connection = V1Config["connections"][number];
+const CURRENT_DATA_DIRECTORY_NAME = "Agent Mem";
+const LEGACY_DATA_DIRECTORY_NAME = "Agent Memory V1";
 export const defaultDataDirectory = (): string => {
-  if (process.platform === "win32") return join(process.env.LOCALAPPDATA ?? process.env.APPDATA ?? join(homedir(), "AppData", "Local"), "Agent Memory V1");
-  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Agent Memory V1");
-  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "Agent Memory V1");
+  const base = process.platform === "win32"
+    ? process.env.LOCALAPPDATA ?? process.env.APPDATA ?? join(homedir(), "AppData", "Local")
+    : process.platform === "darwin"
+      ? join(homedir(), "Library", "Application Support")
+      : process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+  const current = join(base, CURRENT_DATA_DIRECTORY_NAME);
+  const legacy = join(base, LEGACY_DATA_DIRECTORY_NAME);
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
 };
 export const configFile = (directory: string) => join(resolve(directory), "config.json");
 export const installJournalFile = (directory: string) => join(resolve(directory), "install.json");

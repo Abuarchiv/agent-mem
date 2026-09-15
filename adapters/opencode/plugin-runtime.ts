@@ -17,7 +17,7 @@ import {
 import { parseDirectedEvidenceHandoff, parseModelContextWrapper, serializeModelContext, serializeModelContextWithStatus } from "../../src/context/packet.js";
 import { validateBoundedJson, type CaptureAck, type NativeObservationIdentity, type NativeReconcileCursor, type SourceCoverage, type NativeReconcileCoverage } from "../../src/host/contract.js";
 import { createOpenCodePartObservation, createOpenCodeReconcilePlan, isOwnMemoryMcpTool } from "./reconcile.js";
-import { connectedSessionStatus, formatSessionStatus } from "../../src/v1/session-status.js";
+import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend } from "../../src/v1/session-status.js";
 
 export const OPENCODE_PLUGIN_VERSION = "1.0.0" as const;
 export const OPENCODE_NATIVE_VERSION = "1.18.30" as const;
@@ -332,6 +332,20 @@ function currentUserMessage(messages: readonly MessageWithParts[]): { readonly m
 
 function optionsFor(deadline: HookDeadline): OpenCodeBridgeCallOptions {
   return { signal: deadline.signal, deadlineAt: deadline.deadlineAt };
+}
+
+async function sessionStatusFor(
+  bridge: OpenCodeBridge,
+  nativeSessionId: string,
+  cwd: string,
+  options: OpenCodeBridgeCallOptions,
+) {
+  if (bridge.status === undefined) return connectedSessionStatus("OpenCode CLI");
+  try {
+    return sessionStatusFromBackend("OpenCode CLI", await bridge.status(nativeSessionId, cwd, options));
+  } catch {
+    return connectedSessionStatus("OpenCode CLI");
+  }
 }
 
 function ownSyntheticPart(sessionId: string, messageId: string, wrapper: string): TextPart {
@@ -1001,7 +1015,7 @@ export class OpenCodePluginRuntime {
       );
       deadline.throwIfExpired();
       if (this.closing) return;
-      const status = state.statusInjected ? undefined : formatSessionStatus(connectedSessionStatus("OpenCode CLI"));
+      const status = state.statusInjected ? undefined : formatSessionStatus(await sessionStatusFor(this.bridge, sessionId, this.config.workspaceDirectory, optionsFor(deadline)));
       const wrapper = status === undefined ? serializeModelContext(packet) : serializeModelContextWithStatus(packet, status);
       deadline.throwIfExpired();
       if (Buffer.byteLength(wrapper, "utf8") > OPENCODE_CONTEXT_MAX_BYTES) throw new OpenCodePluginError("context_too_large");

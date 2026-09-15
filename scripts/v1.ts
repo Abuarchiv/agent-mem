@@ -5,12 +5,13 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { configureHost } from "../src/v1/connect.js";
-import { defaultDataDirectory, installJournalFile, loadConfig, runtimeDirectory, saveConfig, V1_HOSTS } from "../src/v1/config.js";
-import { installRerankerExtra, removeRerankerExtra, verifyRerankerExtra, RERANKER_EXTRA_ID } from "../src/v1/extras.js";
-import { createInstallJournal, readInstallJournal, updateInstallJournal, writeInstallJournal } from "../src/v1/install-journal.js";
-import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, InstallError, parseInstallArgs, stopOwnedService, type InstallOptions } from "../src/v1/install.js";
+import { defaultDataDirectory, installJournalFile, loadConfig, runtimeDirectory, saveConfig, socketPath, V1_HOSTS } from "../src/v1/config.js";
+import { ensureRerankerExtra, installRerankerExtra, removeRerankerExtra, verifyRerankerExtra, RERANKER_EXTRA_ID } from "../src/v1/extras.js";
+import { createInstallJournal, readInstallJournal, resetInstallJournal, updateInstallJournal, writeInstallJournal } from "../src/v1/install-journal.js";
+import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, InstallError, parseInstallArgs, stopOwnedService, validateMcpToolList, type InstallOptions } from "../src/v1/install.js";
 import { verifyInstallBundle, type InstallBundleReport } from "../src/v1/preflight.js";
 import { assertPrivatePath } from "../src/v1/private-files.js";
+import { acquireOwnerLock, clearStaleSocket } from "../src/v1/lock.js";
 
 const json = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => typeof item === "bigint" ? item.toString() : item);
 
@@ -94,28 +95,35 @@ async function runInstall(directory: string, options: InstallOptions): Promise<v
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "plan", phases: { ...current.phases, plan: "completed" }, lastGoodPhase: "plan" }));
 
     const bundle: InstallBundleReport = await verifyInstallBundle(undefined, directory);
+    const extra = await ensureRerankerExtra(directory, plan.rerank);
+    const effectiveOptions = { ...options, rerank: extra.enabled };
     const config = loadConfig(directory, true);
-    config.reranker_enabled = plan.rerank;
+    config.reranker_enabled = extra.enabled;
     saveConfig(directory, config);
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "stage", phases: { ...current.phases, stage: "completed" }, lastGoodPhase: "stage" }));
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "verify", phases: { ...current.phases, verify: "completed" }, lastGoodPhase: "verify" }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "activate", phases: { ...current.phases, activate: "completed" }, lastGoodPhase: "activate" }));
 
-    const projectEntry = config.projects.find((entry) => entry.root === project);
-    const existingHosts = new Set(projectEntry === undefined
-      ? []
-      : config.connections.filter((entry) => entry.scope_id === projectEntry.scope_id).map((entry) => entry.host));
     const hostResults: unknown[] = [];
+    let serviceWasStopped = false;
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "configure", phases: { ...current.phases, configure: "running" } }));
     for (const host of plan.hosts) {
-      if (existingHosts.has(host)) hostResults.push({ host, state: "already_configured" });
-      else hostResults.push(configureHost(directory, host, project));
+      try {
+        hostResults.push(configureHost(directory, host, project));
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "stop_backend_before_changing_connections" || serviceWasStopped) throw error;
+        const stopped = await stopOwnedInstalledOwner(directory);
+        if (stopped.state !== "stopped") throw new InstallError("install_owner_not_owned");
+        serviceWasStopped = true;
+        hostResults.push(configureHost(directory, host, project));
+      }
     }
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "configure", phases: { ...current.phases, configure: "completed" }, lastGoodPhase: "configure" }));
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "start", phases: { ...current.phases, start: "running" } }));
     const service = await ensureOwnedService({
       isRunning: () => serviceIsReady(directory),
       isStarting: () => serviceIsStarting(directory),
-      start: () => launchOwnedService(directory, options),
+      start: () => launchOwnedService(directory, effectiveOptions),
     });
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "start", phases: { ...current.phases, start: "completed" }, lastGoodPhase: "start" }));
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "smoke", phases: { ...current.phases, smoke: "running" } }));
@@ -123,10 +131,10 @@ async function runInstall(directory: string, options: InstallOptions): Promise<v
     const { operatorCall } = await import("../src/v1/service.js");
     const backend = await operatorCall(directory, { kind: "control", operation: "status" });
     journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "smoke", phases: { ...current.phases, smoke: "completed" }, lastGoodPhase: "smoke" }));
-    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "complete", phases: { ...current.phases, complete: "completed" }, lastGoodPhase: "complete", lastErrorCode: null }));
+    journal = updateInstallJournal(journalPath, current => ({ ...current, currentPhase: "complete", phases: { ...current.phases, complete: "completed", rollback: "skipped" }, lastGoodPhase: "complete", lastErrorCode: null }));
     console.log(json({ version: 1, state: "installed", project, hosts: plan.hosts,
       detected_hosts: plan.detectedHosts, not_detected_hosts: plan.notDetectedHosts,
-      rerank: plan.rerank, host_results: hostResults, mcp, service, backend,
+      rerank: extra.enabled, extra, host_results: hostResults, mcp, service, backend,
       bundle,
       journal: { path: journalPath, phase: journal.currentPhase, attempts: journal.attempts } }));
   } catch (error) {
@@ -135,7 +143,7 @@ async function runInstall(directory: string, options: InstallOptions): Promise<v
         updateInstallJournal(journalPath, current => ({
           ...current,
           currentPhase: "failed",
-          phases: { ...current.phases, failed: "failed" },
+          phases: { ...current.phases, failed: "failed", rollback: "skipped" },
           lastErrorCode: operationErrorCode(error),
         }));
       } catch { /* Keep the original installation error. */ }
@@ -156,13 +164,12 @@ async function verifyMcpConnections(directory: string, project: string, hosts: r
     const client = connectClient(directory, config, entry);
     try {
       await client.connect();
-      const initialize = await client.rpc({ kind: "mcp", message: { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "agent-memory-v1-installer", version: "1" } } } });
+      const initialize = await client.rpc({ kind: "mcp", message: { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "agent-mem-installer", version: "1" } } } });
       const initResult = mcpResult(initialize, "install_mcp_initialize_failed");
       const tools = await client.rpc({ kind: "mcp", message: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } });
       const toolResult = mcpResult(tools, "install_mcp_tools_failed");
-      const listed = toolResult.tools;
-      if (!Array.isArray(listed) || listed.length < 4) throw new InstallError("install_mcp_tools_failed");
-      results.push({ host, state: "verified", protocol: initResult.protocolVersion, tools: listed.length });
+      const toolCount = validateMcpToolList(toolResult.tools);
+      results.push({ host, state: "verified", protocol: initResult.protocolVersion, tools: toolCount });
     } finally { await client.close(); }
   }
   return results;
@@ -188,7 +195,7 @@ function readOwnedOwner(directory: string): { readonly pid: number; readonly own
   return { pid: typeof record.pid === "number" ? record.pid : -1, owned: record.installation_id === config.installation_id };
 }
 
-async function stopInstalledOwner(directory: string): Promise<void> {
+async function stopOwnedInstalledOwner(directory: string): Promise<Awaited<ReturnType<typeof stopOwnedService>>> {
   const result = await stopOwnedService({
     findOwner: async () => readOwnedOwner(directory),
     isAlive: async (pid) => {
@@ -198,6 +205,17 @@ async function stopInstalledOwner(directory: string): Promise<void> {
     },
     signal: (pid, signal) => { process.kill(pid, signal); },
   });
+  if (result.state === "stopped") {
+    await clearStaleSocket(socketPath(directory));
+    const config = loadConfig(directory);
+    const release = acquireOwnerLock(runtimeDirectory(directory), config.installation_id);
+    release();
+  }
+  return result;
+}
+
+async function stopInstalledOwner(directory: string): Promise<void> {
+  const result = await stopOwnedInstalledOwner(directory);
   console.log(json({ version: 1, ...result }));
 }
 function takeOption(args: string[], name: string): string | undefined {
@@ -339,10 +357,15 @@ async function runExtras(directory: string, args: string[]): Promise<void> {
 }
 
 async function runRepair(directory: string, args: string[]): Promise<void> {
-  const journal = readInstallJournal(installJournalFile(directory));
+  const journalPath = installJournalFile(directory);
+  const reset = takeFlag(args, "--reset");
+  let journal = readInstallJournal(journalPath);
   const project = takeOption(args, "--project") ?? journal.project;
   if (args.length) throw new Error("repair_argument_unexpected");
-  if (journal.attempts >= 3) throw new InstallError("install_repair_action_required");
+  if (journal.attempts >= 3 && !reset) throw new InstallError("install_repair_action_required");
+  if (reset) {
+    journal = resetInstallJournal(journalPath, journal, project).journal;
+  }
   await runInstall(directory, {
     project,
     hosts: journal.hosts,
@@ -355,12 +378,12 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
   const args = [...input], directory = resolve(takeOption(args, "--data-dir") ?? defaultDataDirectory());
   const command = args.shift();
   if (!command || command === "--help" || command === "help") {
-    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory repair [--project PATH]\n  memory extras list|install|remove reranker\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, verifies MCP readiness, and self-heals its owned broker once when a host starts.");
+    console.log("Agent Mem\n  agent-mem install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  agent-mem repair [--project PATH] [--reset]\n  agent-mem extras list|install|remove reranker\n  agent-mem stop\n  agent-mem connect|disconnect codex|opencode|copilot-cli --project PATH\n  agent-mem start [--rerank | --no-rerank]\n  agent-mem view [--rerank | --no-rerank]\n  agent-mem status [--json]\n  agent-mem pause|resume\n  agent-mem forget CAPTURE_ID --project PATH\n  agent-mem feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  agent-mem procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, verifies MCP readiness, and self-heals its owned broker once when a host starts. The memory launcher remains a compatibility alias.");
     return;
   }
   if (command === "install") {
     if (args.includes("--help") || args.includes("-h")) {
-      console.log("V1 install\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli]\n  --core-only | --no-rerank  Install only the V1 core\n  --yes | --non-interactive  Use detected/default choices without prompts");
+      console.log("Agent Mem install\n  agent-mem install [--project PATH] [--agents auto|codex,opencode,copilot-cli]\n  --core-only | --no-rerank  Install only the V1 core\n  --yes | --non-interactive  Use detected/default choices without prompts");
       return;
     }
     await runInstall(directory, parseInstallArgs(args));
@@ -408,6 +431,43 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
         stopping = true;
         process.off("SIGINT", stop); process.off("SIGTERM", stop);
         service.close().then(resolveStopped, reject);
+      };
+      process.once("SIGINT", stop); process.once("SIGTERM", stop);
+    });
+    return;
+  }
+  if (command === "view") {
+    const rerank = takeFlag(args, "--rerank");
+    const noRerank = takeFlag(args, "--no-rerank");
+    if (rerank && noRerank) throw new Error("conflicting_rerank_flags");
+    if (args.length) throw new Error("unexpected_view_arguments");
+    const { startService } = await import("../src/v1/service.js");
+    const { createV1ViewServer } = await import("../src/view/server.js");
+    const configuredRerank = loadConfig(directory).reranker_enabled === true;
+    const service = await startService(directory, undefined, {
+      rerank: noRerank ? false : rerank || configuredRerank,
+      local_ui: true,
+    });
+    if (service.localUiBindingFor === undefined) {
+      await service.close();
+      throw new Error("local_ui_not_enabled");
+    }
+    const viewer = await createV1ViewServer({
+      database: service.database,
+      projects: service.config.projects,
+      status: service.status,
+      localUiBindingFor: service.localUiBindingFor,
+      readerOutputBindingFor: service.readerOutputBindingFor,
+      countUnits: service.countContextTokens,
+    });
+    console.log(json({ version: 1, state: "viewing", url: viewer.url, projects: service.config.projects }));
+    await new Promise<void>((resolveStopped, reject) => {
+      let stopping = false;
+      const stop = () => {
+        if (stopping) return;
+        stopping = true;
+        process.off("SIGINT", stop); process.off("SIGTERM", stop);
+        viewer.close().then(() => service.close()).then(resolveStopped, reject);
       };
       process.once("SIGINT", stop); process.once("SIGTERM", stop);
     });

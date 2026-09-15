@@ -3,10 +3,13 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSyn
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { renderCopilotCliHookFile } from "../../adapters/copilot-cli/index.js";
+import { MEMORY_MCP_LEGACY_SERVER_KEYS, MEMORY_MCP_SERVER_KEY } from "../host/tool-schemas.js";
 import { addConnection, bindingFor, connectionFile, ensurePrivateDirectory, loadConfig, runtimeDirectory, saveConfig, socketPath, writePrivateJson, type V1Config, type V1Connection, type V1Host } from "./config.js";
 import { acquireOwnerLock } from "./lock.js";
 
-const name = "agent_memory_v1";
+const name = MEMORY_MCP_SERVER_KEY;
+const legacyNames = MEMORY_MCP_LEGACY_SERVER_KEYS;
+const allNames = [name, ...legacyNames] as const;
 const hookEvents = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "PostCompact"];
 const shellQuote = (value: string): string => process.platform === "win32"
   ? `"${value.replaceAll('"', '\\"')}"`
@@ -152,13 +155,19 @@ function isOwnedCopilotMcpEntry(value: unknown, entry: V1Connection): boolean {
     && args.includes("mcp") && args.includes("--connection") && args.includes(entry.binding_id);
 }
 
+function copilotMcpEntries(servers: Record<string, unknown>, entry: V1Connection): readonly { readonly name: string; readonly owned: boolean }[] {
+  return allNames.flatMap(serverName => {
+    const value = servers[serverName];
+    return value === undefined ? [] : [{ name: serverName, owned: isOwnedCopilotMcpEntry(value, entry) }];
+  });
+}
+
 function copilotMcpPath(root: string, entry: V1Connection, remove: boolean): string {
   const paths = copilotConfigPaths(root);
   const findings = paths.flatMap((path) => {
     if (!existsSync(path)) return [];
     const value = objectJson(readText(path));
-    const server = copilotMcpServers(value).servers.agent_memory_v1;
-    return server === undefined ? [] : [{ path, owned: isOwnedCopilotMcpEntry(server, entry) }];
+    return copilotMcpEntries(copilotMcpServers(value).servers, entry).map(finding => ({ path, owned: finding.owned }));
   });
   const owned = findings.filter((finding) => finding.owned);
   const foreign = findings.filter((finding) => !finding.owned);
@@ -175,10 +184,9 @@ function copilotMcpChanges(root: string, directory: string, entry: V1Connection,
   const before = readText(path);
   const value = objectJson(before);
   const shape = copilotMcpServers(value);
-  const existing = shape.servers.agent_memory_v1;
-  if (existing !== undefined && !isOwnedCopilotMcpEntry(existing, entry)) throw new Error("copilot_mcp_entry_owned_elsewhere");
-  if (remove) delete shape.servers.agent_memory_v1;
-  else shape.servers.agent_memory_v1 = {
+  if (copilotMcpEntries(shape.servers, entry).some(finding => !finding.owned)) throw new Error("copilot_mcp_entry_owned_elsewhere");
+  for (const serverName of allNames) delete shape.servers[serverName];
+  if (!remove) shape.servers[name] = {
     type: "local",
     command: process.execPath,
     args: mcpArguments(directory, entry),
@@ -190,20 +198,27 @@ function copilotMcpChanges(root: string, directory: string, entry: V1Connection,
 
 function copilotHookChanges(root: string, directory: string, entry: V1Connection, remove: boolean) {
   assertCopilotParents(root, true);
-  const path = join(root, ".github", "hooks", "agent-memory-v1.json");
-  const before = readText(path);
+  const canonicalPath = join(root, ".github", "hooks", "agent-mem.json");
+  const legacyPath = join(root, ".github", "hooks", "agent-memory-v1.json");
+  const before = readText(canonicalPath);
+  const legacyBefore = readText(legacyPath);
   const expected = renderCopilotCliHookFile({
     nodePath: process.execPath,
     helperPath: adapterScript("copilot-cli/index.js"),
     configPath: connectionFile(directory, entry.binding_id),
   }) + "\n";
-  if (before.trim() && before !== expected) throw new Error("copilot_hook_file_owned_elsewhere");
-  const after = remove ? "" : expected;
-  return { path, before, after };
+  if ((before.trim() && before !== expected) || (legacyBefore.trim() && legacyBefore !== expected)) throw new Error("copilot_hook_file_owned_elsewhere");
+  if (remove) return [
+    { path: canonicalPath, before, after: "" },
+    { path: legacyPath, before: legacyBefore, after: "" },
+  ];
+  return legacyBefore.trim()
+    ? [{ path: legacyPath, before: legacyBefore, after: "" }, { path: canonicalPath, before, after: expected }]
+    : [{ path: canonicalPath, before, after: expected }];
 }
 
 function copilotChanges(root: string, directory: string, entry: V1Connection, remove: boolean) {
-  return [copilotMcpChanges(root, directory, entry, remove), copilotHookChanges(root, directory, entry, remove)];
+  return [copilotMcpChanges(root, directory, entry, remove), ...copilotHookChanges(root, directory, entry, remove)];
 }
 
 function hookCommand(dataDir: string, entry: V1Connection): string {
@@ -218,12 +233,22 @@ function codexChanges(root: string, directory: string, entry: V1Connection, remo
   assertCodexDirectory(root);
   const tomlPath = join(root, ".codex", "config.toml"), hooksPath = join(root, ".codex", "hooks.json");
   const tomlBefore = readText(tomlPath), hooksBefore = readText(hooksPath);
-  const start = `# BEGIN agent-memory-v1 ${entry.binding_id}`;
-  const end = `# END agent-memory-v1 ${entry.binding_id}`;
+  const start = `# BEGIN agent-mem ${entry.binding_id}`;
+  const end = `# END agent-mem ${entry.binding_id}`;
   const block = `${start}\n[mcp_servers.${name}]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ${JSON.stringify(mcpArguments(directory, entry))}\nstartup_timeout_sec = 20\ntool_timeout_sec = 20\n${end}\n`;
-  const pattern = new RegExp(`${start}\\r?\\n[\\s\\S]*?${end}\\r?\\n?`);
-  if (!pattern.test(tomlBefore) && tomlBefore.includes(`[mcp_servers.${name}]`)) throw new Error("codex_mcp_entry_owned_elsewhere");
-  const tomlAfter = pattern.test(tomlBefore) ? tomlBefore.replace(pattern, remove ? "" : block) : remove ? tomlBefore : `${tomlBefore}${tomlBefore && !tomlBefore.endsWith("\n") ? "\n" : ""}${block}`;
+  let tomlAfter = tomlBefore;
+  let found = false;
+  for (const marker of ["agent-mem", "agent-memory-v1"]) {
+    const markerStart = `# BEGIN ${marker} ${entry.binding_id}`;
+    const markerEnd = `# END ${marker} ${entry.binding_id}`;
+    const pattern = new RegExp(`${markerStart}\\r?\\n[\\s\\S]*?${markerEnd}\\r?\\n?`);
+    if (pattern.test(tomlAfter)) {
+      found = true;
+      tomlAfter = tomlAfter.replace(pattern, remove ? "" : block);
+    }
+  }
+  if (!found && (tomlBefore.includes(`[mcp_servers.${name}]`) || tomlBefore.includes("[mcp_servers.agent_memory_v1]"))) throw new Error("codex_mcp_entry_owned_elsewhere");
+  if (!found && !remove) tomlAfter = `${tomlBefore}${tomlBefore && !tomlBefore.endsWith("\n") ? "\n" : ""}${block}`;
   const hooks = objectJson(hooksBefore);
   const current = hooks.hooks === undefined ? {} : hooks.hooks;
   if (!current || typeof current !== "object" || Array.isArray(current)) throw new Error("codex_hooks_invalid");
@@ -239,7 +264,7 @@ function codexChanges(root: string, directory: string, entry: V1Connection, remo
       const remaining = item.hooks.filter((hook: unknown) => !hook || typeof hook !== "object" || !("command" in hook) || typeof hook.command !== "string" || !hook.command.trimEnd().endsWith(ownConfigSuffix));
       if (remaining.length) retained.push({ ...item, hooks: remaining });
     }
-    if (!remove) retained.push({ hooks: [{ type: "command", command, timeout: 15, statusMessage: "Agent Memory V1" }] });
+    if (!remove) retained.push({ hooks: [{ type: "command", command, timeout: 15, statusMessage: "Agent Mem" }] });
     if (retained.length) groups[event] = retained; else delete groups[event];
   }
   hooks.hooks = groups;
@@ -252,10 +277,13 @@ function openCodeChanges(root: string, directory: string, entry: V1Connection, r
   const mcp = value.mcp === undefined ? {} : value.mcp;
   if (!mcp || typeof mcp !== "object" || Array.isArray(mcp)) throw new Error("opencode_mcp_invalid");
   const servers = mcp as Record<string, unknown>;
-  const existing = servers[name];
-  if (existing && (typeof existing !== "object" || !("command" in existing) || !Array.isArray(existing.command) || !existing.command.includes(entry.binding_id))) throw new Error("opencode_mcp_entry_owned_elsewhere");
-  if (remove) delete servers[name];
-  else servers[name] = { type: "local", command: [process.execPath, ...mcpArguments(directory, entry)], enabled: true, timeout: 15_000 };
+  const existing = allNames.flatMap(serverName => {
+    const value = servers[serverName];
+    return value === undefined ? [] : [{ value, owned: typeof value === "object" && value !== null && !Array.isArray(value) && "command" in value && Array.isArray(value.command) && value.command.includes(entry.binding_id) }];
+  });
+  if (existing.some(candidate => !candidate.owned)) throw new Error("opencode_mcp_entry_owned_elsewhere");
+  for (const serverName of allNames) delete servers[serverName];
+  if (!remove) servers[name] = { type: "local", command: [process.execPath, ...mcpArguments(directory, entry)], enabled: true, timeout: 15_000 };
   value.mcp = servers;
   const plugins = value.plugin ?? [];
   if (!Array.isArray(plugins)) throw new Error("opencode_plugins_invalid");
@@ -286,13 +314,13 @@ function adapterConfig(config: V1Config, entry: V1Connection, directory: string)
 export function configureHost(directory: string, host: V1Host, projectPath: string, remove = false) {
   ensurePrivateDirectory(resolve(directory));
   ensurePrivateDirectory(runtimeDirectory(directory));
-  const release = acquireOwnerLock(runtimeDirectory(directory), "agent-memory-v1-config", "config.lock");
+  const release = acquireOwnerLock(runtimeDirectory(directory), "agent-mem-config", "config.lock");
   try { return configureHostLocked(directory, host, projectPath, remove); }
   finally { release(); }
 }
 
 function configureHostLocked(directory: string, host: V1Host, projectPath: string, remove: boolean) {
-  if (existsSync(socketPath(directory)) || existsSync(join(runtimeDirectory(directory), "owner.lock"))) throw new Error("stop_backend_before_changing_connections");
+  const backendActive = existsSync(socketPath(directory)) || existsSync(join(runtimeDirectory(directory), "owner.lock"));
   const config = loadConfig(directory, !remove);
   const configBefore = structuredClone(config);
   const entry = remove
@@ -301,6 +329,7 @@ function configureHostLocked(directory: string, host: V1Host, projectPath: strin
   if (!entry) return { changed: false, host, state: "not_configured" };
   const project = config.projects.find(p => p.scope_id === entry.scope_id)!;
   const changes = host === "codex" ? codexChanges(project.root, directory, entry, remove) : host === "opencode" ? openCodeChanges(project.root, directory, entry, remove) : copilotChanges(project.root, directory, entry, remove);
+  if (backendActive && changes.some(change => change.before !== change.after)) throw new Error("stop_backend_before_changing_connections");
   const written: typeof changes = [];
   try {
     if (!remove) {

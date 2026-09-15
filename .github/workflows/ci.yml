@@ -39,14 +39,14 @@ jobs:
       - name: Build and smoke-test core package
         shell: bash
         run: |
-          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-core-package"
-          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-core-package" --no-rerank
+          npm run package -- --output "$RUNNER_TEMP/agent-mem-core-package"
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-mem-core-package" --no-rerank
       - name: Build and smoke-test full package
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-full-package" --with-reranker
-          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-full-package"
+          npm run package -- --output "$RUNNER_TEMP/agent-mem-full-package" --with-reranker
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-mem-full-package"
 
   verify-windows-build:
     timeout-minutes: 20

@@ -51,7 +51,7 @@ function setupDatabase(database: AgentMemoryDatabase, binding: TrustedBinding): 
 }
 
 test("validates extraction_enabled as a boolean", () => {
-  const directory = mkdtempSync(join(tmpdir(), "agent-memory-v1-option-"));
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-option-"));
   try {
     assert.throws(
       () => new AgentMemoryDatabase(join(directory, "vault.sqlite"), { extraction_enabled: "false" } as never),
@@ -63,7 +63,7 @@ test("validates extraction_enabled as a boolean", () => {
 });
 
 test("disabled extraction preserves source and FTS, keeps E5 jobs, and distinguishes native replay", () => {
-  const directory = mkdtempSync(join(tmpdir(), "agent-memory-v1-capture-"));
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-capture-"));
   const path = join(directory, "vault.sqlite");
   const options = { extraction_enabled: false, embedding_task_version: "e5-test" } as const;
   const binding = bindingFor();

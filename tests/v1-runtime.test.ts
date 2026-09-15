@@ -95,7 +95,7 @@ test("rejects an existing non-private vault before opening it", async (t) => {
     t.skip("POSIX permission regression; Windows ACL coverage is tested separately");
     return;
   }
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-private-vault-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-private-vault-"));
   const vaultPath = resolve(directory, "vault.sqlite");
   writeFileSync(vaultPath, "not a vault\n", { mode: 0o644 });
   chmodSync(vaultPath, 0o644);
@@ -140,7 +140,7 @@ function fakeReranker(onDispose: () => void, failFirstDispose = false): LocalRer
 }
 
 test("source-only runtime starts, captures without extraction, queries, and restarts", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-"));
   const vaultPath = resolve(directory, "vault.sqlite");
   let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
   try {
@@ -181,7 +181,7 @@ test("source-only runtime starts, captures without extraction, queries, and rest
 });
 
 test("normal runtime rebuilds a legacy projected source on startup and restart", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-reindex-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-reindex-"));
   const vaultPath = resolve(directory, "vault.sqlite");
   const options = sourceOnlyOptions(vaultPath);
   const hostBinding = options.hostBinding;
@@ -289,7 +289,7 @@ test("normal runtime rebuilds a legacy projected source on startup and restart",
 });
 
 test("normal startup rebuilds mixed vector generations despite an old-generation marker", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-mixed-reindex-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-mixed-reindex-"));
   const vaultPath = resolve(directory, "vault.sqlite");
   const options = sourceOnlyOptions(vaultPath);
   const hostBinding = options.hostBinding;
@@ -402,7 +402,7 @@ test("normal startup rebuilds mixed vector generations despite an old-generation
 });
 
 test("source-only startup resumes the same shutdown-paused current-generation embed job", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-shutdown-resume-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-shutdown-resume-"));
   const vaultPath = resolve(directory, "vault.sqlite");
   const options = sourceOnlyOptions(vaultPath);
   const hostBinding = options.hostBinding;
@@ -501,7 +501,7 @@ test("source-only startup resumes the same shutdown-paused current-generation em
 });
 
 test("runtime batch purge removes all requested sources through one owner operation", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-purge-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-purge-"));
   let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
   try {
     runtime = await createRuntime({
@@ -528,7 +528,7 @@ test("runtime batch purge removes all requested sources through one owner operat
 });
 
 test("failed auxiliary purge stays pending and restart reconciles tombstones before admission", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-purge-sidecar-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-purge-sidecar-"));
   let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
   let fail = true;
   let procedureCaptureId: string | undefined;
@@ -599,7 +599,7 @@ test("failed auxiliary purge stays pending and restart reconciles tombstones bef
 });
 
 test("runtime owns one source reranker, reloads it after purge reset, and clears search reports", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-reranker-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-reranker-"));
   const disposed: LocalReranker[] = [];
   const forgotten: Array<{ scopeId: string; ids: readonly string[] }> = [];
   let clearReports = 0;
@@ -643,7 +643,7 @@ test("runtime owns one source reranker, reloads it after purge reset, and clears
 });
 
 test("runtime reports a pending purge when source reranker disposal fails", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-reranker-failure-"));
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-mem-runtime-reranker-failure-"));
   let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
   try {
     runtime = await createRuntime({

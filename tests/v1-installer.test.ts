@@ -9,18 +9,43 @@ test("native Unix installer has valid shell syntax and verifies archives before 
   const syntax = spawnSync("sh", ["-n", fileURLToPath(new URL("../../install.sh", import.meta.url))], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
   assert.match(script, /--proto '=https' --tlsv1\.2/u);
-  assert.match(script, /native_archive_hash_mismatch/u);
+ assert.match(script, /native_archive_hash_mismatch/u);
+ assert.match(script, /native_archive_download_failed/u);
+ assert.match(script, /native_archive_checksum_invalid/u);
+  assert.match(script, /native_archive_invalid/u);
+  assert.match(script, /installer_version_invalid/u);
+  assert.match(script, /native_target_not_published \(supported: \$supported_targets\)/u);
+  assert.match(script, /agent-mem/iu);
+  assert.match(script, /memory compatibility alias/u);
   assert.match(script, /darwin-arm64/u);
-  assert.match(script, /linux-arm64/u);
+  assert.match(script, /native_target_not_published/u);
   assert.equal(script.includes("sudo"), false);
   assert.equal(script.includes("hash_command -a 256"), false);
 });
 
 test("native Windows installer covers both supported Node architectures", () => {
   const script = readFileSync(new URL("../../install.ps1", import.meta.url), "utf8");
-  assert.match(script, /win-arm64/u);
+  assert.match(script, /native_target_not_published/u);
   assert.match(script, /win-x64/u);
   assert.match(script, /Get-FileHash -Algorithm SHA256/u);
   assert.match(script, /installer_requires_https/u);
-  assert.match(script, /native_archive_hash_mismatch/u);
+ assert.match(script, /native_archive_hash_mismatch/u);
+ assert.match(script, /native_archive_download_failed/u);
+ assert.match(script, /native_archive_checksum_invalid/u);
+  assert.match(script, /native_archive_invalid/u);
+  assert.match(script, /installer_version_invalid/u);
+  assert.match(script, /PROCESSOR_ARCHITEW6432/u);
+  assert.match(script, /LOCALAPPDATA/u);
+  assert.match(script, /agent-mem\.cmd/u);
+  assert.match(script, /memory\.cmd/u);
+});
+
+test("release gate validates both archive layouts and the complete published target set", () => {
+ const workflow = readFileSync(new URL("../../.github/workflows/release.yml", import.meta.url), "utf8");
+ assert.match(workflow, /archive="agent-mem-\$\{\{ matrix\.target \}\}\.tar\.gz"/u);
+ assert.match(workflow, /agent-mem-package\/agent-mem/u);
+ assert.match(workflow, /unix_archive_layout_invalid/u);
+ assert.match(workflow, /windows_archive_layout_invalid/u);
+ assert.match(workflow, /Verify published asset set/u);
+ assert.match(workflow, /darwin-arm64 darwin-x64 linux-x64 win-x64/u);
 });

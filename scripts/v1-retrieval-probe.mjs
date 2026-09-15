@@ -36,8 +36,9 @@ if (packageDirectory === repoRoot || packageDirectory.startsWith(`${repoRoot}${s
 }
 if (process.env.NODE_PATH !== undefined) throw new Error("NODE_PATH_must_be_unset");
 
-if (process.env.AGENT_MEMORY_V1_PROBE_REEXEC !== "1" && realpathSync(process.execPath) !== packageNode) {
-  const environment = { ...process.env, AGENT_MEMORY_V1_PROBE_REEXEC: "1" };
+if ((process.env.AGENT_MEM_PROBE_REEXEC ?? process.env.AGENT_MEMORY_V1_PROBE_REEXEC) !== "1" && realpathSync(process.execPath) !== packageNode) {
+  const environment = { ...process.env, AGENT_MEM_PROBE_REEXEC: "1" };
+  delete environment.AGENT_MEMORY_V1_PROBE_REEXEC;
   delete environment.NODE_PATH;
   delete environment.NODE_OPTIONS;
   const child = spawnSync(packageNode, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
@@ -354,7 +355,7 @@ for (const entry of directions) {
   assert.ok(related.intelligence.graph_added <= 16);
   assert.ok(related.packet.items.every(item => captureIds.includes(item.item_id)));
   const command = async (...argumentsValue) => {
-    const result = await promisify(execFile)(join(packageDirectory, "memory"),
+    const result = await promisify(execFile)(join(packageDirectory, "agent-mem"),
       ["--data-dir", dataDirectory, ...argumentsValue], { timeout: 30_000 });
     return JSON.parse(result.stdout);
   };

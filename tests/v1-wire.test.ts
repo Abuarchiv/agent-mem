@@ -65,7 +65,7 @@ function bindingFor(): TrustedBinding {
 }
 
 function setup(): Fixture {
-  const directory = mkdtempSync(join(tmpdir(), "agent-memory-v1-wire-"));
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-wire-"));
   const runtimeDirectory = join(directory, "runtime");
   mkdirSync(runtimeDirectory, { mode: 0o700 });
   chmodSync(runtimeDirectory, 0o700);

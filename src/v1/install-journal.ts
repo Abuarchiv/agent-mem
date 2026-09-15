@@ -11,7 +11,7 @@ export const INSTALL_JOURNAL_PHASES = [
   "detect", "plan", "stage", "verify", "activate", "configure", "start", "smoke", "complete", "failed", "rollback",
 ] as const;
 export type InstallJournalPhase = typeof INSTALL_JOURNAL_PHASES[number];
-export const INSTALL_JOURNAL_STATES = ["pending", "running", "completed", "failed"] as const;
+export const INSTALL_JOURNAL_STATES = ["pending", "running", "completed", "failed", "skipped"] as const;
 export type InstallJournalPhaseState = typeof INSTALL_JOURNAL_STATES[number];
 export const MAX_INSTALL_JOURNAL_ATTEMPTS = 3;
 export const INSTALL_JOURNAL_SIZE_LIMIT = 64 * 1024;
@@ -22,6 +22,7 @@ export type InstallJournalErrorCode =
   | "install_journal_unknown"
   | "install_journal_stale"
   | "install_journal_unverified"
+  | "install_journal_reset_failed"
   | "install_journal_attempts_exceeded"
   | "install_journal_invalid";
 
@@ -62,6 +63,11 @@ export interface ReadInstallJournalOptions {
 
 export interface UpdateInstallJournalOptions {
   readonly expectedUpdatedAt?: string;
+}
+
+export interface ResetInstallJournalResult {
+  readonly journal: InstallJournal;
+  readonly backupPath: string;
 }
 
 const TOP_LEVEL_KEYS = new Set(["version", "project", "hosts", "rerank", "phases", "currentPhase", "attempts", "lastErrorCode", "lastGoodPhase", "updatedAt"]);
@@ -223,4 +229,29 @@ export function updateInstallJournal(
   }
   const next = parseInstallJournal({ ...mutate(current), updatedAt: new Date().toISOString() });
   return writeInstallJournal(path, next);
+}
+
+/** Move a capped journal aside and atomically create a fresh repair attempt. */
+export function resetInstallJournal(path: string, current: InstallJournal, project = current.project): ResetInstallJournalResult {
+  const file = resolve(path);
+  const parsed = parseInstallJournal(current);
+  const backupPath = `${file}.reset-${randomUUID()}`;
+  try {
+    renameSync(file, backupPath);
+  } catch (error) {
+    throw new InstallJournalError("install_journal_reset_failed", error);
+  }
+  const journal = createInstallJournal({ project, hosts: parsed.hosts, rerank: parsed.rerank });
+  try {
+    writeInstallJournal(file, journal);
+  } catch (error) {
+    try {
+      if (existsSync(file)) unlinkSync(file);
+      renameSync(backupPath, file);
+    } catch {
+      // Keep the recoverable backup if restoring the original path is impossible.
+    }
+    throw new InstallJournalError("install_journal_reset_failed", error);
+  }
+  return { journal, backupPath };
 }

@@ -333,6 +333,7 @@ test("bridge stamps the first observed time once and rejects an outside workspac
           },
           recall: async (): Promise<never> => undefined as never,
           recognizeContext: async (): Promise<boolean> => false,
+          rpc: async (): Promise<unknown> => ({}),
         };
       },
     });

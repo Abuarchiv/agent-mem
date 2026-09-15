@@ -6,6 +6,6 @@ import { createOpenCodePluginHooks } from "./plugin-runtime.js";
 const OpenCodeMemoryPlugin: Plugin = async (input, options) => createOpenCodePluginHooks(input, options);
 
 export default {
-  id: "agent-memory",
+  id: "agent-mem",
   server: OpenCodeMemoryPlugin,
 };

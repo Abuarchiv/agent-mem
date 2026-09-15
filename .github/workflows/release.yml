@@ -36,29 +36,63 @@ jobs:
         run: npm run models:download
       - name: Download pinned Node runtime
         run: npm run runtime:download
+      - name: Verify pinned inputs
+        run: |
+          npm run models:verify
+          npm run runtime:verify
+      - name: Run V1 gate
+        run: npm test
       - name: Build package
-        run: npm run package -- --output "${{ runner.temp }}/agent-memory-v1-package"
+        run: npm run package -- --output "${{ runner.temp }}/agent-mem-package"
+      - name: Probe package
+        run: npm run probe -- --package-dir "${{ runner.temp }}/agent-mem-package" --no-rerank
+      - name: Run Windows install smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP 'agent-mem-install-smoke'
+          New-Item -ItemType Directory -Path (Join-Path $smoke 'project') -Force | Out-Null
+          & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" --data-dir (Join-Path $smoke 'data') install --project (Join-Path $smoke 'project') --agents codex --no-rerank --yes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" --data-dir (Join-Path $smoke 'data') stop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run Unix install smoke
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          smoke="${RUNNER_TEMP}/agent-mem-install-smoke"
+          mkdir -p "${smoke}/project"
+          "${RUNNER_TEMP}/agent-mem-package/agent-mem" --data-dir "${smoke}/data" install --project "${smoke}/project" --agents codex,opencode,copilot-cli --no-rerank --yes
+          "${RUNNER_TEMP}/agent-mem-package/agent-mem" --data-dir "${smoke}/data" stop
       - name: Archive Unix bundle
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          archive="agent-memory-v1-${{ matrix.target }}.tar.gz"
-          tar -czf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" agent-memory-v1-package
+          archive="agent-mem-${{ matrix.target }}.tar.gz"
+          tar -czf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" agent-mem-package
+          check="$(mktemp -d)"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${check}"
+          test -f "${check}/agent-mem-package/agent-mem" || { echo unix_archive_layout_invalid >&2; exit 1; }
+          test -f "${check}/agent-mem-package/manifest.json" || { echo unix_archive_layout_invalid >&2; exit 1; }
           shasum -a 256 "${RUNNER_TEMP}/${archive}" | sed "s#${RUNNER_TEMP}/##" > "${RUNNER_TEMP}/${archive}.sha256"
       - name: Archive Windows bundle
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $archive = "agent-memory-v1-${{ matrix.target }}.zip"
-          Compress-Archive -LiteralPath "${{ runner.temp }}/agent-memory-v1-package" -DestinationPath "${{ runner.temp }}/$archive"
+          $archive = "agent-mem-${{ matrix.target }}.zip"
+          Compress-Archive -LiteralPath "${{ runner.temp }}/agent-mem-package" -DestinationPath "${{ runner.temp }}/$archive"
+          $check = Join-Path $env:RUNNER_TEMP 'agent-mem-archive-check'
+          Expand-Archive -LiteralPath "${{ runner.temp }}/$archive" -DestinationPath $check -Force
+          if (-not (Test-Path (Join-Path $check 'agent-mem-package/agent-mem.cmd'))) { throw 'windows_archive_layout_invalid' }
+          if (-not (Test-Path (Join-Path $check 'agent-mem-package/manifest.json'))) { throw 'windows_archive_layout_invalid' }
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "${{ runner.temp }}/$archive").Hash.ToLowerInvariant()
           "$hash  $archive" | Set-Content -LiteralPath "${{ runner.temp }}/$archive.sha256" -Encoding ASCII
       - name: Upload bundle assets
         uses: actions/upload-artifact@v4
         with:
-          name: agent-memory-v1-${{ matrix.target }}
+          name: agent-mem-${{ matrix.target }}
           path: |
-            ${{ runner.temp }}/agent-memory-v1-${{ matrix.target }}.*
+            ${{ runner.temp }}/agent-mem-${{ matrix.target }}.*
           if-no-files-found: error
 
   publish:
@@ -68,10 +102,18 @@ jobs:
       - name: Download bundle assets
         uses: actions/download-artifact@v4
         with:
-          pattern: agent-memory-v1-*
+          pattern: agent-mem-*
           path: assets
           merge-multiple: true
+      - name: Verify published asset set
+        shell: bash
+        run: |
+          test "$(find assets -maxdepth 1 -type f -name 'agent-mem-*' | wc -l | tr -d ' ')" -eq 8
+          for target in darwin-arm64 darwin-x64 linux-x64 win-x64; do
+            test -f "assets/agent-mem-${target}.sha256"
+            test -f "assets/agent-mem-${target}.tar.gz" || test -f "assets/agent-mem-${target}.zip"
+          done
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" assets/* --repo "${GITHUB_REPOSITORY}" --title "Agent Memory V1 ${GITHUB_REF_NAME}" --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" assets/* --repo "${GITHUB_REPOSITORY}" --title "Agent Mem ${GITHUB_REF_NAME}" --generate-notes

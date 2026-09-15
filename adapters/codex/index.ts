@@ -43,12 +43,14 @@ import {
 } from "../../src/host/contract.js";
 import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend, type AgentMemorySessionStatus, type SessionHost } from "../../src/v1/session-status.js";
 import { ensureOwnedBrokerForConnection } from "../../src/v1/recovery.js";
+import { MEMORY_MCP_LEGACY_SERVER_KEYS, MEMORY_MCP_SERVER_KEY, MEMORY_MCP_SERVER_NAME } from "../../src/host/tool-schemas.js";
 
 export const CODEX_ADAPTER_VERSION = "1.0.0" as const;
 export const CODEX_SESSION_START_UTF8_BYTES = 4_000;
 export const CODEX_PROMPT_UTF8_BYTES = 8_000;
 export const CODEX_SESSION_START_MAX_BYTES = 24 * 1024;
 export const CODEX_PROMPT_MAX_BYTES = 64 * 1024;
+const ownMemoryMcpServerNames = [MEMORY_MCP_SERVER_KEY, MEMORY_MCP_SERVER_NAME, ...MEMORY_MCP_LEGACY_SERVER_KEYS] as const;
 /** Native hook names accepted by this adapter's versioned input contract. */
 export const CODEX_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "PostCompact"] as const;
 
@@ -57,7 +59,7 @@ const MAX_HOOK_NODES = 50_000;
 const MAX_HOOK_DEPTH = 20;
 const DEFAULT_HOOK_TIMEOUT_MS = 4_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 2_000;
-const DEGRADED_MESSAGE = "Agent Memory unavailable; Codex continued without memory context.";
+const DEGRADED_MESSAGE = "Agent Mem unavailable; Codex continued without memory context.";
 
 const codexSurfaceSchema = z.enum(["codex_cli", "codex_desktop"]);
 const versionSchema = z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
@@ -551,7 +553,7 @@ export class CodexHostAdapter {
     // These results already come from this memory store. Saving them again
     // would turn retrieved evidence into increasingly duplicated new evidence.
     if (hook.hook_event_name === "PostToolUse" &&
-      ["memory_recall", "memory_get", "memory_forget", "memory_write"].some(name => hook.tool_name === `mcp__agent_memory_v1__${name}`)) {
+      ["memory_recall", "memory_get", "memory_forget", "memory_write"].some(name => ownMemoryMcpServerNames.some(server => hook.tool_name === `mcp__${server}__${name}`))) {
       return { status: "completed", response: {}, hookEventName: hook.hook_event_name, coverage: { status: "complete" } };
     }
     try {

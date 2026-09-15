@@ -91,7 +91,7 @@ function setup(scopeIds: readonly string[] = [scopeA]): {
   readonly binding: TrustedBinding;
   readonly policy: PolicySetupBinding;
 } {
-  const directory = mkdtempSync(join(tmpdir(), "agent-memory-v1-source-graph-"));
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-source-graph-"));
   const database = new AgentMemoryDatabase(join(directory, "vault.sqlite"), { extraction_enabled: false });
   const binding = bindingFor(scopeIds);
   const policy = policyFor(scopeIds);

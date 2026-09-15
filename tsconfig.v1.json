@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "outDir": "dist-v1", "declaration": false, "declarationMap": false },
-  "files": ["scripts/v1.ts", "scripts/package-v1.ts", "adapters/codex/index.ts", "adapters/opencode/plugin.ts", "adapters/opencode/bridge.ts", "adapters/copilot-cli/index.ts"],
+  "files": ["scripts/v1.ts", "scripts/package-v1.ts", "src/view/client.ts", "adapters/codex/index.ts", "adapters/opencode/plugin.ts", "adapters/opencode/bridge.ts", "adapters/copilot-cli/index.ts"],
   "include": ["tests/v1-*.test.ts", "tests/vector-projection.test.ts", "tests/capture.test.ts", "tests/capture-policy.test.ts", "tests/lexical.test.ts", "tests/broker.test.ts", "tests/broker-owner.test.ts", "tests/codex-host.test.ts", "tests/opencode-bridge.test.ts", "tests/opencode-transform.test.ts", "tests/opencode-reconcile.test.ts", "tests/copilot-cli-hook.test.ts", "tests/copilot-cli-manifest.test.ts", "tests/purge-source.test.ts"]
 }

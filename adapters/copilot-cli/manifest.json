@@ -20,7 +20,7 @@
   "registration": {
     "kind": "version1_command_bash_powershell",
     "version": 1,
-    "recommendedLocation": ".github/hooks/agent-memory.json",
+    "recommendedLocation": ".github/hooks/agent-mem.json",
     "eventArg": "--event",
     "shellKeys": ["bash", "powershell"],
     "eventsRendered": [

@@ -8,6 +8,7 @@ import {
   ExtraError,
   RERANKER_EXTRA_ID,
   installRerankerExtra,
+  ensureRerankerExtra,
   removeRerankerExtra,
   rerankerDataRoot,
   rerankerModelRoot,
@@ -63,5 +64,16 @@ test("a failed reranker download reports a stable error and removes staging", as
       (error: unknown) => error instanceof ExtraError && error.code === "extra_download_hash_mismatch",
     );
     assert.deepEqual((await import("node:fs")).readdirSync(rerankerDataRoot(data)), []);
+  } finally { rmSync(data, { recursive: true, force: true }); }
+});
+
+test("recommended reranker activation is optional and degrades without blocking core", async () => {
+  const data = fixture();
+  try {
+    assert.deepEqual(await ensureRerankerExtra(data, false), { enabled: false, state: "disabled", reason: null });
+    const unavailable = await ensureRerankerExtra(data, true, async () => {
+      throw new ExtraError("extra_download_failed");
+    });
+    assert.deepEqual(unavailable, { enabled: false, state: "unavailable", reason: "extra_download_failed" });
   } finally { rmSync(data, { recursive: true, force: true }); }
 });

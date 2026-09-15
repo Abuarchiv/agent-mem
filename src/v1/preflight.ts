@@ -34,9 +34,14 @@ export interface InstallBundleReport {
   readonly runtime: { readonly state: "embedded" | "system"; readonly version: string };
   readonly core: { readonly state: "ready"; readonly model: string; readonly revision: string };
   readonly reranker: RerankerExtraStatus;
-  readonly sqlite_vec: unknown;
+  readonly sqlite_vec: InstallVectorCapability;
   readonly manifest?: { readonly profile: InstallBundleManifest["profile"]; readonly version: string };
 }
+
+export type InstallVectorCapability =
+  | { readonly state: "bundled"; readonly target: string; readonly asset: string; readonly sha256: string }
+  | { readonly state: "fallback"; readonly reason: string }
+  | { readonly state: "unknown"; readonly reason: string };
 
 function fail(code: string): never {
   throw new InstallError(code);
@@ -94,6 +99,34 @@ function verifyManifestFiles(root: string, manifest: InstallBundleManifest): voi
   }
 }
 
+export function verifyVectorCapability(root: string, manifest: InstallBundleManifest | undefined): InstallVectorCapability {
+  if (manifest === undefined) return { state: "unknown", reason: "source_checkout" };
+  const value = manifest.sqlite_vec;
+  if (typeof value !== "object" || value === null || Array.isArray(value) || typeof (value as { state?: unknown }).state !== "string") {
+    fail("install_bundle_vector_capability_invalid");
+  }
+  const state = (value as { state: unknown }).state;
+  if (state === "fallback") {
+    const reason = (value as { reason?: unknown }).reason;
+    if (typeof reason !== "string" || reason.length === 0 || reason.length > 128) fail("install_bundle_vector_capability_invalid");
+    return { state: "fallback", reason };
+  }
+  if (state !== "bundled") fail("install_bundle_vector_capability_invalid");
+  const target = (value as { target?: unknown }).target;
+  const asset = (value as { asset?: unknown }).asset;
+  if (typeof target !== "string" || typeof asset !== "string" || asset.length === 0) fail("install_bundle_vector_capability_invalid");
+  const relativeAsset = `dist-v1/src/native/${asset}`;
+  const assetPath = safeBundlePath(root, relativeAsset);
+  let info: ReturnType<typeof lstatSync>;
+  try { info = lstatSync(assetPath); } catch { fail("install_bundle_vector_asset_missing"); }
+  if (!info.isFile() || info.isSymbolicLink()) fail("install_bundle_vector_asset_invalid");
+  const listed = manifest.files.find(file => file.path === relativeAsset);
+  if (listed === undefined) fail("install_bundle_vector_asset_unlisted");
+  const digest = createHash("sha256").update(readFileSync(assetPath)).digest("hex");
+  if (digest !== listed.sha256) fail("install_bundle_vector_asset_tampered");
+  return { state: "bundled", target, asset, sha256: listed.sha256 };
+}
+
 function verifyRuntime(root: string, manifest: InstallBundleManifest): string {
   const executable = manifest.platform === "win32" ? join(root, "runtime", "bin", "node.exe") : join(root, "runtime", "bin", "node");
   try {
@@ -121,6 +154,7 @@ export async function verifyInstallBundle(root = bundleRoot(), dataDirectory?: s
     if (bundleManifest.platform !== process.platform || bundleManifest.arch !== process.arch) fail("install_bundle_target_mismatch");
     verifyManifestFiles(resolve(root), bundleManifest);
   }
+  const vector = verifyVectorCapability(resolve(root), bundleManifest);
   const runtimeVersion = bundleManifest === undefined ? process.version : verifyRuntime(resolve(root), bundleManifest);
   const e5Root = join(resolve(root), ".models", "e5", E5_MODEL_MANIFEST.model_id, E5_MODEL_MANIFEST.revision);
   try { await verifyE5Artifacts(e5Root, E5_MODEL_MANIFEST); }
@@ -135,7 +169,7 @@ export async function verifyInstallBundle(root = bundleRoot(), dataDirectory?: s
     runtime: { state: bundleManifest === undefined ? "system" : "embedded", version: runtimeVersion },
     core: { state: "ready", model: E5_MODEL_MANIFEST.model_id, revision: E5_MODEL_MANIFEST.revision },
     reranker,
-    sqlite_vec: bundleManifest?.sqlite_vec ?? { state: "unknown" },
+    sqlite_vec: vector,
     ...(bundleManifest === undefined ? {} : { manifest: { profile: bundleManifest.profile, version: bundleManifest.version } }),
   };
 }

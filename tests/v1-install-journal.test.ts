@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import {
   InstallJournalError,
   createInstallJournal,
   readInstallJournal,
+  resetInstallJournal,
   updateInstallJournal,
   writeInstallJournal,
 } from "../src/v1/install-journal.js";
@@ -131,6 +132,31 @@ test("install journal enforces the three-attempt bound", () => {
       expectJournalError("install_journal_attempts_exceeded"),
     );
     assert.equal(readInstallJournal(path).attempts, 3);
+  } finally {
+    teardown(directory);
+  }
+});
+
+test("install journal reset preserves the capped journal and starts a fresh attempt", () => {
+  const { directory, path } = setup();
+  try {
+    const base = createInstallJournal({ project: directory, hosts: ["codex", "opencode"], rerank: true });
+    writeInstallJournal(path, base);
+    const capped = updateInstallJournal(path, (current) => ({ ...current, attempts: 3, lastErrorCode: "install_smoke_failed" }));
+    const alternateProject = join(directory, "alternate-project");
+    const reset = resetInstallJournal(path, capped, alternateProject);
+    assert.equal(reset.journal.attempts, 0);
+    assert.equal(reset.journal.project, alternateProject);
+    assert.deepEqual(reset.journal.hosts, ["codex", "opencode"]);
+    assert.equal(reset.journal.rerank, true);
+    assert.equal(readInstallJournal(path).attempts, 0);
+    assert.equal(existsSync(reset.backupPath), true);
+    assert.equal(readInstallJournal(reset.backupPath).attempts, 3);
+    const skipped = { ...reset.journal, currentPhase: "failed" as const, phases: { ...reset.journal.phases, rollback: "skipped" as const } };
+    assert.equal(readInstallJournal(path).phases.rollback, "pending");
+    writeFileSync(path, JSON.stringify({ ...skipped, updatedAt: new Date().toISOString() }), { mode: 0o600 });
+    assert.equal(readInstallJournal(path).phases.rollback, "skipped");
+    assert.ok(!readFileSync(reset.backupPath, "utf8").includes("secret"));
   } finally {
     teardown(directory);
   }

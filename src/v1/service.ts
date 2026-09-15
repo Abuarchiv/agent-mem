@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { createRuntime, type RuntimeOwner } from "../app/runtime.js";
-import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setReaderOutputGrants, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
+import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setLocalUiOutputGrants, setReaderOutputGrants, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
 import { AgentMemoryBroker, AgentMemoryBrokerClient } from "../host/broker.js";
 import { bindingOwnerId, validateBoundRecallRequest, type EvidencePacket, type TrustedBinding } from "../host/contract.js";
 import { createMemoryMcpServer, type MemoryMcpServer } from "../host/mcp.js";
@@ -33,6 +33,7 @@ export const V1_READER_SOURCE_CLASSES = ["prompt", "assistant_output"] as const;
 
 export interface V1ServiceOptions {
   readonly rerank?: boolean;
+  readonly local_ui?: boolean;
 }
 
 type RerankerStatus = { state: "disabled" | "loading" | "ready" | "disposing" | "disposed" | "unavailable"; reason: string | null };
@@ -79,7 +80,7 @@ export function connectClient(directory: string, config: V1Config, entry?: V1Con
 export async function startService(directory: string, modelRoot?: string, options: V1ServiceOptions = {}) {
   ensurePrivateDirectory(directory);
   ensurePrivateDirectory(runtimeDirectory(directory));
-  const releaseConfiguration = acquireOwnerLock(runtimeDirectory(directory), "agent-memory-v1-config", "config.lock");
+  const releaseConfiguration = acquireOwnerLock(runtimeDirectory(directory), "agent-mem-config", "config.lock");
   try { return await startConfiguredService(directory, modelRoot, options); }
   finally { releaseConfiguration(); }
 }
@@ -104,7 +105,9 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
   ];
   const scopeIds = config.projects.map(p => p.scope_id);
   const targets = V1_OUTPUT_TARGETS;
-  const policy = createPolicySetupBinding({ version: 1, setup_id: config.installation_id, allowed_scope_ids: scopeIds, allowed_output_targets: targets });
+  const localUiEnabled = options.local_ui === true;
+  const allowedOutputTargets = localUiEnabled ? [...targets, "local_ui"] : [...targets];
+  const policy = createPolicySetupBinding({ version: 1, setup_id: config.installation_id, allowed_scope_ids: scopeIds, allowed_output_targets: allowedOutputTargets });
   const first = config.projects[0]!;
   const output = createPolicyOutputBinding(policy, { version: 1, setup_id: policy.setup_id, output_binding_id: randomUUID(), scope_id: first.scope_id, target: "reader:codex_cli" });
   let servers = new WeakMap<object, MemoryMcpServer>();
@@ -123,6 +126,17 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     scope_id: scopeId,
     target: readerOutputTarget(binding),
   });
+  const readerOutputBindingFor = (scopeId: string) => outputBindingFor(operator, scopeId);
+  const localUiBindingFor = (scopeId: string) => {
+    if (!localUiEnabled) throw new Error("local_ui_not_enabled");
+    return createPolicyOutputBinding(policy, {
+      version: 1,
+      output_binding_id: randomUUID(),
+      setup_id: policy.setup_id,
+      scope_id: scopeId,
+      target: "local_ui",
+    });
+  };
   const requireCurrentSource = (owner: RuntimeOwner, binding: TrustedBinding, scopeId: string, captureId: string): void => {
     if (!scopeIds.includes(scopeId)) throw new Error("scope_not_allowed");
     try {
@@ -273,10 +287,13 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
         for (const project of config.projects) {
           database.registerScope({ scope_id: project.scope_id, kind: "project", owner_ref: config.installation_id, created_at: project.created_at });
           if (!database.getScopeCapturePolicy(project.scope_id).enrolled) {
-            setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
+            const grants: unknown[] = targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] }));
+            if (localUiEnabled) grants.push({ target: "local_ui", source_classes: [...sourceClasses] });
+            setScopeOutputGrants(database, policy, project.scope_id, grants, timestamp);
             setScopeCapturePolicy(database, policy, project.scope_id, sourceClasses.map(source_class => ({ source_class, retention: { mode: "until_deleted" } })), timestamp);
           } else {
             setReaderOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
+            if (localUiEnabled) setLocalUiOutputGrants(database, policy, project.scope_id, sourceClasses, timestamp);
           }
         }
       },
@@ -290,7 +307,29 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     closePromise = (async () => { await broker.stop(); await runtime?.close(); servers = new WeakMap(); releaseLock(); })();
     return closePromise;
   }
-  return { status, close, database: runtime.database, broker, config };
+  let countContextTokens: ((text: string) => number) | undefined;
+  try {
+    countContextTokens = runtime.countContextTokens(" ") === undefined
+      ? undefined
+      : (text: string): number => {
+        const count = runtime.countContextTokens(text);
+        if (count === undefined) throw new Error("tokenizer_unavailable");
+        return count;
+      };
+  } catch {
+    countContextTokens = undefined;
+  }
+  return {
+    status,
+    close,
+    database: runtime.database,
+    broker,
+    config,
+    policyBinding: policy,
+    readerOutputBindingFor,
+    localUiBindingFor: localUiEnabled ? localUiBindingFor : undefined,
+    countContextTokens,
+  };
 }
 
 export async function operatorCall(directory: string, payload: unknown): Promise<unknown> {

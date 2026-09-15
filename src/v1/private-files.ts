@@ -24,8 +24,8 @@ function windowsAcl(path: string, initialize = false, mode: "private" | "asset" 
 $sidType = [System.Security.Principal.SecurityIdentifier]
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 ${initialize ? `# Only an empty application directory is changed; its ACL is set to the current user.
-$existing = Get-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH
-if (@(Get-ChildItem -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
+$existing = Get-Acl -LiteralPath $env:AGENT_MEM_PRIVATE_PATH
+if (@(Get-ChildItem -LiteralPath $env:AGENT_MEM_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $acl.SetOwner($user)
 $acl.SetAccessRuleProtection($true, $false)
@@ -34,8 +34,8 @@ foreach ($sid in @($user.Value, 'S-1-5-18', 'S-1-5-32-544')) {
   $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')
   $acl.AddAccessRule($rule)
 }
-Set-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -AclObject $acl
-` : ""}$acl = Get-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH
+Set-Acl -LiteralPath $env:AGENT_MEM_PRIVATE_PATH -AclObject $acl
+` : ""}$acl = Get-Acl -LiteralPath $env:AGENT_MEM_PRIVATE_PATH
 $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
   @{ sid = $_.IdentityReference.Value; allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights; inheritOnly = (($_.PropagationFlags -band 2) -ne 0) }
 })
@@ -45,7 +45,7 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
     const systemRoot = process.env.SystemRoot;
     if (!systemRoot) throw new Error("windows_system_root_missing");
     const output = execFileSync(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
-      env: { ...process.env, AGENT_MEMORY_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, AGENT_MEM_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
     if (!isPrivateWindowsAcl(JSON.parse(output.replace(/^\uFEFF/, "")), mode)) throw new Error("windows_acl_not_safe");
   } catch { throw new Error(`windows_${mode}_acl_unverified`); }

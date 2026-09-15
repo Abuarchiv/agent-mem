@@ -244,7 +244,7 @@ test("reconcile planner drops own MCP tool parts but retains foreign MCP tool pa
     messageID: "own-mcp-message",
     type: "tool",
     callID: "own-mcp-call",
-    tool: "agent_memory_v1_memory_recall",
+    tool: "agent_mem_memory_recall",
     state: { status: "completed", input: {}, output: "own memory output", title: "own", metadata: {}, time: { start: 1, end: 2 } },
   } as unknown as Part;
   const foreign = {
