@@ -20,6 +20,16 @@ const hash = (path: string) => createHash("sha256").update(readFileSync(path)).d
 
 export type NodeRuntimeTarget = "darwin-arm64" | "darwin-x64" | "linux-arm64" | "linux-x64" | "win-x64";
 
+export interface PackageV1Options {
+  readonly withReranker?: boolean;
+}
+
+export type PackageV1Profile = "core-v1" | "full-v1";
+
+export function packageProfile(options: PackageV1Options = {}): PackageV1Profile {
+  return options.withReranker === true ? "full-v1" : "core-v1";
+}
+
 export function nodeRuntimeTarget(platform = process.platform, arch = process.arch): NodeRuntimeTarget {
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) return `darwin-${arch}`;
   if (platform === "linux" && (arch === "arm64" || arch === "x64")) return `linux-${arch}`;
@@ -176,17 +186,19 @@ function copyPackages(names: readonly string[], output: string): { name: string;
   return records;
 }
 
-export async function packageV1(destination: string) {
+export async function packageV1(destination: string, options: PackageV1Options = {}) {
+  const includeReranker = options.withReranker === true;
   sqliteVecTarget();
   const output = resolve(destination);
   if (existsSync(output)) throw new Error("v1_package_destination_must_be_new");
   const graph = runtimeGraph();
   const modelRoot = join(root, ".models", "e5", E5_MODEL_MANIFEST.model_id, E5_MODEL_MANIFEST.revision);
   await verifyE5Artifacts(modelRoot);
+  const reranker = includeReranker
+    ? parseRerankManifest(JSON.parse(readFileSync(join(root, "src", "models", "rerank-manifest.json"), "utf8")))
+    : undefined;
   const rerankBase = join(root, ".models", "rerank", RERANK_MODEL_ID);
-  const rerankManifestPath = join(root, "src", "models", "rerank-manifest.json");
-  const reranker = parseRerankManifest(JSON.parse(readFileSync(rerankManifestPath, "utf8")));
-  await verifyRerankArtifacts(join(rerankBase, reranker.revision), reranker);
+  if (reranker !== undefined) await verifyRerankArtifacts(join(rerankBase, reranker.revision), reranker);
   mkdirSync(output, { recursive: true, mode: 0o700 });
   for (const file of graph.files) {
     const target = join(output, "dist-v1", file);
@@ -219,14 +231,16 @@ export async function packageV1(destination: string) {
     const target = join(targetModel, artifact.path); mkdirSync(dirname(target), { recursive: true }); copyFileSync(join(modelRoot, artifact.path), target);
   }
   mkdirSync(join(output, "licenses"), { recursive: true });
-  const targetRerank = join(output, ".models", "rerank", RERANK_MODEL_ID);
-  mkdirSync(targetRerank, { recursive: true });
-  for (const artifact of reranker.artifacts) {
-    const target = join(targetRerank, reranker.revision, artifact.path);
-    mkdirSync(dirname(target), { recursive: true });
-    copyFileSync(join(rerankBase, reranker.revision, artifact.path), target);
+  if (reranker !== undefined) {
+    const targetRerank = join(output, ".models", "rerank", RERANK_MODEL_ID);
+    mkdirSync(targetRerank, { recursive: true });
+    for (const artifact of reranker.artifacts) {
+      const target = join(targetRerank, reranker.revision, artifact.path);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(join(rerankBase, reranker.revision, artifact.path), target);
+    }
+    copyFileSync(join(root, "src/licenses/rerank-Apache-2.0-LICENSE"), join(output, "licenses/rerank-Apache-2.0-LICENSE"));
   }
-  copyFileSync(join(root, "src/licenses/rerank-Apache-2.0-LICENSE"), join(output, "licenses/rerank-Apache-2.0-LICENSE"));
   copyFileSync(join(root, "src/package-readme.md"), join(output, "README.md"));
   for (const name of ["node-LICENSE", "e5-LICENSE", "onnxruntime-LICENSE", "onnxruntime-ThirdPartyNotices.txt", "sqlite-vec-LICENSE-MIT", "sharp-libvips-THIRD-PARTY-NOTICES.md"]) {
     copyFileSync(join(root, "src/licenses", name), join(output, "licenses", name));
@@ -247,13 +261,15 @@ export async function packageV1(destination: string) {
     }
   }
   inspect(output);
-  const manifest = { version: "1.0.0", platform: process.platform, arch: process.arch, node: `v${NODE_RUNTIME_VERSION}`, roots: entries, modules: graph.files, dependencies: packages, model: E5_MODEL_MANIFEST, reranker, files };
+  const manifest = { version: "1.0.0", profile: packageProfile(options), platform: process.platform, arch: process.arch, node: `v${NODE_RUNTIME_VERSION}`, roots: entries, modules: graph.files, dependencies: packages, model: E5_MODEL_MANIFEST, ...(reranker === undefined ? {} : { reranker }), files };
   writeFileSync(join(output, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   return { path: output, files: files.length, bytes: files.reduce((sum, file) => sum + file.bytes, 0), modules: graph.files.length, manifest_sha256: hash(join(output, "manifest.json")) };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (args.length !== 2 || args[0] !== "--output" || !args[1]) throw new Error("usage: package:v1 -- --output NEW_DIRECTORY");
-  console.log(JSON.stringify(await packageV1(args[1])));
+  const withReranker = args.includes("--with-reranker");
+  const filtered = args.filter((arg) => arg !== "--with-reranker");
+  if (filtered.length !== 2 || filtered[0] !== "--output" || !filtered[1]) throw new Error("usage: package:v1 -- --output NEW_DIRECTORY [--with-reranker]");
+  console.log(JSON.stringify(await packageV1(filtered[1], { withReranker })));
 }
