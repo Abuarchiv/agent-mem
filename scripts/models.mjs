@@ -38,7 +38,12 @@ async function verifyAll() {
 
 async function downloadArtifact(spec, artifact) {
   if (await verifyArtifact(spec, artifact)) return "existing";
-  const url = `https://huggingface.co/${spec.repo}/resolve/${spec.revision}/${artifact.path}?download=true`;
+  // Transformers.js expects model_quantized.onnx locally. The upstream
+  // reranker repository names the same q8 artifact model_quint8_avx2.onnx.
+  const upstreamPath = spec.repo === rerankManifest.model_id && artifact.path === "onnx/model_quantized.onnx"
+    ? "onnx/model_quint8_avx2.onnx"
+    : artifact.path;
+  const url = `https://huggingface.co/${spec.repo}/resolve/${spec.revision}/${upstreamPath}?download=true`;
   const response = await fetch(url, { redirect: "follow" });
   if (!response.ok) throw new Error(`model_download_http_${response.status}:${spec.repo}/${artifact.path}`);
   const bytes = Buffer.from(await response.arrayBuffer());
