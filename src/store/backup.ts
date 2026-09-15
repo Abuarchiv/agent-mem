@@ -23,7 +23,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, parse, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
@@ -347,10 +347,29 @@ function safePath(input: string, field: string): string {
   return join(realpathSync(dirname(output)), basename(output));
 }
 
+interface PathFlavor {
+  readonly sep: string;
+  readonly resolve: (...paths: string[]) => string;
+  readonly parse: (path: string) => { readonly root: string };
+}
+
+const nativePathFlavor: PathFlavor = { sep, resolve, parse };
+
+/** Enumerate every existing-or-to-be-created ancestor in a platform-neutral way. */
+export function pathAncestors(path: string, pathFlavor: PathFlavor = nativePathFlavor): readonly string[] {
+  const resolved = pathFlavor.resolve(path);
+  const root = pathFlavor.parse(resolved).root;
+  let current = root;
+  const ancestors: string[] = [];
+  for (const part of resolved.slice(root.length).split(pathFlavor.sep).filter(Boolean)) {
+    current = pathFlavor.resolve(current, part);
+    ancestors.push(current);
+  }
+  return ancestors;
+}
+
 function assertNoSymlinkAncestors(path: string): void {
-  let current = "/";
-  for (const part of resolve(path).split("/").filter(Boolean)) {
-    current = resolve(current, part);
+  for (const current of pathAncestors(path)) {
     try {
       if (lstatSync(current).isSymbolicLink()) {
         const canonical = resolve(realpathSync(current));
