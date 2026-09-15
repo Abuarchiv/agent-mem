@@ -78,6 +78,7 @@ test("install journal rejects malformed data", () => {
     writeFileSync(path, "[]", { mode: 0o600 });
     assert.throws(() => readInstallJournal(path), expectJournalError("install_journal_malformed"));
     assert.throws(() => readInstallJournal(join(directory, "absent.json")), expectJournalError("install_journal_missing"));
+    assert.throws(() => readInstallJournal(join(directory, "new", "absent.json")), expectJournalError("install_journal_missing"));
   } finally {
     teardown(directory);
   }

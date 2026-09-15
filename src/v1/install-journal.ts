@@ -124,6 +124,7 @@ function wrapFileError(error: unknown, fallback: InstallJournalErrorCode): Insta
 }
 
 function assertJournalParent(directory: string): void {
+  if (!existsSync(directory)) return;
   try {
     assertPrivatePath(directory, undefined, "install_journal_unverified");
   } catch (error) {

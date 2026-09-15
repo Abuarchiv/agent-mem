@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   ExtraError,
   RERANKER_EXTRA_ID,
+  installRerankerExtra,
   removeRerankerExtra,
   rerankerDataRoot,
   rerankerModelRoot,
@@ -51,4 +52,15 @@ test("removal refuses symlinked extra roots and never follows them", () => {
     rmSync(data, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   }
+});
+
+test("a failed reranker download reports a stable error and removes staging", async () => {
+  const data = fixture();
+  try {
+    await assert.rejects(
+      installRerankerExtra(data, { fetch: async () => new Response("not the pinned artifact", { status: 200 }) }),
+      (error: unknown) => error instanceof ExtraError && error.code === "extra_download_hash_mismatch",
+    );
+    assert.deepEqual((await import("node:fs")).readdirSync(rerankerDataRoot(data)), []);
+  } finally { rmSync(data, { recursive: true, force: true }); }
 });
