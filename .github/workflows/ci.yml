@@ -36,6 +36,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          Import-Module Microsoft.PowerShell.Security
           $privateTemp = Join-Path $env:RUNNER_TEMP "agent-memory-v1-private-temp"
           New-Item -ItemType Directory -Force -Path $privateTemp | Out-Null
           $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -54,6 +56,8 @@ jobs:
             $acl.AddAccessRule($rule)
           }
           Set-Acl -LiteralPath $privateTemp -AclObject $acl
+          $check = Get-Acl -LiteralPath $privateTemp
+          if ($check.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $userSid) { throw "private temp owner mismatch" }
           "TEMP=$privateTemp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TMP=$privateTemp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Run tests
