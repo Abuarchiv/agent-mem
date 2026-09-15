@@ -105,6 +105,12 @@ function hasSearchableTerms(query: string): boolean {
   return /[\p{L}\p{N}_]+/u.test(query);
 }
 
+function lexicalSignal(rank: number): number {
+  if (!Number.isFinite(rank)) return 0;
+  const relevance = Math.max(0, -rank);
+  return relevance / (1 + relevance);
+}
+
 function usesRecentTimeline(context: PreparationContext, request: RecallRequest): boolean {
   return request.mode === "timeline" || context.kind === "session_start" && (
     context.capture_status.state === "committed" ||
@@ -192,7 +198,7 @@ function searchCandidateIds(
   }
   const rows = lexicalSearch(database, binding, boundedRequest, LEXICAL_CANDIDATE_LIMIT, lexicalOptions);
   return { candidateIds: rows.map(row => row.source_id), projectionUnavailable: queryVector !== undefined,
-    signals: new Map(rows.map(row => [row.source_id, { ...emptySignals(), lexical: 61 / (61 + row.rank) }])) };
+    signals: new Map(rows.map(row => [row.source_id, { ...emptySignals(), lexical: lexicalSignal(row.rank) }])) };
 }
 
 function recordTrace(

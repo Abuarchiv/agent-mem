@@ -21,9 +21,9 @@ import {
 import { bindingOwnerId, createTrustedBinding, type TrustedBinding } from "../src/host/contract.js";
 import { SearchState } from "../src/v1/search-state.js";
 import type { LocalReranker } from "../src/models/rerank.js";
-import { emptySignals, improveSourceRanking } from "../src/retrieval/source-intelligence.js";
+import { emptySignals, improveSourceRanking, retrievalQuery } from "../src/retrieval/source-intelligence.js";
 import { VECTOR_DIM, VectorSearchError } from "../src/retrieval/vector.js";
-import { AgentMemoryDatabase } from "../src/store/database.js";
+import { AgentMemoryDatabase, type RecallSourceGroup } from "../src/store/database.js";
 
 const scopeId = "11111111-1111-4111-8111-111111111111";
 const bindingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -184,6 +184,62 @@ test("a distinctive exact term beats a misleading hybrid score", async () => {
       {},
     );
     assert.equal(result.groups[0]?.capture_id, answerId);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("long queries retain technical anchors at the retrieval boundary", () => {
+  const query = `${Array.from({ length: 60 }, (_, index) => `filler${index}`).join(" ")} src/retrieval/lexical.ts`;
+  assert.match(retrievalQuery(query), /src\/retrieval\/lexical\.ts/);
+});
+
+test("lexical fallback keeps a distinctive technical anchor ahead of question filler", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const rareId = randomUUID();
+    const fillerId = randomUUID();
+    capture(envelope(rareId, "AXOLOTL_7421 release checklist is the relevant decision.", "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    capture(envelope(fillerId, "Where can I find the release document?", "2026-09-14T08:02:00Z", "tool_result"), binding, database);
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "Where can I find AXOLOTL_7421 document?", scope_ids: [scopeId], mode: "current", token_budget: 1_500 },
+      binding,
+      createPreparationContext(binding, { version: 1, kind: "session_start", deadline_at: "2099-01-01T00:00:00Z", capture_status: { state: "not_attempted" }, budget: { profile: { unit: "utf8_bytes", limit: 4_000 } } }),
+    );
+    assert.equal(packet.items[0]?.item_id, rareId, JSON.stringify(packet.items.map(item => ({ id: item.item_id, content: item.content }))));
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("equal matches get a stable session and source-class diversity pass", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const group = (captureId: string, sessionId: string, evidenceClass: "prompt" | "assistant_output", commitSeq: string): RecallSourceGroup => ({
+      capture_id: captureId,
+      scope_id: scopeId,
+      session_id: sessionId,
+      commit_seq: commitSeq,
+      data_epoch: "0",
+      evidence_class: evidenceClass,
+      role: evidenceClass === "prompt" ? "user" : "assistant",
+      event_json: JSON.stringify({ native_ids: { message_id: captureId } }),
+      spans: [{ span_id: randomUUID(), quote: "release decision" }],
+    } as unknown as RecallSourceGroup);
+    const first = group(randomUUID(), "session-a", "prompt", "1");
+    const duplicate = group(randomUUID(), "session-a", "prompt", "2");
+    const otherSession = group(randomUUID(), "session-b", "assistant_output", "3");
+    const result = await improveSourceRanking(
+      database,
+      { query: "release decision", scope_ids: [scopeId], mode: "current", token_budget: 4_000, known_at_seq: "3" },
+      binding,
+      [first, duplicate, otherSession],
+      new Map([[first.capture_id, emptySignals()], [duplicate.capture_id, emptySignals()], [otherSession.capture_id, emptySignals()]]),
+      { deadline_at: "2099-01-01T00:00:00Z", exclude_current_session_prompts: false, timeline: false },
+      {},
+    );
+    assert.deepEqual(result.groups.map(group => group.capture_id), [first.capture_id, otherSession.capture_id, duplicate.capture_id]);
   } finally {
     close(database, directory);
   }
