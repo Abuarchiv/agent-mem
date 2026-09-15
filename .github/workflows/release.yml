@@ -40,6 +40,18 @@ jobs:
         run: |
           npm run models:verify
           npm run runtime:verify
+      - name: Harden Windows model asset ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          foreach ($path in $paths) {
+            $permission = (Get-Item -LiteralPath $path).PSIsContainer ? "(OI)(CI)F" : "F"
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Run V1 gate (Unix)
         if: runner.os != 'Windows'
         run: npm test

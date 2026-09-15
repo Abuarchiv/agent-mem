@@ -61,24 +61,12 @@ jobs:
         run: |
           $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
           $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-          icacls.exe $modelRoot /inheritance:r /grant:r "*${userSid}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T /C
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Report Windows model asset ACL
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
-          $sidType = [System.Security.Principal.SecurityIdentifier]
           $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
-          $report = foreach ($path in $paths) {
-            $acl = Get-Acl -LiteralPath $path
-            $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
-              @{ sid = $_.IdentityReference.Value; allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights; inheritOnly = (($_.PropagationFlags -band 2) -ne 0) }
-            })
-            @{ path = $path; owner = $acl.GetOwner($sidType).Value; rules = $rules }
+          foreach ($path in $paths) {
+            $permission = (Get-Item -LiteralPath $path).PSIsContainer ? "(OI)(CI)F" : "F"
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          $report | ConvertTo-Json -Depth 4 -Compress
 
       - name: Build package (Windows)
         if: runner.os == 'Windows'
