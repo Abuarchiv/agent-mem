@@ -963,7 +963,12 @@ function packetItem(group: RecallSourceGroup): EvidencePacketItem {
     scope_id: group.scope_id,
     kind: "source",
     status: group.job_state === "pending_extraction" ? "pending_extraction" : "candidate",
-    content: sourceSpans.map((span) => span.quote).join("\n"),
+    content: sourceSpans.reduce((content, span, index) => {
+      if (index === 0) return span.quote;
+      const previous = sourceSpans[index - 1]!;
+      const separator = previous.root === span.root && previous.path === span.path && previous.end_utf16 === span.start_utf16 ? "" : "\n";
+      return `${content}${separator}${span.quote}`;
+    }, ""),
     source_span_ids: sourceSpans.map((span) => span.span_id),
     source_class: group.evidence_class,
     role: group.role,
@@ -988,12 +993,23 @@ function groupFitsPacketContract(group: RecallSourceGroup): boolean {
 
 function selectBudgetedSourceSpans(group: RecallSourceGroup, query: string | undefined, byteBudget: number): RecallSourceGroup {
   if (group.spans.length <= 1) return group;
-  const maxEnd = group.spans.reduce((max, span) => span.end_utf16 > max ? span.end_utf16 : max, 0n);
-  const wholeSpan = group.spans.find((span) => span.start_utf16 === 0n && span.end_utf16 === maxEnd && group.spans.some((other) => other.span_id !== span.span_id && other.end_utf16 < maxEnd));
+  const wholeSpan = group.spans.find((span) => span.start_utf16 === 0n && group.spans.some((other) =>
+    other.span_id !== span.span_id &&
+    other.root === span.root &&
+    other.path === span.path &&
+    other.start_utf16 >= span.start_utf16 &&
+    other.end_utf16 <= span.end_utf16 &&
+    other.end_utf16 < span.end_utf16,
+  ));
   const sourceSpans = wholeSpan === undefined ? group.spans : group.spans.filter((span) => span.span_id !== wholeSpan.span_id);
-  if (sourceSpans.length <= 1) return group;
-  const baseCap = Math.max(2_048, Math.min(8_192, Math.floor(byteBudget * 0.75)));
+  if (sourceSpans.length === 0) return { ...group, spans: [] };
+  const baseCap = Math.min(byteBudget, Math.max(256, Math.min(8_192, Math.floor(byteBudget * 0.75))));
   const cap = group.evidence_class === "assistant_output" ? Math.min(baseCap, 1_024) : baseCap;
+  if (sourceSpans.length === 1) {
+    return Buffer.byteLength(sourceSpans[0]!.quote, "utf8") <= cap
+      ? { ...group, spans: [sourceSpans[0]!] }
+      : { ...group, spans: [] };
+  }
   const terms = query?.toLocaleLowerCase("und").match(/[\p{L}\p{N}_-]{3,}/gu) ?? [];
   const ranked = sourceSpans.map((span, index) => {
     const text = span.quote.toLocaleLowerCase("und");
@@ -1005,11 +1021,12 @@ function selectBudgetedSourceSpans(group: RecallSourceGroup, query: string | und
   for (const candidate of ranked) {
     const nextBytes = Buffer.byteLength(candidate.span.quote, "utf8") + (selected.length === 0 ? 0 : 1);
     if (selected.length > 0 && bytes + nextBytes > cap) continue;
-    if (selected.length === 0 && nextBytes > cap) return group;
+    if (nextBytes > cap && selected.length === 0) continue;
     selected.push(candidate);
     bytes += nextBytes;
   }
-  if (selected.length === 0 || selected.length === group.spans.length) return group;
+  if (selected.length === 0) return { ...group, spans: [] };
+  if (wholeSpan === undefined && selected.length === group.spans.length) return group;
   const spans = selected.sort((left, right) => left.index - right.index).map(candidate => candidate.span);
   return { ...group, spans };
 }

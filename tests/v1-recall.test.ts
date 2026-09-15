@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -243,6 +243,101 @@ test("automatically segments long event text without losing source provenance", 
     assert.ok(item !== undefined && item.source_provenance !== undefined, JSON.stringify({ items: packet.items, diagnostics: packet.diagnostics, tokens: packet.tokens }));
     assert.ok(item.source_provenance.length < chunkSpans.length, JSON.stringify({ spans: chunkSpans.length, provenance: item.source_provenance.length }));
     assert.ok(item.content?.includes("AXOLOTL_7421 exact decision"), JSON.stringify(item));
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("automatic event segmentation stays within the hard span limit after boundary seeking", () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const original = `${"x".repeat(512)}\n`.repeat(1_000);
+    capture(envelope(sourceId, original, "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    const snapshot = database.getRecallSnapshot([scopeId], binding);
+    const spans = database.getRecallSourceGroups([scopeId], binding, [sourceId], snapshot.watermark)[0]?.spans ?? [];
+    const eventSpans = spans.filter((span) => span.root === "event" && span.path === "/text");
+    const fullSpan = eventSpans.find((span) => span.start_utf16 === 0n && span.end_utf16 === BigInt(original.length));
+    const chunks = eventSpans.filter((span) => span !== fullSpan);
+    assert.ok(chunks.length > 1);
+    assert.ok(fullSpan !== undefined);
+    assert.ok(eventSpans.length <= 128);
+    assert.equal(chunks.map((span) => span.quote).join(""), original);
+    assert.equal(fullSpan.quote, original);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("budgeted recall keeps payload and event provenance distinct", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const eventText = `ROOT_PATH_ANCHOR_7421${"E".repeat(1_480)}`;
+    const payloadText = "P".repeat(eventText.length);
+    const payloadSpanId = randomUUID();
+    const base = envelope(sourceId, eventText, "2026-09-14T08:01:00Z", "tool_result") as {
+      readonly event: Record<string, unknown>;
+      readonly payload: Record<string, unknown>;
+    };
+    capture(
+      { ...base, event: { ...base.event, text: eventText }, payload: { ...base.payload, text: payloadText } },
+      binding,
+      database,
+      { source_spans: [{
+        span_id: payloadSpanId,
+        root: "payload",
+        path: "/text",
+        start_utf16: 0,
+        end_utf16: payloadText.length,
+        digest: createHash("sha256").update(payloadText, "utf8").digest("hex"),
+      }] },
+    );
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "ANCHOR", scope_ids: [scopeId], mode: "current", token_budget: 16_000 },
+      binding,
+      createPreparationContext(binding, {
+        version: 1,
+        kind: "session_start",
+        deadline_at: "2099-01-01T00:00:00Z",
+        capture_status: { state: "not_attempted" },
+        budget: { profile: { unit: "utf8_bytes", limit: 16_000 } },
+      }),
+    );
+    const item = packet.items.find((candidate) => candidate.item_id === sourceId);
+    if (item?.source_provenance === undefined) throw new Error("source_item_missing");
+    assert.ok(item.source_provenance.some((span) => span.span_id === payloadSpanId));
+    assert.ok(item.source_provenance.some((span) => span.root === "event" && span.quote.includes("ROOT_PATH_ANCHOR_7421")));
+    assert.equal(item.source_provenance.some((span) => span.root === "event" && span.start_utf16 === 0 && span.end_utf16 === eventText.length), false);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("UTF-8-heavy event chunks remain useful under a byte budget", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const original = `${"界".repeat(1_024)}UTF8_BUDGET_ANCHOR_7421`;
+    capture(envelope(sourceId, original, "2026-09-14T08:01:00Z", "tool_result"), binding, database);
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "BUDGET", scope_ids: [scopeId], mode: "current", token_budget: 1_800 },
+      binding,
+      createPreparationContext(binding, {
+        version: 1,
+        kind: "session_start",
+        deadline_at: "2099-01-01T00:00:00Z",
+        capture_status: { state: "not_attempted" },
+        budget: { profile: { unit: "utf8_bytes", limit: 1_800 } },
+      }),
+    );
+    const item = packet.items.find((candidate) => candidate.item_id === sourceId);
+    if (item === undefined) throw new Error(JSON.stringify({ packet: packet.items, diagnostics: packet.diagnostics }));
+    assert.ok(item.content?.includes("UTF8_BUDGET_ANCHOR_7421"), JSON.stringify({ packet: packet.items, diagnostics: packet.diagnostics }));
+    assert.ok(packet.tokens.used <= 1_800);
+    for (const span of item.source_provenance ?? []) assert.ok(Buffer.byteLength(span.quote, "utf8") <= 1_350);
   } finally {
     close(database, directory);
   }

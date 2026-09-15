@@ -391,6 +391,23 @@ test("reindexes old chunker projections and returns exact multi-chunk source quo
   }
 });
 
+test("long automatic event spans do not duplicate the payload full span in vector jobs", () => {
+  const { directory, database, binding } = setup();
+  try {
+    const captureId = "abababab-eeee-4ded-8efe-abababababab";
+    const spanId = "cdcdcdcd-aaaa-4fef-8a8f-cdcdcdcdcdcd";
+    const text = `${"vector source line ".repeat(120)}VECTOR_DUPLICATE_ANCHOR`;
+    captureWithEmbed(database, binding, captureId, scopeA, text, spanId);
+    const source = database.getVectorProjectionSource(scopeA, captureId);
+    assert.ok(source.spans.length > 1);
+    assert.ok(source.spans.length <= 127);
+    assert.ok(source.spans.every((span) => span.root === "event" && span.path === "/text"));
+    assert.equal(source.spans.some((span) => span.start_utf16 === 0 && span.end_utf16 === text.length), false);
+  } finally {
+    closeSetup(directory, database);
+  }
+});
+
 test("keeps repeated identical chunks bound to cumulative UTF-16 offsets", () => {
   const { directory, database, binding } = setup();
   try {

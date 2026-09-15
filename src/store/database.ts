@@ -2166,9 +2166,13 @@ function automaticEventSpans(
   let start = 0;
   let index = 0;
   while (start < eventText.length) {
-    const desiredEnd = Math.min(eventText.length, start + chunkSize);
+    // The final available slot must absorb the remainder. Boundary seeking
+    // may move an earlier cut backwards, so the nominal ceil(length / N)
+    // calculation alone does not guarantee the hard span limit.
+    const forceFinalChunk = index >= chunkLimit - 1;
+    const desiredEnd = forceFinalChunk ? eventText.length : Math.min(eventText.length, start + chunkSize);
     let end = desiredEnd;
-    if (desiredEnd < eventText.length) {
+    if (!forceFinalChunk && desiredEnd < eventText.length) {
       const minimumBoundary = start + Math.floor((desiredEnd - start) / 2);
       for (let cursor = desiredEnd - 1; cursor >= minimumBoundary; cursor -= 1) {
         if (eventText[cursor] === "\n" || eventText[cursor] === "\r" || eventText[cursor] === " ") {
@@ -9759,7 +9763,7 @@ export class AgentMemoryDatabase {
     if (row === undefined) throw new StoreError("job_not_found");
     const payload = JSON.parse(sqlText(rowValue(row, "payload_json"), "vector-source-payload")) as unknown;
     const event = JSON.parse(sqlText(rowValue(row, "event_json"), "vector-source-event")) as unknown;
-    const spans = this.database
+    const sourceSpans = this.database
       .prepare(
         `SELECT span_id, root, path, start_utf16, end_utf16, digest
            FROM source_span WHERE scope_id = ? AND source_id = ? ORDER BY rowid`,
@@ -9795,6 +9799,28 @@ export class AgentMemoryDatabase {
           revision_ids: revisionRows.map((revisionRow) => sqlText(rowValue(revisionRow, "revision_id"), "vector-source-revision")),
         };
       });
+    // Long event text is stored as one canonical full span plus bounded child
+    // spans. Embed only the children: projecting both levels duplicates the
+    // same source and can exceed the worker's bounded batch. The address
+    // check deliberately includes root and path so unrelated payload/event
+    // spans with equal offsets never suppress one another.
+    const eventTextSpans = sourceSpans.filter((span) => span.root === "event" && span.path === "/text");
+    const eventWholeSpan = eventTextSpans.find((span) => span.start_utf16 === 0 && eventTextSpans.some((child) =>
+      child.span_id !== span.span_id && child.end_utf16 < span.end_utf16,
+    ));
+    const spans = sourceSpans.filter((span) => !sourceSpans.some((child) =>
+      child.span_id !== span.span_id &&
+      child.root === span.root &&
+      child.path === span.path &&
+      span.start_utf16 === 0 &&
+      child.start_utf16 >= span.start_utf16 &&
+      child.end_utf16 <= span.end_utf16 &&
+      child.end_utf16 < span.end_utf16,
+    ) && !(eventWholeSpan !== undefined &&
+      span.root !== "event" &&
+      span.start_utf16 === 0 &&
+      span.end_utf16 === eventWholeSpan.end_utf16 &&
+      span.digest === eventWholeSpan.digest));
     return {
       scope_id: sqlText(rowValue(row, "scope_id"), "vector-source-scope"),
       source_id: sqlText(rowValue(row, "capture_id"), "vector-source-capture"),
