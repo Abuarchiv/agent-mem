@@ -279,6 +279,7 @@ export async function packageV1(destination: string) {
   if (process.platform !== "win32") chmodSync(join(output, "runtime/bin", runtimeNode), 0o755);
   bundleDarwinRuntime(process.execPath, join(output, "runtime"));
   writeFileSync(join(output, "package.json"), JSON.stringify({ name: "agent-memory-v1", version: "1.0.0", type: "module", private: true }, null, 2) + "\n");
+  copyFileSync(join(root, "LICENSE"), join(output, "LICENSE"));
   const launcher = process.platform === "win32"
     ? windowsLaunchers().cmd
     : `#!/usr/bin/env sh\nset -eu\nPACKAGE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nunset NODE_OPTIONS NODE_PATH\nexec "$PACKAGE_DIR/runtime/bin/${runtimeNode}" "$PACKAGE_DIR/dist-v1/scripts/v1.js" "$@"\n`;

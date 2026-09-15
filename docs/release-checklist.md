@@ -8,7 +8,7 @@
 - [x] `npm run package -- --output <new-directory>` succeeds.
 - [x] Package manifest hashes, model manifests, and native sqlite-vec asset verify.
 - [x] Package smoke passes with provider keys unset and runtime model downloads disabled; the package bundles and relinks the macOS Node runtime dependencies.
-- [ ] Select and include the project license before public publication.
+- [x] MIT License is present in the repository and copied into release packages.
 
 ## Functional gates
 
@@ -26,6 +26,7 @@
 - [x] OpenCode capture and authenticated fresh-session recall trace (OpenCode `1.18.30`).
 - [ ] Copilot CLI/app local worktree MCP capture behavior.
 - [ ] Native Linux and Windows package smoke; do not infer them from macOS.
+- [x] Required Linux/Windows release-gate workflow is configured in `.github/workflows/release-gates.yml`; its hosted runs remain mandatory before tagging.
 - [ ] OpenCode concurrent-session snapshot lock issue is resolved upstream or the serial-session workaround is verified for the target release.
 
 ## Release discipline

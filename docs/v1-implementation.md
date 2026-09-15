@@ -8,9 +8,10 @@ Current local verification: `npm test` passes 279/279; package construction, man
 
 - `npm run build` passes on the current checkout.
 - `npm test`: **279/279** focused V1 tests pass.
-- The current package build with Node `v24.19.0` contains 3,941 files, is 600,798,980 bytes, and has manifest SHA-256 `84db944f2d8c939b6061eee9818ae83bb0ffabc67075a4f5bb2c4f152b5a77f3`.
+- The current package build with Node `v24.19.0` contains 3,942 files, is 600,800,046 bytes, and has manifest SHA-256 `cd1b70b4512347c6b8b3ee7854eaa66750e2119557f5b1bb36d43000b472c488`.
 - Packaged retrieval probes pass with reranking disabled; the reranker-enabled probe passes through the documented baseline fallback when the local model cannot load.
 - The package contains no generative provider SDK or UI runtime. Model artifacts are pinned and verified offline.
+- The repository and release package carry the MIT License. Linux/Windows package gates are defined in `.github/workflows/release-gates.yml` but cannot be claimed green until hosted runners complete.
 
 ## Native host evidence (15 September 2026)
 
