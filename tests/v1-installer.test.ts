@@ -13,6 +13,7 @@ test("native Unix installer has valid shell syntax and verifies archives before 
   assert.match(script, /darwin-arm64/u);
   assert.match(script, /linux-arm64/u);
   assert.equal(script.includes("sudo"), false);
+  assert.equal(script.includes("hash_command -a 256"), false);
 });
 
 test("native Windows installer covers both supported Node architectures", () => {

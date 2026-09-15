@@ -43,8 +43,10 @@ case "$base_url" in
 esac
 
 command -v curl >/dev/null 2>&1 || { echo "curl_required" >&2; exit 1; }
-if command -v shasum >/dev/null 2>&1; then hash_command=shasum
-elif command -v sha256sum >/dev/null 2>&1; then hash_command=sha256sum
+if command -v shasum >/dev/null 2>&1; then
+  calculate_hash() { shasum -a 256 "$1" | awk '{ print tolower($1) }'; }
+elif command -v sha256sum >/dev/null 2>&1; then
+  calculate_hash() { sha256sum "$1" | awk '{ print tolower($1) }'; }
 else echo "sha256_tool_required" >&2; exit 1
 fi
 
@@ -56,7 +58,7 @@ trap cleanup EXIT HUP INT TERM
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$base_url/$archive" -o "$tmp_dir/$archive"
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$base_url/$archive.sha256" -o "$tmp_dir/$archive.sha256"
 expected=$(awk 'NF { print tolower($1); exit }' "$tmp_dir/$archive.sha256")
-actual=$($hash_command -a 256 "$tmp_dir/$archive" | awk '{ print tolower($1) }')
+actual=$(calculate_hash "$tmp_dir/$archive")
 [ "$expected" = "$actual" ] || { echo "native_archive_hash_mismatch" >&2; exit 1; }
 
 mkdir "$tmp_dir/unpacked"
