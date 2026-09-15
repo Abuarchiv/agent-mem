@@ -6,9 +6,13 @@ import test from "node:test";
 
 const root = process.cwd();
 const e5Manifest = JSON.parse(readFileSync(join(root, "src/models/model-manifest.json"), "utf8")) as { model_id: string };
-const rerankManifest = JSON.parse(readFileSync(join(root, "src/models/rerank-manifest.json"), "utf8")) as { model_id: string };
+const rerankManifest = JSON.parse(readFileSync(join(root, "src/models/rerank-manifest.json"), "utf8")) as { model_id: string; artifacts?: readonly { path?: unknown }[] };
 const e5Id: string = e5Manifest.model_id;
 const rerankId: string = rerankManifest.model_id;
+
+test("reranker manifest uses the local Transformers artifact name", () => {
+  assert.ok(rerankManifest.artifacts?.some((artifact) => artifact.path === "onnx/model_quantized.onnx"));
+});
 
 function runModels(...args: string[]): { status: number | null; combined: string } {
   const result = spawnSync(process.execPath, ["scripts/models.mjs", ...args], {

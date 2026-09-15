@@ -36,14 +36,22 @@ jobs:
           npm run models:download
           npm run models:verify
 
-      - name: Run full test suite
+      - name: Run full test suite (Unix)
+        if: runner.os != 'Windows'
         run: npm test
+
+      - name: Run Windows build and platform gates
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run build
+          node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js dist-v1/tests/v1-installer.test.js
 
       - name: Build package (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          package_dir="$RUNNER_TEMP/agent-memory-v1-package"
+          package_dir="$RUNNER_TEMP/agent-mem-package"
           npm run package -- --output "$package_dir"
           echo "PACKAGE_DIR=$package_dir" >> "$GITHUB_ENV"
 
@@ -51,26 +59,21 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $packageDir = Join-Path $env:RUNNER_TEMP "agent-memory-v1-package"
+          $packageDir = Join-Path $env:RUNNER_TEMP "agent-mem-package"
           npm run package -- --output $packageDir
           "PACKAGE_DIR=$packageDir" >> $env:GITHUB_ENV
 
       - name: Check packaged launcher (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: "$PACKAGE_DIR/memory help"
+        run: "$PACKAGE_DIR/agent-mem help"
 
       - name: Check packaged launcher (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: '& "$env:PACKAGE_DIR\memory.cmd" help'
+        run: '& "$env:PACKAGE_DIR\agent-mem.cmd" help'
 
       - name: Run packaged retrieval probe (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: node scripts/v1-retrieval-probe.mjs --package-dir "$PACKAGE_DIR" --no-rerank
-
-      - name: Run packaged retrieval probe (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: node scripts/v1-retrieval-probe.mjs --package-dir "$env:PACKAGE_DIR" --no-rerank

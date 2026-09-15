@@ -34,13 +34,13 @@ The SQLite vault is not encrypted at rest. Anyone who can read the data director
 macOS and Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.sh | sh -s -- --project "$PWD"
+curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh -s -- --project "$PWD"
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.ps1))) -Project (Get-Location)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1))) -Project (Get-Location)
 ```
 
 The installer selects the OS/CPU bundle, verifies its SHA-256 checksum, installs it in user space, and with `--project` runs `agent-mem install`. The `memory` command remains a compatibility alias. Installation configures selected hosts, writes MCP and hook files, starts the owned broker, verifies `initialize` and `tools/list`, and records an install journal.

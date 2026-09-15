@@ -16,7 +16,7 @@ test("native Unix installer has valid shell syntax and verifies archives before 
   assert.match(script, /installer_version_invalid/u);
   assert.match(script, /native_target_not_published \(supported: \$supported_targets\)/u);
   assert.match(script, /agent-mem/iu);
-  assert.match(script, /github\.com\/Abuarchiv\/agent-memory-v1/u);
+  assert.match(script, /github\.com\/Abuarchiv\/agent-mem/u);
   assert.match(script, /memory compatibility alias/u);
   assert.match(script, /darwin-arm64/u);
   assert.match(script, /native_target_not_published/u);
@@ -38,7 +38,7 @@ test("native Windows installer covers both supported Node architectures", () => 
   assert.match(script, /PROCESSOR_ARCHITEW6432/u);
   assert.match(script, /LOCALAPPDATA/u);
   assert.match(script, /agent-mem\.cmd/u);
-  assert.match(script, /github\.com\/Abuarchiv\/agent-memory-v1/u);
+  assert.match(script, /github\.com\/Abuarchiv\/agent-mem/u);
   assert.match(script, /memory\.cmd/u);
 });
 

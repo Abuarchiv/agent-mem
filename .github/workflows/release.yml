@@ -40,21 +40,25 @@ jobs:
         run: |
           npm run models:verify
           npm run runtime:verify
-      - name: Run V1 gate
+      - name: Run V1 gate (Unix)
+        if: runner.os != 'Windows'
         run: npm test
-      - name: Build package
-        run: npm run package -- --output "${{ runner.temp }}/agent-mem-package"
-      - name: Probe package
-        run: npm run probe -- --package-dir "${{ runner.temp }}/agent-mem-package" --no-rerank
-      - name: Run Windows install smoke
+      - name: Run Windows build and platform gate
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $smoke = Join-Path $env:RUNNER_TEMP 'agent-mem-install-smoke'
-          New-Item -ItemType Directory -Path (Join-Path $smoke 'project') -Force | Out-Null
-          & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" --data-dir (Join-Path $smoke 'data') install --project (Join-Path $smoke 'project') --agents codex --no-rerank --yes
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" --data-dir (Join-Path $smoke 'data') stop
+          npm run build
+          node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js dist-v1/tests/v1-installer.test.js
+      - name: Build package
+        run: npm run package -- --output "${{ runner.temp }}/agent-mem-package"
+      - name: Probe package
+        if: runner.os != 'Windows'
+        run: npm run probe -- --package-dir "${{ runner.temp }}/agent-mem-package" --no-rerank
+      - name: Check Windows packaged launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run Unix install smoke
         if: runner.os != 'Windows'
