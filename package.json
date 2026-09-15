@@ -7,7 +7,7 @@
   "engines": { "node": ">=24.20.0 <25" },
   "scripts": {
     "build": "tsc -p tsconfig.v1.json && node scripts/copy-v1-assets.mjs",
-    "test": "npm run build && node --test --test-concurrency=1 --test-timeout=120000 \"dist-v1/tests/v1-*.test.js\" dist-v1/tests/vector-projection.test.js dist-v1/tests/capture.test.js dist-v1/tests/capture-policy.test.js dist-v1/tests/lexical.test.js dist-v1/tests/broker.test.js dist-v1/tests/broker-owner.test.js dist-v1/tests/codex-host.test.js dist-v1/tests/opencode-bridge.test.js dist-v1/tests/opencode-transform.test.js dist-v1/tests/opencode-reconcile.test.js dist-v1/tests/copilot-cli-hook.test.js dist-v1/tests/copilot-cli-manifest.test.js dist-v1/tests/purge-source.test.js",
+    "test": "npm run build && node scripts/run-tests.mjs",
     "models:verify": "node scripts/models.mjs verify",
     "models:download": "node scripts/models.mjs download",
     "runtime:verify": "node scripts/node-runtime.mjs verify",
