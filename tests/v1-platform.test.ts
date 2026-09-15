@@ -6,12 +6,23 @@ import test from "node:test";
 import { assertNativeOnnxRuntime } from "../src/models/manifest.js";
 import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.js";
 import { ipcEndpointPath } from "../src/host/ipc-path.js";
-import { packageRelativePath, sharpPlatformPackages, windowsLaunchers } from "../scripts/package-v1.js";
+import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageRelativePath, sharpPlatformPackages, windowsLaunchers } from "../scripts/package-v1.js";
 import { isPrivateWindowsAcl } from "../src/v1/private-files.js";
 import { V1_OUTPUT_TARGETS, V1_READER_SOURCE_CLASSES } from "../src/v1/service.js";
 
 test("V1 output grants include every supported local host", () => {
   assert.deepEqual([...V1_OUTPUT_TARGETS], ["reader:codex_cli", "reader:opencode_cli", "reader:copilot_cli"]);
+});
+
+test("Node runtime packaging uses the pinned portable release for each target", () => {
+  assert.equal(nodeRuntimeTarget("darwin", "arm64"), "darwin-arm64");
+  assert.equal(nodeRuntimeTarget("darwin", "x64"), "darwin-x64");
+  assert.equal(nodeRuntimeTarget("linux", "arm64"), "linux-arm64");
+  assert.equal(nodeRuntimeTarget("linux", "x64"), "linux-x64");
+  assert.equal(nodeRuntimeTarget("win32", "x64"), "win-x64");
+  assert.equal(nodeRuntimeDirectory("darwin", "arm64"), "node-v24.20.0-darwin-arm64");
+  assert.equal(nodeRuntimeArchive("darwin", "arm64"), "node-v24.20.0-darwin-arm64.tar.gz");
+  assert.throws(() => nodeRuntimeTarget("win32", "arm64"), /node_runtime_platform_unsupported/);
 });
 
 test("default reader egress excludes tool and diagnostic source classes", () => {

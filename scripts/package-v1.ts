@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { builtinModules, createRequire } from "node:module";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
@@ -11,10 +12,55 @@ import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.j
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const build = join(root, "dist-v1");
+const NODE_RUNTIME_VERSION = "24.20.0" as const;
 const entries = ["scripts/v1.js", "src/v1/service.js", "src/v1/connect.js", "adapters/codex/index.js", "adapters/opencode/plugin.js", "adapters/opencode/bridge.js", "adapters/copilot-cli/index.js"];
 const forbidden = /(?:^src\/(?:ui|setup|platform|transfer)\/|^adapters\/(?:claude-code|copilot-vscode)\/|^src\/execution\/(?:api|local|codex|claude|copilot|copilot-auth)\.js$|^src\/retrieval\/(?:graph|controller)\.js$|^src\/context\/(?:prepare|select)\.js$|^src\/worker\/(?:extract-job|consolidate)\.js$|^src\/core\/(?:summaries|lessons|procedures)\.js$)/;
 const builtin = new Set([...builtinModules, ...builtinModules.map(n => `node:${n}`)]);
 const hash = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+export type NodeRuntimeTarget = "darwin-arm64" | "darwin-x64" | "linux-arm64" | "linux-x64" | "win-x64";
+
+export function nodeRuntimeTarget(platform = process.platform, arch = process.arch): NodeRuntimeTarget {
+  if (platform === "darwin" && (arch === "arm64" || arch === "x64")) return `darwin-${arch}`;
+  if (platform === "linux" && (arch === "arm64" || arch === "x64")) return `linux-${arch}`;
+  if (platform === "win32" && arch === "x64") return "win-x64";
+  throw new Error("node_runtime_platform_unsupported");
+}
+
+export function nodeRuntimeDirectory(platform = process.platform, arch = process.arch): string {
+  return `node-v${NODE_RUNTIME_VERSION}-${nodeRuntimeTarget(platform, arch)}`;
+}
+
+export function nodeRuntimeArchive(platform = process.platform, arch = process.arch): string {
+  const target = nodeRuntimeTarget(platform, arch);
+  const suffix = target.startsWith("linux-") ? ".tar.xz" : target === "win-x64" ? ".zip" : ".tar.gz";
+  return `${nodeRuntimeDirectory(platform, arch)}${suffix}`;
+}
+
+function nodeRuntimeRoot(): string {
+  return join(root, ".runtime", nodeRuntimeDirectory());
+}
+
+function copyNodeRuntime(output: string): string {
+  const sourceRoot = nodeRuntimeRoot();
+  const runtimeNode = process.platform === "win32" ? "node.exe" : "node";
+  const sourceNode = join(sourceRoot, "bin", runtimeNode);
+  if (!existsSync(sourceNode)) throw new Error(`node_runtime_missing:${sourceRoot}`);
+  const targetRoot = join(output, "runtime");
+  const targetNode = join(targetRoot, "bin", runtimeNode);
+  mkdirSync(dirname(targetNode), { recursive: true, mode: 0o700 });
+  copyFileSync(sourceNode, targetNode);
+  if (process.platform !== "win32") chmodSync(targetNode, 0o755);
+  const sourceLib = join(sourceRoot, "lib");
+  if (existsSync(sourceLib)) copyOwnedTree(sourceLib, join(targetRoot, "lib"));
+  const version = execFileSync(targetNode, ["--version"], {
+    encoding: "utf8",
+    timeout: 10_000,
+    env: { ...process.env, NODE_OPTIONS: undefined, NODE_PATH: undefined },
+  }).trim();
+  if (version !== `v${NODE_RUNTIME_VERSION}`) throw new Error(`node_runtime_version_invalid:${version}`);
+  return runtimeNode;
+}
 
 /** Manifest and graph names always use '/', regardless of the build host. */
 export function packageRelativePath(base: string, target: string, paths = path): string {
@@ -120,7 +166,6 @@ function copyPackages(names: readonly string[], output: string): { name: string;
 
 export async function packageV1(destination: string) {
   sqliteVecTarget();
-  if (!process.version.startsWith("v24.")) throw new Error("v1_build_requires_node24");
   const output = resolve(destination);
   if (existsSync(output)) throw new Error("v1_package_destination_must_be_new");
   const graph = runtimeGraph();
@@ -174,10 +219,7 @@ export async function packageV1(destination: string) {
   for (const name of ["node-LICENSE", "e5-LICENSE", "onnxruntime-LICENSE", "onnxruntime-ThirdPartyNotices.txt", "sqlite-vec-LICENSE-MIT", "sharp-libvips-THIRD-PARTY-NOTICES.md"]) {
     copyFileSync(join(root, "src/licenses", name), join(output, "licenses", name));
   }
-  const runtimeNode = process.platform === "win32" ? "node.exe" : "node";
-  mkdirSync(join(output, "runtime/bin"), { recursive: true });
-  copyFileSync(process.execPath, join(output, "runtime/bin", runtimeNode));
-  if (process.platform !== "win32") chmodSync(join(output, "runtime/bin", runtimeNode), 0o755);
+  const runtimeNode = copyNodeRuntime(output);
   writeFileSync(join(output, "package.json"), JSON.stringify({ name: "agent-memory-v1", version: "1.0.0", type: "module", private: true }, null, 2) + "\n");
   const launcher = process.platform === "win32"
     ? windowsLaunchers().cmd
@@ -193,7 +235,7 @@ export async function packageV1(destination: string) {
     }
   }
   inspect(output);
-  const manifest = { version: "1.0.0", platform: process.platform, arch: process.arch, node: process.version, roots: entries, modules: graph.files, dependencies: packages, model: E5_MODEL_MANIFEST, reranker, files };
+  const manifest = { version: "1.0.0", platform: process.platform, arch: process.arch, node: `v${NODE_RUNTIME_VERSION}`, roots: entries, modules: graph.files, dependencies: packages, model: E5_MODEL_MANIFEST, reranker, files };
   writeFileSync(join(output, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   return { path: output, files: files.length, bytes: files.reduce((sum, file) => sum + file.bytes, 0), modules: graph.files.length, manifest_sha256: hash(join(output, "manifest.json")) };
 }
