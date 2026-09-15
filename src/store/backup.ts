@@ -28,7 +28,7 @@ import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
 
-import { removeOwnedPath } from "../execution/owned-path.js";
+import { removeOwnedPath } from "../runtime/owned-path.js";
 import { createPolicySetupBinding } from "../core/policy.js";
 import { fullPurge } from "../core/purge.js";
 import { qualifySqliteVec } from "../retrieval/vec0.js";
@@ -39,7 +39,7 @@ import {
 } from "./database.js";
 import { StoreError } from "./errors.js";
 import { registerBackupIntent, finishBackupRegistration, snapshotBasis, transferBackupInventory, assertManagedRestoreCandidate } from "./backup-inventory.js";
-import type { RuntimeCleanupWorker } from "../execution/cleanup.js";
+import type { RuntimeCleanupWorker } from "../runtime/cleanup.js";
 
 /** The on-disk format is deliberately a SQLite file plus a small manifest. */
 export const BACKUP_FORMAT = "agent-memory-backup" as const;

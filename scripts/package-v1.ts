@@ -128,6 +128,10 @@ function runtimeGraph(): { files: string[]; packages: string[] } {
   return { files: [...seen].sort(), packages: [...packages].sort() };
 }
 
+export function v1RuntimeGraph(): { files: string[]; packages: string[] } {
+  return runtimeGraph();
+}
+
 interface PackageInfo { name: string; version: string; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; }
 function findPackage(name: string, from: string): string {
   const require = createRequire(join(from, "package.json"));

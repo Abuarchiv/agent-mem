@@ -1,7 +1,7 @@
 
 import { z } from "zod";
 
-import { RuntimeCleanupWorker, type NativeSessionRemover } from "../execution/cleanup.js";
+import { RuntimeCleanupWorker, type NativeSessionRemover } from "../runtime/cleanup.js";
 import { nonNegativeInt64Schema, parseContract, type TrustedBinding } from "../host/contract.js";
 import { type PolicySetupBinding } from "./policy.js";
 import { purgeSource, type PurgeSourceResult } from "./purge-source.js";

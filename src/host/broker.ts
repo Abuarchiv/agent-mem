@@ -13,7 +13,7 @@ import { createPreparationContext, type PreparationContext } from "../context/pa
 import { ContextPreparationError, prepareEvidencePacket } from "../context/source-only.js";
 import { createDirectedEvidenceHandoff, serializeDirectedEvidenceHandoff, recognizePersistedEvidencePacket } from "../context/packet.js";
 import { createJobScheduler, SchedulerError, type InteractiveRunOptions, type JobScheduler, type JobSchedulerOptions, type SchedulerStatus } from "../worker/main.js";
-import { RuntimeCleanupWorker } from "../execution/cleanup.js";
+import { RuntimeCleanupWorker } from "../runtime/cleanup.js";
 import {
   ContractValidationError,
   createNativeSessionBinding,

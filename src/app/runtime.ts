@@ -13,7 +13,7 @@ import { fullPurge, type FullPurgeRequest, type FullPurgeResult } from "../core/
 import { createPreparationContext, type PreparationContext } from "../context/packet.js";
 import { prepareSourceEvidencePacket } from "../context/source-only.js";
 import { createJobScheduler, type InteractiveRunOptions } from "../worker/main.js";
-import { RuntimeCleanupWorker } from "../execution/cleanup.js";
+import { RuntimeCleanupWorker } from "../runtime/cleanup.js";
 import { E5ModelError, loadE5Embedder, type LocalE5Embedder } from "../models/embedding.js";
 import type { LocalReranker } from "../models/rerank.js";
 import { E5_MODEL_MANIFEST, ModelArtifactError } from "../models/manifest.js";

@@ -204,7 +204,7 @@ export function prepareExecutionBatch(database: AgentMemoryDatabase, input: Disp
     binding: snapshot,
     budget: input.budget,
   };
-  const batch = database.attempts.beginBatch(begin);
+  const batch = database.attempts!.beginBatch(begin);
   return { batch, request, claim: input.claim, dispatch_mode: mode, binding, binding_snapshot: snapshot, source_closure: input.source_closure === true };
 }
 
@@ -212,7 +212,7 @@ export function prepareExecutionAttempt(database: AgentMemoryDatabase, input: Di
   const binding = requireActiveExecutionBinding(input.batch.binding);
   const mode = assertDispatchMode(input.batch.dispatch_mode);
   const validated = validateDispatch(input.request, binding, new Date(), mode);
-  const deadline = database.attempts.boundAttemptDeadline({ batch_id: input.batch.batch.batch_id, attempt_id: validated.attempt_id, phase: validatePhase(validated.phase), deadline: validated.deadline, claim: input.batch.claim, binding: input.batch.binding_snapshot });
+  const deadline = database.attempts!.boundAttemptDeadline({ batch_id: input.batch.batch.batch_id, attempt_id: validated.attempt_id, phase: validatePhase(validated.phase), deadline: validated.deadline, claim: input.batch.claim, binding: input.batch.binding_snapshot });
   const request = { ...validated, deadline };
   const phase = validatePhase(request.phase);
   if (request.job_id !== input.batch.batch.job_id) throw new Error("attempt_job_mismatch");
@@ -233,7 +233,7 @@ export function prepareExecutionAttempt(database: AgentMemoryDatabase, input: Di
     claim: input.batch.claim,
     binding: input.batch.binding_snapshot,
   };
-  const attempt = database.attempts.prepareAttempt(prepare);
+  const attempt = database.attempts!.prepareAttempt(prepare);
   return {
     batch: input.batch,
     request,
@@ -336,7 +336,7 @@ export function createAttemptLifecycle(database: AgentMemoryDatabase, control: A
         };
         rootArtifact = database.runtimeArtifacts.register(rootPlan);
       }
-      current = database.attempts.markDispatchIntent(currentControl());
+      current = database.attempts!.markDispatchIntent(currentControl());
     },
     runtimeArtifactPresent: async () => {
       if (rootArtifact !== undefined) rootArtifact = database.runtimeArtifacts.markPresent(rootArtifact.artifact_id);
@@ -365,14 +365,14 @@ export function createAttemptLifecycle(database: AgentMemoryDatabase, control: A
       // Cleanup-only registration intentionally precedes the semantic
       // recordSession CAS: purge/auth/fence loss may reject that CAS, but the
       // observed provider session must still remain durably cleanable.
-      current = database.attempts.recordSession(currentControl(), runtimeSessionId);
+      current = database.attempts!.recordSession(currentControl(), runtimeSessionId);
     },
     beforePromptDispatch: async () => {
-      current = database.attempts.recordPromptDispatch(currentControl());
+      current = database.attempts!.recordPromptDispatch(currentControl());
     },
     terminalObserved: async (status, usage, providerAttemptId) => {
       if (status === "completed" || status === "refused" || status === "invalid_output" || status === "timeout" || status === "aborted" || status === "failed") {
-        current = database.attempts.recordTerminal(currentControl(), {
+        current = database.attempts!.recordTerminal(currentControl(), {
           status,
           ...(usage === undefined ? {} : { usage }),
           ...(providerAttemptId === undefined ? {} : { provider_attempt_id: providerAttemptId }),
@@ -380,11 +380,11 @@ export function createAttemptLifecycle(database: AgentMemoryDatabase, control: A
       }
     },
     dispatchCancelled: async (reason) => {
-      current = database.attempts.cancelPrepared(currentControl(), reason);
+      current = database.attempts!.cancelPrepared(currentControl(), reason);
     },
     cleanupCompleted: async (input) => {
       if (rootArtifact !== undefined && input.confirmed) rootArtifact = await database.runtimeArtifacts.reconcile(rootArtifact.artifact_id);
-      current = database.attempts.recordCleanup(currentControl(), input);
+      current = database.attempts!.recordCleanup(currentControl(), input);
     },
     nativeSessionRemoved: async (runtimeSessionId) => {
       if (sessionArtifact?.native_session_id === runtimeSessionId) {
@@ -395,5 +395,5 @@ export function createAttemptLifecycle(database: AgentMemoryDatabase, control: A
 }
 
 export function completeExecutionAttempt(database: AgentMemoryDatabase, control: AttemptControlInput, result: ExecutionResult, receivedAt: string): AttemptCompletionResult {
-  return database.attempts.complete(control, executionResultCompletion(result, receivedAt));
+  return database.attempts!.complete(control, executionResultCompletion(result, receivedAt));
 }

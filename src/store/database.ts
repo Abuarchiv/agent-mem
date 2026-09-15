@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
@@ -22,17 +23,14 @@ import { countManagedBackups, finishBackupRegistration, purgeManagedBackups, reg
 import { AuthStateRepository } from "./auth-repository.js";
 import { RevisionRepository, type RevisionDetail } from "./revision-repository.js";
 import { JobRepository } from "./job-repository.js";
-import { AttemptRepository } from "./attempt-repository.js";
+import type { AttemptRepository } from "./attempt-repository.js";
 import { RuntimeArtifactRepository } from "./runtime-artifact-repository.js";
 import { SummaryRepository } from "./derived-repository.js";
 import { recordCommitClock, resolveWallTimeToSequence, type WallClockResolution } from "../core/time.js";
 import { qualifySqliteVec, type SqliteVecQualification } from "../retrieval/vec0.js";
-import { parseExtractionCandidate, type VerificationReceipt } from "../extraction/schema.js";
-import { verifyExtractionCandidates } from "../extraction/verify.js";
-import { executionResultDigest } from "../execution/dispatch.js";
-import { parseExecutionResult, type ExecutionResult } from "../execution/types.js";
+import type { ExtractionCandidate, VerificationReceipt } from "../extraction/schema.js";
+import type { ExecutionResult } from "../execution/types.js";
 import type { SourceSpanForValidation } from "../execution/protocol.js";
-import { extractionBatchResultDigest } from "../extraction/extract.js";
 
 import {
   parseContract,
@@ -276,6 +274,7 @@ const VECTOR_BLOB_BYTES = 1_536;
 const VECTOR_PROFILE_ID = "e5-multilingual-small-q8-761b726dd34fb83930e26aab4e9ac3899aa1fa78";
 const VECTOR_MAX_RESULTS = 200;
 const MAX_INT64 = 9_223_372_036_854_775_807n;
+const requireCompat = createRequire(import.meta.url);
 const LOCAL_UI_MAX_RESULTS = 100;
 const LOCAL_UI_MAX_QUERY_BYTES = 4_096;
 const LOCAL_UI_MAX_QUERY_TOKENS = 64;
@@ -2547,7 +2546,7 @@ export class AgentMemoryDatabase {
   readonly auth!: AuthStateRepository;
   readonly revisions!: RevisionRepository;
   readonly jobs!: JobRepository;
-  readonly attempts!: AttemptRepository;
+  readonly attempts: AttemptRepository | undefined;
   readonly runtimeArtifacts!: RuntimeArtifactRepository;
   readonly summaries!: SummaryRepository;
   private closed = false;
@@ -2622,11 +2621,16 @@ export class AgentMemoryDatabase {
         () => this.ensureOpen(),
         { ...(options.job_clock === undefined ? {} : { clock: options.job_clock }), ...(options.job_lease_ms === undefined ? {} : { lease_ms: options.job_lease_ms }) },
       );
-      this.attempts = new AttemptRepository(
-        database,
-        () => this.ensureOpen(),
-        options.attempt_clock === undefined ? {} : { clock: options.attempt_clock },
-      );
+      if (extractionEnabled) {
+        const { AttemptRepository } = requireCompat("./attempt-repository.js") as typeof import("./attempt-repository.js");
+        this.attempts = new AttemptRepository(
+          database,
+          () => this.ensureOpen(),
+          options.attempt_clock === undefined ? {} : { clock: options.attempt_clock },
+        );
+      } else {
+        this.attempts = undefined;
+      }
       this.runtimeArtifacts = new RuntimeArtifactRepository(database, () => this.ensureOpen());
       if (options.vector_extension_path !== undefined && options.migration_basis_sha256 !== undefined) {
         this.vectorQualification = qualifySqliteVec(this.database, options.vector_extension_path);
@@ -4269,7 +4273,9 @@ export class AgentMemoryDatabase {
     const parsedBatchId = parseContract(z.uuid(), batchId, "extraction-batch-id");
     const parsedAttemptId = parseContract(z.uuid(), attemptId, "extraction-attempt-id");
     const parsedDigest = parseContract(extractionDigestSchema, resultDigest, "extraction-result-digest").toLowerCase();
-    const attempt = this.attempts.getAttempt(parsedAttemptId);
+    const attempts = this.attempts;
+    if (attempts === undefined) throw new StoreError("attempt_conflict");
+    const attempt = attempts.getAttempt(parsedAttemptId);
     if (
       attempt === undefined ||
       attempt.batch_id !== parsedBatchId ||
@@ -4304,8 +4310,11 @@ export class AgentMemoryDatabase {
         const id = parseContract(z.uuid(), candidate.candidate_id, "candidate-id");
         const digest = parseContract(z.string().regex(/^[a-f0-9]{64}$/i), candidate.candidate_digest, "candidate-digest").toLowerCase();
         if (typeof candidate.candidate_json !== "string" || candidate.candidate_json.length === 0 || candidate.candidate_json.length > 16_384) throw new StoreError("attempt_stale");
-        let parsedCandidate: ReturnType<typeof parseExtractionCandidate>;
-        try { parsedCandidate = parseExtractionCandidate(JSON.parse(candidate.candidate_json) as unknown); } catch (error: unknown) { throw new StoreError("attempt_stale", error); }
+        let parsedCandidate: ExtractionCandidate;
+        try {
+          const { parseExtractionCandidate } = requireCompat("../extraction/schema.js") as typeof import("../extraction/schema.js");
+          parsedCandidate = parseExtractionCandidate(JSON.parse(candidate.candidate_json) as unknown);
+        } catch (error: unknown) { throw new StoreError("attempt_stale", error); }
         if (parsedCandidate.candidate_id !== id || parsedCandidate.candidate_digest !== digest) throw new StoreError("attempt_stale");
         insert.run(parsedBatchId, id, digest, candidate.candidate_json);
         const row = this.database.prepare("SELECT candidate_digest, candidate_json FROM extraction_candidate WHERE batch_id = ? AND candidate_id = ?").get(parsedBatchId, id);
@@ -4328,6 +4337,10 @@ export class AgentMemoryDatabase {
     this.database.exec("BEGIN IMMEDIATE");
     let committed = false;
     try {
+      const { parseExecutionResult } = requireCompat("../execution/types.js") as typeof import("../execution/types.js");
+      const { executionResultDigest } = requireCompat("../execution/dispatch.js") as typeof import("../execution/dispatch.js");
+      const { parseExtractionCandidate } = requireCompat("../extraction/schema.js") as typeof import("../extraction/schema.js");
+      const { verifyExtractionCandidates } = requireCompat("../extraction/verify.js") as typeof import("../extraction/verify.js");
       const result = parseExecutionResult(input);
       const batch = this.readExtractionBatchLocked(parsedBatchId);
       if (batch.state !== "extracted" && batch.state !== "verified") throw new StoreError("attempt_conflict");
@@ -4397,6 +4410,7 @@ export class AgentMemoryDatabase {
     try {
       const batch = this.readExtractionBatchLocked(parsedBatchId);
       if (batch.state !== "extracted" && batch.state !== "verified") throw new StoreError("attempt_conflict");
+      const { extractionBatchResultDigest } = requireCompat("../extraction/extract.js") as typeof import("../extraction/extract.js");
       const resultDigest = extractionBatchResultDigest(batch.batch_id, batch.extraction_digest, batch.verification_digest);
       const receipt = {
         version: 1,

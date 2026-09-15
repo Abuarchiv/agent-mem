@@ -3,7 +3,7 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { removeOwnedPath } from "../execution/owned-path.js";
+import { removeOwnedPath } from "../runtime/owned-path.js";
 
 const identity = z.object({ dev: z.string(), ino: z.string() }).strict();
 const file = z.object({ path: z.string(), parent: identity, identity: identity.nullable(), hash: z.string().nullable() }).strict();

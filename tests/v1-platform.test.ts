@@ -6,7 +6,7 @@ import test from "node:test";
 import { assertNativeOnnxRuntime } from "../src/models/manifest.js";
 import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.js";
 import { ipcEndpointPath } from "../src/host/ipc-path.js";
-import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageRelativePath, sharpPlatformPackages, windowsLaunchers } from "../scripts/package-v1.js";
+import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageRelativePath, sharpPlatformPackages, v1RuntimeGraph, windowsLaunchers } from "../scripts/package-v1.js";
 import { isPrivateWindowsAcl } from "../src/v1/private-files.js";
 import { V1_OUTPUT_TARGETS, V1_READER_SOURCE_CLASSES } from "../src/v1/service.js";
 
@@ -23,6 +23,11 @@ test("Node runtime packaging uses the pinned portable release for each target", 
   assert.equal(nodeRuntimeDirectory("darwin", "arm64"), "node-v24.20.0-darwin-arm64");
   assert.equal(nodeRuntimeArchive("darwin", "arm64"), "node-v24.20.0-darwin-arm64.tar.gz");
   assert.throws(() => nodeRuntimeTarget("win32", "arm64"), /node_runtime_platform_unsupported/);
+});
+
+test("the V1 package graph excludes legacy extraction and execution modules", () => {
+  const graph = v1RuntimeGraph();
+  assert.equal(graph.files.some((file) => /^src\/(?:execution|extraction)\//.test(file)), false);
 });
 
 test("default reader egress excludes tool and diagnostic source classes", () => {
