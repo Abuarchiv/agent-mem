@@ -55,4 +55,4 @@ Keep the data directory, vault, credentials, and IPC directory private. Cloud se
 
 ## Status
 
-This checkout is an engineering preview. The local build, tests, and macOS ARM64 package probe pass with Node 24.20.0. The CI matrix runs on Linux, Windows, and macOS 14. Codex Desktop, native Copilot, and concurrent OpenCode runs still need direct verification.
+This checkout is an engineering preview. The local build, tests, and macOS ARM64 package probe pass with Node 24.20.0. Full CI runs on Linux and macOS 14; a separate Windows job checks the build and platform code. The Windows private-data runtime, Codex Desktop, native Copilot, and concurrent OpenCode runs still need direct verification.
