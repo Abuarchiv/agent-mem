@@ -4,10 +4,12 @@ This is the standalone V1 line; the legacy full-product repository is separate a
 
 ## Verified local gates
 
+Current local verification: `npm test` passes 279/279; package construction and manifest verification pass, while the self-contained macOS launcher smoke remains blocked by the external Homebrew Node `libnode` dylib.
+
 - `npm run build` passes on the current checkout.
-- `npm test`: **269/269** focused V1 checks pass.
-- The embedded Node `v24.20.0` package contains 3,921 files, is 607,691,762 bytes, and has manifest SHA-256 `48a0eaa106e7e22037005dc84aa3869a9e450e3116f4d9963cedd0bed2ea0a7d`.
-- Packaged retrieval probes pass with reranking disabled and with the local cross-encoder enabled. They cover restart, source-backed write/replacement, bounded graph search, feedback, purge, and exact-source retrieval.
+- `npm test`: **279/279** focused V1 tests pass.
+- The current package build with Node `v24.19.0` contains 3,922 files, is 486,165,700 bytes, and has manifest SHA-256 `4e3e72cc8c7a0d82209c1e726ed77a4ff13f2f440eee8ffe88d867a7917ecdb5`.
+- Packaged retrieval probes remain blocked before startup by the macOS Homebrew Node `libnode` dylib dependency; the in-repository retrieval and host probes pass.
 - The package contains no generative provider SDK or UI runtime. Model artifacts are pinned and verified offline.
 
 ## Native host evidence (15 September 2026)
