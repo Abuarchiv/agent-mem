@@ -15,3 +15,5 @@ coverage/
 .runtime/
 .models/
 artifacts/
+/docs/
+/release/

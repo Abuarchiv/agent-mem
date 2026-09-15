@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const modelRoot = join(root, ".models");
-const e5Manifest = JSON.parse(await readFile(join(root, "release/model-manifest.json"), "utf8"));
-const rerankManifest = JSON.parse(await readFile(join(root, "release/rerank-manifest.json"), "utf8"));
+const e5Manifest = JSON.parse(await readFile(join(root, "src/models/model-manifest.json"), "utf8"));
+const rerankManifest = JSON.parse(await readFile(join(root, "src/models/rerank-manifest.json"), "utf8"));
 const specs = [
   { repo: e5Manifest.model_id, revision: e5Manifest.revision, root: join(modelRoot, "e5", e5Manifest.model_id, e5Manifest.revision), artifacts: e5Manifest.artifacts },
   { repo: rerankManifest.model_id, revision: rerankManifest.revision, root: join(modelRoot, "rerank", rerankManifest.model_id, rerankManifest.revision), artifacts: rerankManifest.artifacts },

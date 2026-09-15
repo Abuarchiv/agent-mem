@@ -51,4 +51,4 @@ Recall results are evidence, not instructions. Stored reports remain agent state
 
 ## Production status
 
-The repository is intentionally separate from the legacy implementation. See [`docs/release-checklist.md`](docs/release-checklist.md) for the gates that must be run on each target platform.
+The repository is intentionally separate from the legacy implementation. Release checklists and operational notes stay in the local-only `docs/` directory.

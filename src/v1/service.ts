@@ -45,7 +45,7 @@ function pinnedRerankerFactory(update: (status: RerankerStatus) => void): () => 
     try {
       const root = fileURLToPath(new URL("../../../", import.meta.url));
       const base = join(root, ".models", "rerank", RERANK_MODEL_ID);
-      const manifest = parseRerankManifest(JSON.parse(readFileSync(join(root, "release", "rerank-manifest.json"), "utf8")) as unknown);
+      const manifest = parseRerankManifest(JSON.parse(readFileSync(join(root, "src", "models", "rerank-manifest.json"), "utf8")) as unknown);
       const reranker = await loadReranker({ modelRoot: join(base, manifest.revision), manifest });
       update({ state: "ready", reason: null });
       return reranker;

@@ -127,7 +127,7 @@ export async function packageV1(destination: string) {
   const modelRoot = join(root, ".models", "e5", E5_MODEL_MANIFEST.model_id, E5_MODEL_MANIFEST.revision);
   await verifyE5Artifacts(modelRoot);
   const rerankBase = join(root, ".models", "rerank", RERANK_MODEL_ID);
-  const rerankManifestPath = join(root, "release", "rerank-manifest.json");
+  const rerankManifestPath = join(root, "src", "models", "rerank-manifest.json");
   const reranker = parseRerankManifest(JSON.parse(readFileSync(rerankManifestPath, "utf8")));
   await verifyRerankArtifacts(join(rerankBase, reranker.revision), reranker);
   mkdirSync(output, { recursive: true, mode: 0o700 });
@@ -144,11 +144,9 @@ export async function packageV1(destination: string) {
   }
   copyData(join(build, "src/store"), join(output, "dist-v1/src/store"));
   const vectorAsset = sqliteVecAssetFilename();
-  for (const file of [`src/native/${vectorAsset}`, "release/model-manifest.json", "release/rerank-manifest.json"]) {
+  for (const file of [`src/native/${vectorAsset}`, "src/models/model-manifest.json", "src/models/rerank-manifest.json"]) {
     const target = join(output, "dist-v1", file); mkdirSync(dirname(target), { recursive: true }); copyFileSync(join(root, file), target);
   }
-  mkdirSync(join(output, "release"), { recursive: true });
-  copyFileSync(rerankManifestPath, join(output, "release", "rerank-manifest.json"));
   const adapterManifest = join(output, "dist-v1/adapters/copilot-cli/manifest.json");
   mkdirSync(dirname(adapterManifest), { recursive: true });
   copyFileSync(join(root, "adapters/copilot-cli/manifest.json"), adapterManifest);
@@ -171,10 +169,10 @@ export async function packageV1(destination: string) {
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(join(rerankBase, reranker.revision, artifact.path), target);
   }
-  copyFileSync(join(root, "release/offline-licenses/rerank-Apache-2.0-LICENSE"), join(output, "licenses/rerank-Apache-2.0-LICENSE"));
-  copyFileSync(join(root, "docs/v1-start.md"), join(output, "README.md"));
+  copyFileSync(join(root, "src/licenses/rerank-Apache-2.0-LICENSE"), join(output, "licenses/rerank-Apache-2.0-LICENSE"));
+  copyFileSync(join(root, "src/package-readme.md"), join(output, "README.md"));
   for (const name of ["node-LICENSE", "e5-LICENSE", "onnxruntime-LICENSE", "onnxruntime-ThirdPartyNotices.txt", "sqlite-vec-LICENSE-MIT", "sharp-libvips-THIRD-PARTY-NOTICES.md"]) {
-    copyFileSync(join(root, "release/offline-licenses", name), join(output, "licenses", name));
+    copyFileSync(join(root, "src/licenses", name), join(output, "licenses", name));
   }
   const runtimeNode = process.platform === "win32" ? "node.exe" : "node";
   mkdirSync(join(output, "runtime/bin"), { recursive: true });
