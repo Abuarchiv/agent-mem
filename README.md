@@ -60,4 +60,4 @@ The data directory, vault, connection credentials, and IPC endpoint must remain 
 
 ## Current verification
 
-The 15 September 2026 audit passes `npm run build`, `npm test` (271 tests), `npm run models:verify`, and the production dependency audit on the current macOS Node 26.7.0 shell. The package gate still requires a fresh Node 24.20.x run. Codex Desktop, Copilot native execution, and native Windows/Linux package smoke remain separate open gates.
+The 15 September 2026 audit passes `npm run build`, `npm test` (273 tests), `npm run models:verify`, and the production dependency audit on the current macOS Node 26.7.0 shell. The package gate still requires a fresh Node 24.20.x run. Codex Desktop, Copilot native execution, and native Windows/Linux package smoke remain separate open gates.
