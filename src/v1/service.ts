@@ -15,6 +15,7 @@ import type { RecallSnapshot } from "../store/database.js";
 import { SearchState } from "./search-state.js";
 import { acquireOwnerLock, clearStaleSocket } from "./lock.js";
 import { bindingFor, ensurePrivateDirectory, loadConfig, runtimeDirectory, saveConfig, socketPath, vaultPath, type V1Config, type V1Connection } from "./config.js";
+import { rerankerDataRoot } from "./extras.js";
 
 const controlSchema = z.discriminatedUnion("operation", [
   z.object({ kind: z.literal("control"), operation: z.literal("status") }).strict(),
@@ -41,21 +42,29 @@ function errorCode(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function pinnedRerankerFactory(update: (status: RerankerStatus) => void): () => Promise<LocalReranker> {
+function pinnedRerankerFactory(update: (status: RerankerStatus) => void, dataDirectory?: string): () => Promise<LocalReranker> {
   return async () => {
     update({ state: "loading", reason: null });
-    try {
-      const root = fileURLToPath(new URL("../../../", import.meta.url));
-      const base = join(root, ".models", "rerank", RERANK_MODEL_ID);
-      const manifestPath = fileURLToPath(new URL("../models/rerank-manifest.json", import.meta.url));
-      const manifest = parseRerankManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
-      const reranker = await loadReranker({ modelRoot: join(base, manifest.revision), manifest });
-      update({ state: "ready", reason: null });
-      return reranker;
-    } catch (error: unknown) {
-      update({ state: "unavailable", reason: errorCode(error, "source_reranker_unavailable") });
-      throw error;
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const manifestPath = fileURLToPath(new URL("../models/rerank-manifest.json", import.meta.url));
+    const manifest = parseRerankManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
+    const bundledBase = join(root, ".models", "rerank", RERANK_MODEL_ID);
+    const candidates = dataDirectory === undefined
+      ? [bundledBase]
+      : [rerankerDataRoot(dataDirectory), bundledBase];
+    let lastError: unknown;
+    for (const base of candidates) {
+      try {
+        const reranker = await loadReranker({ modelRoot: join(base, manifest.model_id, manifest.revision), manifest });
+        update({ state: "ready", reason: null });
+        return reranker;
+      } catch (error: unknown) {
+        lastError = error;
+      }
     }
+    const failure = lastError ?? new Error("source_reranker_unavailable");
+    update({ state: "unavailable", reason: errorCode(failure, "source_reranker_unavailable") });
+    throw failure;
   };
 }
 
@@ -80,7 +89,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
   if (config.projects.length === 0 || config.connections.length === 0) throw new Error("connect_a_project_before_start");
   ensurePrivateDirectory(runtimeDirectory(directory));
   const operator = bindingFor(config);
-  const rerankEnabled = options.rerank === true;
+  const rerankEnabled = options.rerank ?? config.reranker_enabled ?? false;
   let rerankerStatus: RerankerStatus = rerankEnabled
     ? { state: "loading", reason: null }
     : { state: "disabled", reason: null };
@@ -179,9 +188,9 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
   async function rpc(binding: TrustedBinding, payload: unknown, signal?: AbortSignal, client?: object): Promise<unknown> {
     const control = controlSchema.safeParse(payload);
     if (control.success) {
-      if (binding.binding_id !== operator.binding_id) throw new Error("operator_binding_required");
       const request = control.data;
       if (request.operation === "status") return status();
+      if (binding.binding_id !== operator.binding_id) throw new Error("operator_binding_required");
       const owner = active();
       if (request.operation === "forget") {
         stateOrThrow();
@@ -255,7 +264,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
       embeddingModelRoot: modelRoot ?? fileURLToPath(new URL(`../../../.models/e5/${E5_MODEL_MANIFEST.model_id}/${E5_MODEL_MANIFEST.revision}`, import.meta.url)),
       scope: { scope_id: first.scope_id, kind: "project", owner_ref: config.installation_id, created_at: first.created_at },
       policyBinding: policy, outputBinding: output, hostBinding: operator,
-      ...(rerankEnabled ? { sourceReranker: pinnedRerankerFactory(updateRerankerStatus) } : {}),
+      ...(rerankEnabled ? { sourceReranker: pinnedRerankerFactory(updateRerankerStatus, directory) } : {}),
       ...(searchState === undefined ? {} : { searchState }),
       initialize(database, timestamp) {
         for (const project of config.projects) {

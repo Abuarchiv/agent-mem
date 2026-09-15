@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { configureHost } from "../src/v1/connect.js";
 import { defaultDataDirectory, installJournalFile, loadConfig, runtimeDirectory, saveConfig, V1_HOSTS } from "../src/v1/config.js";
+import { installRerankerExtra, removeRerankerExtra, verifyRerankerExtra, RERANKER_EXTRA_ID } from "../src/v1/extras.js";
 import { createInstallJournal, readInstallJournal, updateInstallJournal, writeInstallJournal } from "../src/v1/install-journal.js";
 import { createInstallPlan, detectInstallHostProbe, ensureOwnedService, InstallError, parseInstallArgs, stopOwnedService, type InstallOptions } from "../src/v1/install.js";
 import { assertPrivatePath } from "../src/v1/private-files.js";
@@ -230,6 +231,18 @@ async function mcp(directory: string, id: string): Promise<void> {
   const { connectClient } = await import("../src/v1/service.js");
   const config = loadConfig(directory), entry = config.connections.find(c => c.binding_id === id);
   if (!entry) throw new Error("mcp_connection_not_configured");
+  const project = config.projects.find(candidate => candidate.scope_id === entry.scope_id);
+  if (!project) throw new Error("mcp_project_not_configured");
+  await ensureOwnedService({
+    isRunning: () => serviceIsReady(directory),
+    isStarting: () => serviceIsStarting(directory),
+    start: () => launchOwnedService(directory, {
+      project: project.root,
+      hosts: [entry.host],
+      rerank: config.reranker_enabled === true,
+      nonInteractive: true,
+    }),
+  });
   const client = connectClient(directory, config, entry);
   await client.connect();
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -291,11 +304,42 @@ async function mcp(directory: string, id: string): Promise<void> {
   } finally { process.stdin.off("data", guard); input.close(); await client.close(); }
 }
 
+async function runExtras(directory: string, args: string[]): Promise<void> {
+  const action = args.shift();
+  const name = args.shift();
+  if (action === "list" && name === undefined && args.length === 0) {
+    let enabled = false;
+    try { enabled = loadConfig(directory).reranker_enabled === true; } catch { /* Fresh install has no config yet. */ }
+    const availability = await verifyRerankerExtra(directory);
+    console.log(json({ version: 1, extras: [{ id: RERANKER_EXTRA_ID, state: enabled ? availability.state : "disabled", available: availability.state === "ready", reason: availability.state === "unavailable" ? availability.reason : null }] }));
+    return;
+  }
+  if (name !== RERANKER_EXTRA_ID || args.length !== 0) throw new Error("extra_unknown");
+  if (action === "install") {
+    const result = await installRerankerExtra(directory);
+    const config = loadConfig(directory, true);
+    config.reranker_enabled = true;
+    saveConfig(directory, config);
+    console.log(json({ version: 1, id: RERANKER_EXTRA_ID, ...result, next: "Restart the memory broker to activate the reranker if it is already running." }));
+    return;
+  }
+  if (action === "remove") {
+    if (await serviceIsReady(directory)) throw new InstallError("extra_service_running");
+    const result = removeRerankerExtra(directory);
+    const config = loadConfig(directory, true);
+    config.reranker_enabled = false;
+    saveConfig(directory, config);
+    console.log(json({ version: 1, id: RERANKER_EXTRA_ID, ...result }));
+    return;
+  }
+  throw new Error("extra_action_invalid");
+}
+
 export async function main(input = process.argv.slice(2)): Promise<void> {
   const args = [...input], directory = resolve(takeOption(args, "--data-dir") ?? defaultDataDirectory());
   const command = args.shift();
   if (!command || command === "--help" || command === "help") {
-    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, and verifies readiness.");
+    console.log("Agent Memory V1\n  memory install [--project PATH] [--agents auto|codex,opencode,copilot-cli] [--no-rerank]\n  memory extras list|install|remove reranker\n  memory stop\n  memory connect|disconnect codex|opencode|copilot-cli --project PATH\n  memory start [--rerank | --no-rerank]\n  memory status [--json]\n  memory pause|resume\n  memory forget CAPTURE_ID --project PATH\n  memory feedback --project PATH --query-id ID --capture-id ID --useful yes|no\n  memory procedure add|list|remove --project PATH [--capture-id ID] [--terms TERM[,TERM...]]\nInstall configures selected hosts, starts the owned broker, verifies MCP readiness, and self-heals its owned broker once when a host starts.");
     return;
   }
   if (command === "install") {
@@ -309,6 +353,10 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
   if (command === "stop") {
     if (args.length) throw new Error("stop_takes_no_arguments");
     await stopInstalledOwner(directory);
+    return;
+  }
+  if (command === "extras") {
+    await runExtras(directory, args);
     return;
   }
   if (command === "connect" || command === "disconnect") {
@@ -330,7 +378,8 @@ export async function main(input = process.argv.slice(2)): Promise<void> {
     if (rerank && noRerank) throw new Error("conflicting_rerank_flags");
     if (args.length) throw new Error("unexpected_start_arguments");
     const { startService } = await import("../src/v1/service.js");
-    const service = await startService(directory, undefined, { rerank });
+    const configuredRerank = loadConfig(directory).reranker_enabled === true;
+    const service = await startService(directory, undefined, { rerank: noRerank ? false : rerank || configuredRerank });
     console.error(json(service.status()));
     await new Promise<void>((resolveStopped, reject) => {
       let stopping = false;
