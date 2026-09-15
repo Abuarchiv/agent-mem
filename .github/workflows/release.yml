@@ -1,0 +1,77 @@
+name: Release V1 bundles
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: darwin-arm64
+          - os: macos-13
+            target: darwin-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: windows-latest
+            target: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.20.x
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Download pinned models
+        run: npm run models:download
+      - name: Download pinned Node runtime
+        run: npm run runtime:download
+      - name: Build package
+        run: npm run package -- --output "${{ runner.temp }}/agent-memory-v1-package"
+      - name: Archive Unix bundle
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive="agent-memory-v1-${{ matrix.target }}.tar.gz"
+          tar -czf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" agent-memory-v1-package
+          shasum -a 256 "${RUNNER_TEMP}/${archive}" | sed "s#${RUNNER_TEMP}/##" > "${RUNNER_TEMP}/${archive}.sha256"
+      - name: Archive Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "agent-memory-v1-${{ matrix.target }}.zip"
+          Compress-Archive -LiteralPath "${{ runner.temp }}/agent-memory-v1-package" -DestinationPath "${{ runner.temp }}/$archive"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "${{ runner.temp }}/$archive").Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -LiteralPath "${{ runner.temp }}/$archive.sha256" -Encoding ASCII
+      - name: Upload bundle assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-memory-v1-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/agent-memory-v1-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download bundle assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-memory-v1-*
+          path: assets
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" assets/* --repo "${GITHUB_REPOSITORY}" --title "Agent Memory V1 ${GITHUB_REF_NAME}" --generate-notes

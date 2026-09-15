@@ -12,12 +12,13 @@ const checksums = {
   "linux-arm64": "5f4ddab610c1ab2016b3c227cebdbf6d9495161487e4739c7b90090595f465f7",
   "linux-x64": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
   "win-x64": "6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba",
+  "win-arm64": "31c6799744de8a54601643098040c68c3697e56c94e407d61d0e5fa5f34191d7",
 };
 
 function target(platform = process.platform, arch = process.arch) {
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) return `darwin-${arch}`;
   if (platform === "linux" && (arch === "arm64" || arch === "x64")) return `linux-${arch}`;
-  if (platform === "win32" && arch === "x64") return "win-x64";
+  if (platform === "win32" && (arch === "x64" || arch === "arm64")) return `win-${arch}`;
   throw new Error("node_runtime_platform_unsupported");
 }
 
@@ -26,7 +27,7 @@ function directoryName(currentTarget = target()) {
 }
 
 function archiveName(currentTarget = target()) {
-  return `${directoryName(currentTarget)}${currentTarget.startsWith("linux-") ? ".tar.xz" : currentTarget === "win-x64" ? ".zip" : ".tar.gz"}`;
+  return `${directoryName(currentTarget)}${currentTarget.startsWith("linux-") ? ".tar.xz" : currentTarget.startsWith("win-") ? ".zip" : ".tar.gz"}`;
 }
 
 function archivePath(currentTarget = target()) {
@@ -38,7 +39,7 @@ function runtimePath(currentTarget = target()) {
 }
 
 function executablePath(currentTarget, base) {
-  return join(base, currentTarget === "win-x64" ? "node.exe" : "bin", ...(currentTarget === "win-x64" ? [] : ["node"]));
+  return join(base, currentTarget.startsWith("win-") ? "node.exe" : "bin", ...(currentTarget.startsWith("win-") ? [] : ["node"]));
 }
 
 function digest(path) {

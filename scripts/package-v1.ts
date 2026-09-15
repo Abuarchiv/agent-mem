@@ -18,7 +18,7 @@ const forbidden = /(?:^src\/(?:ui|setup|platform|transfer)\/|^adapters\/(?:claud
 const builtin = new Set([...builtinModules, ...builtinModules.map(n => `node:${n}`)]);
 const hash = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-export type NodeRuntimeTarget = "darwin-arm64" | "darwin-x64" | "linux-arm64" | "linux-x64" | "win-x64";
+export type NodeRuntimeTarget = "darwin-arm64" | "darwin-x64" | "linux-arm64" | "linux-x64" | "win-x64" | "win-arm64";
 
 export interface PackageV1Options {
   readonly withReranker?: boolean;
@@ -33,7 +33,7 @@ export function packageProfile(options: PackageV1Options = {}): PackageV1Profile
 export function nodeRuntimeTarget(platform = process.platform, arch = process.arch): NodeRuntimeTarget {
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) return `darwin-${arch}`;
   if (platform === "linux" && (arch === "arm64" || arch === "x64")) return `linux-${arch}`;
-  if (platform === "win32" && arch === "x64") return "win-x64";
+  if (platform === "win32" && (arch === "x64" || arch === "arm64")) return `win-${arch}`;
   throw new Error("node_runtime_platform_unsupported");
 }
 
@@ -43,8 +43,23 @@ export function nodeRuntimeDirectory(platform = process.platform, arch = process
 
 export function nodeRuntimeArchive(platform = process.platform, arch = process.arch): string {
   const target = nodeRuntimeTarget(platform, arch);
-  const suffix = target.startsWith("linux-") ? ".tar.xz" : target === "win-x64" ? ".zip" : ".tar.gz";
+  const suffix = target.startsWith("linux-") ? ".tar.xz" : target.startsWith("win-") ? ".zip" : ".tar.gz";
   return `${nodeRuntimeDirectory(platform, arch)}${suffix}`;
+}
+
+export type PackageVectorCapability =
+  | { readonly state: "bundled"; readonly target: string; readonly asset: string }
+  | { readonly state: "fallback"; readonly reason: "sqlite_vec_platform_unsupported" };
+
+export function packageVectorCapability(platform = process.platform, arch = process.arch): PackageVectorCapability {
+  try {
+    return { state: "bundled", target: sqliteVecTarget(platform, arch), asset: sqliteVecAssetFilename(platform, arch) };
+  } catch (error) {
+    if (error instanceof Error && error.message === "sqlite_vec_platform_unsupported") {
+      return { state: "fallback", reason: "sqlite_vec_platform_unsupported" };
+    }
+    throw error;
+  }
 }
 
 function nodeRuntimeRoot(): string {
@@ -188,7 +203,7 @@ function copyPackages(names: readonly string[], output: string): { name: string;
 
 export async function packageV1(destination: string, options: PackageV1Options = {}) {
   const includeReranker = options.withReranker === true;
-  sqliteVecTarget();
+  const vectorCapability = packageVectorCapability();
   const output = resolve(destination);
   if (existsSync(output)) throw new Error("v1_package_destination_must_be_new");
   const graph = runtimeGraph();
@@ -212,8 +227,9 @@ export async function packageV1(destination: string, options: PackageV1Options =
     }
   }
   copyData(join(build, "src/store"), join(output, "dist-v1/src/store"));
-  const vectorAsset = sqliteVecAssetFilename();
-  for (const file of [`src/native/${vectorAsset}`, "src/models/model-manifest.json", "src/models/rerank-manifest.json"]) {
+  const packageFiles = ["src/models/model-manifest.json", "src/models/rerank-manifest.json"];
+  if (vectorCapability.state === "bundled") packageFiles.unshift(`src/native/${vectorCapability.asset}`);
+  for (const file of packageFiles) {
     const target = join(output, "dist-v1", file); mkdirSync(dirname(target), { recursive: true }); copyFileSync(join(root, file), target);
   }
   const adapterManifest = join(output, "dist-v1/adapters/copilot-cli/manifest.json");
@@ -261,7 +277,7 @@ export async function packageV1(destination: string, options: PackageV1Options =
     }
   }
   inspect(output);
-  const manifest = { version: "1.0.0", profile: packageProfile(options), platform: process.platform, arch: process.arch, node: `v${NODE_RUNTIME_VERSION}`, roots: entries, modules: graph.files, dependencies: packages, model: E5_MODEL_MANIFEST, ...(reranker === undefined ? {} : { reranker }), files };
+  const manifest = { version: "1.0.0", profile: packageProfile(options), platform: process.platform, arch: process.arch, node: `v${NODE_RUNTIME_VERSION}`, roots: entries, modules: graph.files, dependencies: packages, model: E5_MODEL_MANIFEST, sqlite_vec: vectorCapability, ...(reranker === undefined ? {} : { reranker }), files };
   writeFileSync(join(output, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   return { path: output, files: files.length, bytes: files.reduce((sum, file) => sum + file.bytes, 0), modules: graph.files.length, manifest_sha256: hash(join(output, "manifest.json")) };
 }

@@ -6,7 +6,7 @@ import test from "node:test";
 import { assertNativeOnnxRuntime } from "../src/models/manifest.js";
 import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.js";
 import { ipcEndpointPath } from "../src/host/ipc-path.js";
-import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageProfile, packageRelativePath, sharpPlatformPackages, v1RuntimeGraph, windowsLaunchers } from "../scripts/package-v1.js";
+import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageProfile, packageRelativePath, packageVectorCapability, sharpPlatformPackages, v1RuntimeGraph, windowsLaunchers } from "../scripts/package-v1.js";
 import { isPrivateWindowsAcl } from "../src/v1/private-files.js";
 import { V1_OUTPUT_TARGETS, V1_READER_SOURCE_CLASSES } from "../src/v1/service.js";
 
@@ -20,9 +20,16 @@ test("Node runtime packaging uses the pinned portable release for each target", 
   assert.equal(nodeRuntimeTarget("linux", "arm64"), "linux-arm64");
   assert.equal(nodeRuntimeTarget("linux", "x64"), "linux-x64");
   assert.equal(nodeRuntimeTarget("win32", "x64"), "win-x64");
+  assert.equal(nodeRuntimeTarget("win32", "arm64"), "win-arm64");
   assert.equal(nodeRuntimeDirectory("darwin", "arm64"), "node-v24.20.0-darwin-arm64");
   assert.equal(nodeRuntimeArchive("darwin", "arm64"), "node-v24.20.0-darwin-arm64.tar.gz");
-  assert.throws(() => nodeRuntimeTarget("win32", "arm64"), /node_runtime_platform_unsupported/);
+  assert.equal(nodeRuntimeArchive("win32", "arm64"), "node-v24.20.0-win-arm64.zip");
+});
+
+test("unsupported native vector targets use an explicit package fallback", () => {
+  assert.deepEqual(packageVectorCapability("darwin", "arm64").state, "bundled");
+  assert.deepEqual(packageVectorCapability("darwin", "x64"), { state: "fallback", reason: "sqlite_vec_platform_unsupported" });
+  assert.deepEqual(packageVectorCapability("win32", "arm64"), { state: "fallback", reason: "sqlite_vec_platform_unsupported" });
 });
 
 test("V1 package profile excludes optional reranker artifacts by default", () => {

@@ -23,7 +23,45 @@ Local storage is not encrypted. The SQLite vault is readable by anyone who can r
 - A local project or worktree for each connected host.
 - Pinned E5 artifacts. The reranker is optional.
 
-## Setup
+## Installation
+
+### Native Install (Recommended)
+
+macOS and Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.sh | sh -s -- --project "$PWD"
+```
+
+Windows PowerShell:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.ps1))) -Project (Get-Location)
+```
+
+The native bootstrap selects the OS/CPU bundle, verifies its SHA-256 checksum, installs it in user space, and with `--project` immediately runs `memory install`. That command configures every detected V1 host, writes MCP/hooks, starts the owned broker, verifies `initialize`/`tools/list`, and records an install journal.
+
+### Homebrew
+
+After the release tap is published:
+
+```sh
+brew install Abuarchiv/tap/agent-memory-v1
+memory install --project "$PWD"
+```
+
+### WinGet
+
+After the signed WinGet manifest is published:
+
+```powershell
+winget install Abuarchiv.AgentMemory
+memory install --project (Get-Location)
+```
+
+All three channels use the same target-specific, checksum-verified package. No channel silently installs provider credentials or a generative model.
+
+## Development setup
 
 ```sh
 npm ci --ignore-scripts
@@ -42,16 +80,15 @@ npm run package -- --output /absolute/path/agent-memory-v1-package
 
 The command downloads and verifies the official Node 24.20.0 runtime when it is not cached. By default, the package contains the V1 core: the launcher, local broker, E5 model, native sqlite-vec asset, and licenses. Add `--with-reranker` to include the optional local reranker.
 
-## Connect a host
+## Manual recovery
 
 ```sh
-memory --data-dir /absolute/private-data connect codex --project /absolute/project
-memory --data-dir /absolute/private-data connect opencode --project /absolute/project
-memory --data-dir /absolute/private-data connect copilot-cli --project /absolute/project
-memory --data-dir /absolute/private-data start
+memory --data-dir /absolute/private-data repair --project /absolute/project
+memory --data-dir /absolute/private-data extras list
+memory --data-dir /absolute/private-data extras install reranker
 ```
 
-Keep the data directory, vault, credentials, and IPC directory private. Cloud sessions cannot access this local vault.
+Use `connect` and `start` only for manual diagnostics. The normal install path keeps the data directory, vault, credentials, and IPC directory private. Cloud sessions cannot access this local vault.
 
 ## Status
 
