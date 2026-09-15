@@ -15,7 +15,8 @@ export function isPrivateWindowsAcl(value: unknown, mode: "private" | "asset" = 
     if (!rule || typeof rule !== "object" || typeof rule.sid !== "string" || !/^S-\d+(?:-\d+)+$/.test(rule.sid) || rule.allow !== true || !Number.isSafeInteger(rule.rights) || rule.rights <= 0 || typeof rule.inheritOnly !== "boolean") return false;
     // A whitelist also rejects generic/unknown rights and large values that would truncate in bitwise operations.
     if (!allowed.has(rule.sid) && (mode === "private" || (rule.rights & readExecute) !== rule.rights)) return false;
-    if (rule.sid === value.user && !rule.inheritOnly && (rule.rights & ownerRights) === ownerRights) ownerAccess = true;
+    const accessSid = mode === "asset" ? allowed.has(rule.sid) : rule.sid === value.user;
+    if (accessSid && !rule.inheritOnly && (rule.rights & ownerRights) === ownerRights) ownerAccess = true;
   }
   return ownerAccess;
 }
