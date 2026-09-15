@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-13, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -32,6 +36,7 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=moderate
       - name: Build and smoke-test package
+        shell: bash
         run: |
           npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-package"
           npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-package" --no-rerank

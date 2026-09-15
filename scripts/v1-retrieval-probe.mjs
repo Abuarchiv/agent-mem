@@ -29,7 +29,7 @@ if (packageArgument === undefined || !resolve(packageArgument).startsWith(sep)) 
 }
 
 const packageDirectory = realpathSync(resolve(packageArgument));
-const packageNode = realpathSync(join(packageDirectory, "runtime", "bin", "node"));
+const packageNode = realpathSync(join(packageDirectory, "runtime", "bin", process.platform === "win32" ? "node.exe" : "node"));
 const repoRoot = realpathSync(root);
 if (packageDirectory === repoRoot || packageDirectory.startsWith(`${repoRoot}${sep}`)) {
   throw new Error("package_must_be_outside_repository_ancestry");
