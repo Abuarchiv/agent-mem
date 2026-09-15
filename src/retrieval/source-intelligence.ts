@@ -41,6 +41,23 @@ function rankingPassage(group: RecallSourceGroup, query: string): string {
   return text.slice(start, end);
 }
 
+function rankingQueryTerms(query: string): string[] {
+  return [...new Set(query.toLocaleLowerCase("und").match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])];
+}
+
+function queryFit(group: RecallSourceGroup, terms: readonly string[]): number {
+  if (terms.length === 0) return 0;
+  const text = [...new Set(group.spans.map(span => span.quote))].join("\n").toLocaleLowerCase("und");
+  let total = 0;
+  let matched = 0;
+  for (const term of terms) {
+    const weight = /[\d_/-]/u.test(term) || term.length >= 12 ? 4 : 1;
+    total += weight;
+    if (text.includes(term)) matched += weight;
+  }
+  return total === 0 ? 0 : matched / total;
+}
+
 function logicalMessageKey(group: RecallSourceGroup): string {
   const event = JSON.parse(group.event_json) as { native_ids?: { message_id?: unknown }; role?: unknown };
   const id = event.native_ids?.message_id;
@@ -122,9 +139,11 @@ export async function improveSourceRanking(
     values.set(group.capture_id, value);
   }
   const baseOrder = new Map([...byId.keys()].map((id, index) => [id, index]));
+  const terms = rankingQueryTerms(request.query);
+  const fit = new Map([...byId.values()].map(group => [group.capture_id, queryFit(group, terms)]));
   const score = (group: RecallSourceGroup) => SEARCH_SIGNALS.reduce((sum, key) => sum + weights[key] * values.get(group.capture_id)![key], 0);
   const exact = (group: RecallSourceGroup) => kind === "identifier" && group.spans.some(span => span.quote.toLocaleLowerCase("und").includes(request.query.toLocaleLowerCase("und"))) ? 1 : 0;
-  let ordered = [...byId.values()].sort((a, b) => exact(b) - exact(a) || score(b) - score(a) || baseOrder.get(a.capture_id)! - baseOrder.get(b.capture_id)!);
+  let ordered = [...byId.values()].sort((a, b) => exact(b) - exact(a) || fit.get(b.capture_id)! - fit.get(a.capture_id)! || score(b) - score(a) || baseOrder.get(a.capture_id)! - baseOrder.get(b.capture_id)!);
   let reranker: SearchReport["reranker"] = options.reranker === undefined ? options.rerankerState ?? "disabled" : "skipped";
   if (options.reranker && !["identifier", "recent"].includes(kind) && ordered.length > 1 && deadline - Date.now() > 250) {
     const top = request.token_budget >= 16000 ? 20 : 12;

@@ -21,6 +21,7 @@ import {
 import { bindingOwnerId, createTrustedBinding, type TrustedBinding } from "../src/host/contract.js";
 import { SearchState } from "../src/v1/search-state.js";
 import type { LocalReranker } from "../src/models/rerank.js";
+import { emptySignals, improveSourceRanking } from "../src/retrieval/source-intelligence.js";
 import { VECTOR_DIM, VectorSearchError } from "../src/retrieval/vector.js";
 import { AgentMemoryDatabase } from "../src/store/database.js";
 
@@ -159,6 +160,33 @@ test("recent wording does not replace topical search with an unrelated timeline"
     assert.equal(packet.items[0]?.item_id, sourceId);
     assert.notEqual(packet.mode, "timeline");
   } finally { close(database, directory); }
+});
+
+test("a distinctive exact term beats a misleading hybrid score", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const answerId = randomUUID();
+    const toolId = randomUUID();
+    capture(envelope(answerId, "CODEX_MEMORY_ANCHOR_7421 is the confirmed release decision.", "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    capture(envelope(toolId, "The tool output discusses memory context and the current release session.", "2026-09-14T08:02:00Z", "tool_result"), binding, database);
+    const snapshot = database.getRecallSnapshot([scopeId], binding);
+    const groups = database.getRecallSourceGroups([scopeId], binding, [toolId, answerId], snapshot.watermark);
+    const result = await improveSourceRanking(
+      database,
+      { query: "CODEX_MEMORY_ANCHOR_7421", scope_ids: [scopeId], mode: "current", token_budget: 4_000, known_at_seq: snapshot.watermark },
+      binding,
+      groups,
+      new Map([
+        [toolId, { ...emptySignals(), lexical: 1, semantic: 1 }],
+        [answerId, { ...emptySignals(), lexical: 0.1, semantic: 0.1 }],
+      ]),
+      { deadline_at: "2099-01-01T00:00:00Z", exclude_current_session_prompts: false, timeline: false },
+      {},
+    );
+    assert.equal(result.groups[0]?.capture_id, answerId);
+  } finally {
+    close(database, directory);
+  }
 });
 
 test("snapshot revalidation retry performs at most one cross-encoder pass", async () => {
