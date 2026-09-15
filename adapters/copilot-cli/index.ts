@@ -10,6 +10,7 @@ import {
   parseEvidencePacketWrapper,
   parseModelContextWrapper,
   serializeModelContext,
+  serializeModelContextWithStatus,
 } from "../../src/context/packet.js";
 import {
   AgentMemoryBrokerClient,
@@ -35,6 +36,7 @@ import {
   type SourceCoverage,
   type TrustedBinding,
 } from "../../src/host/contract.js";
+import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend, type AgentMemorySessionStatus } from "../../src/v1/session-status.js";
 import {
   normalizeNativeEvent,
   type NativeEventInput,
@@ -283,6 +285,7 @@ export interface CopilotCliBrokerClient extends ImmutableCaptureClient {
   readonly registeredSessionIds: ReadonlyMap<string, string>;
   recall(request: unknown, context: unknown): Promise<EvidencePacket>;
   recognizeContext(context: unknown): Promise<boolean>;
+  readonly rpc?: (payload: unknown) => Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -584,11 +587,19 @@ function timestampOf(hook: CopilotCliHook): number {
   return (hook as { timestamp: number }).timestamp;
 }
 
-function outputForSessionPacket(packet: EvidencePacket, maxBytes: number): CopilotCliHookOutput {
-  const { serializeModelContext: serialize } = { serializeModelContext };
-  const additionalContext = serialize(packet);
+function outputForSessionPacket(packet: EvidencePacket, maxBytes: number, status?: string): CopilotCliHookOutput {
+  const additionalContext = status === undefined ? serializeModelContext(packet) : serializeModelContextWithStatus(packet, status);
   if (Buffer.byteLength(additionalContext, "utf8") > maxBytes) throw new CopilotCliAdapterError("additional_context_too_large");
   return { additionalContext };
+}
+
+async function sessionStatusFor(client: CopilotCliBrokerClient): Promise<AgentMemorySessionStatus> {
+  if (client.rpc === undefined) return connectedSessionStatus("GitHub Copilot CLI");
+  try {
+    return sessionStatusFromBackend("GitHub Copilot CLI", await client.rpc({ kind: "control", operation: "status" }));
+  } catch {
+    return connectedSessionStatus("GitHub Copilot CLI");
+  }
 }
 
 function outputForTransformedPacket(transformedPrompt: string, packet: EvidencePacket, maxBytes: number): CopilotCliHookOutput {
@@ -780,7 +791,8 @@ export class CopilotCliHostAdapter {
       if (hookEventName !== "sessionStart" && hookEventName !== "subagentStart") {
         throw new CopilotCliAdapterError("recall_event_invalid");
       }
-      const response = outputForSessionPacket(packet, maxBytes);
+      const status = kind === "session_start" ? formatSessionStatus(await sessionStatusFor(client)) : undefined;
+      const response = outputForSessionPacket(packet, maxBytes, status);
       return { status: "completed", response, hookEventName, captureAck: ack, event, coverage: mapped.coverage };
     } catch {
       return degradedResult(hookEventName, mapped.coverage);

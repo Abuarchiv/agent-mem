@@ -10,6 +10,7 @@ import {
   parseEvidencePacketWrapper,
   parseModelContextWrapper,
   serializeModelContext,
+  serializeModelContextWithStatus,
 } from "../../src/context/packet.js";
 import {
   AgentMemoryBrokerClient,
@@ -40,6 +41,7 @@ import {
   type SourceCoverage,
   type TrustedBinding,
 } from "../../src/host/contract.js";
+import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend, type AgentMemorySessionStatus, type SessionHost } from "../../src/v1/session-status.js";
 
 export const CODEX_ADAPTER_VERSION = "1.0.0" as const;
 export const CODEX_SESSION_START_UTF8_BYTES = 4_000;
@@ -209,6 +211,7 @@ export interface CodexBrokerClient {
   capture(event: unknown): Promise<CaptureAck>;
   recall(request: unknown, context: unknown): Promise<EvidencePacket>;
   recognizeContext(context: unknown): Promise<boolean>;
+  readonly rpc?: (payload: unknown) => Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -466,15 +469,25 @@ function ownWrapperCandidate(text: string): unknown | undefined {
   }
 }
 
-function outputForPacket(hookEventName: string, packet: EvidencePacket, maxBytes: number): CodexHookOutput {
-  const additionalContext = serializeModelContext(packet);
+function outputForPacket(hookEventName: string, packet: EvidencePacket, maxBytes: number, status?: string): CodexHookOutput {
+  const additionalContext = status === undefined ? serializeModelContext(packet) : serializeModelContextWithStatus(packet, status);
   if (Buffer.byteLength(additionalContext, "utf8") > maxBytes) throw new CodexAdapterError("additional_context_too_large");
   return {
+    ...(status === undefined ? {} : { systemMessage: status }),
     hookSpecificOutput: {
       hookEventName,
       additionalContext,
     },
   };
+}
+
+async function sessionStatusFor(client: CodexBrokerClient, host: SessionHost): Promise<AgentMemorySessionStatus> {
+  if (client.rpc === undefined) return connectedSessionStatus(host);
+  try {
+    return sessionStatusFromBackend(host, await client.rpc({ kind: "control", operation: "status" }));
+  } catch {
+    return connectedSessionStatus(host);
+  }
 }
 
 function degradedResult(hookEventName: string | undefined, coverage: SourceCoverage, recognizedOwnContext?: boolean): CodexAdapterResult {
@@ -645,7 +658,10 @@ export class CodexHostAdapter {
       // wire schema.
       const packet = await client.recall(request, contextInput);
       deadline?.throwIfExpired();
-      const response = outputForPacket(hook.hook_event_name, packet, maxBytes);
+      const status = kind === "session_start"
+        ? formatSessionStatus(await sessionStatusFor(client, this.config.surface === "codex_desktop" ? "Codex Desktop" : "Codex CLI"))
+        : undefined;
+      const response = outputForPacket(hook.hook_event_name, packet, maxBytes, status);
       return { status: "completed", response, hookEventName: hook.hook_event_name, captureAck: ack, event, coverage: mapped.coverage };
     } catch {
       return degradedResult(hook.hook_event_name, mapped.coverage);

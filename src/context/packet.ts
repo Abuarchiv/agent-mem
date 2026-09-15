@@ -264,6 +264,7 @@ const modelContextWrapperSchema = z
     kind: z.literal("agent_memory_context"),
     injection_id: z.uuid(),
     mode: z.enum(["current", "historical", "timeline", "degraded"]),
+    status: z.string().min(1).max(512).optional(),
     graph_continuation: evidenceGraphContinuationSchema.optional(),
     items: z
       .array(
@@ -344,6 +345,7 @@ export interface EvidenceContextWrapper {
   readonly kind: "agent_memory_context";
   readonly injection_id: string;
   readonly mode: "current" | "historical" | "timeline" | "degraded";
+  readonly status?: string;
   readonly graph_continuation?: EvidencePacket["graph_continuation"];
   readonly items: readonly {
     readonly item_id: string;
@@ -369,6 +371,7 @@ function serializeModelContextWrapper(wrapper: EvidenceContextWrapper): string {
     kind: "agent_memory_context",
     injection_id: wrapper.injection_id,
     mode: wrapper.mode,
+    ...(wrapper.status === undefined ? {} : { status: wrapper.status }),
     ...(wrapper.graph_continuation === undefined ? {} : { graph_continuation: wrapper.graph_continuation }),
     items: wrapper.items.map((item) => item.kind === "procedure" || item.kind === "record"
       ? {
@@ -406,7 +409,13 @@ export function serializeModelContext(packet: EvidencePacket): string {
   return serializePacketContext(packet, true);
 }
 
-function serializePacketContext(packet: EvidencePacket, deduplicateQuotes: boolean): string {
+/** Serialize a context packet with the bounded install/session marker. */
+export function serializeModelContextWithStatus(packet: EvidencePacket, status: string): string {
+  if (typeof status !== "string" || status.length === 0 || status.length > 512) throw new Error("session_status_invalid");
+  return serializePacketContext(packet, true, status);
+}
+
+function serializePacketContext(packet: EvidencePacket, deduplicateQuotes: boolean, status?: string): string {
   if (packet.delivery === undefined) throw new Error("evidence_delivery_missing");
   const items = packet.items.map((item) => {
     if (item.kind === "record") {
@@ -475,6 +484,7 @@ function serializePacketContext(packet: EvidencePacket, deduplicateQuotes: boole
     kind: "agent_memory_context",
     injection_id: packet.delivery.injection_id,
     mode: packet.mode,
+    ...(status === undefined ? {} : { status }),
     ...(packet.graph_continuation === undefined ? {} : { graph_continuation: packet.graph_continuation }),
     items,
     ...(packet.diagnostics === undefined ? {} : { diagnostics: packet.diagnostics }),
