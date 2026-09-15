@@ -21,6 +21,23 @@ export function isPrivateWindowsAcl(value: unknown, mode: "private" | "asset" = 
   return ownerAccess;
 }
 
+function powershellExecutable(systemRoot: string): string {
+  const candidates = [
+    process.env.ProgramW6432 === undefined ? undefined : join(process.env.ProgramW6432, "PowerShell", "7", "pwsh.exe"),
+    process.env.ProgramFiles === undefined ? undefined : join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe"),
+    join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+  ].filter((candidate): candidate is string => candidate !== undefined);
+  for (const candidate of candidates) {
+    try {
+      const info = lstatSync(candidate);
+      if (info.isFile() && !info.isSymbolicLink()) return candidate;
+    } catch {
+      // Try the next known system location.
+    }
+  }
+  throw new Error("windows_powershell_missing");
+}
+
 function windowsAcl(path: string, initialize = false, mode: "private" | "asset" = "private"): void {
   const script = `$ErrorActionPreference = 'Stop'
 $sidType = [System.Security.Principal.SecurityIdentifier]
@@ -46,11 +63,11 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
   try {
     const systemRoot = process.env.SystemRoot;
     if (!systemRoot) throw new Error("windows_system_root_missing");
-    const output = execFileSync(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
+    const output = execFileSync(powershellExecutable(systemRoot), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
       env: { ...process.env, AGENT_MEM_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
     if (!isPrivateWindowsAcl(JSON.parse(output.replace(/^\uFEFF/, "")), mode)) throw new Error("windows_acl_not_safe");
-  } catch (error) { throw new Error(`windows_${mode}_acl_unverified`, { cause: error }); }
+  } catch { throw new Error(`windows_${mode}_acl_unverified`); }
 }
 
 /** Also checks an opened descriptor still names the same non-symlink entry. */

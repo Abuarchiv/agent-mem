@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-base_url=${AGENT_MEM_BASE_URL:-${AGENT_MEMORY_V1_BASE_URL:-https://github.com/Abuarchiv/agent-memory-v1/releases/latest/download}}
+base_url=${AGENT_MEM_BASE_URL:-${AGENT_MEMORY_V1_BASE_URL:-https://github.com/Abuarchiv/agent-mem/releases/latest/download}}
 version=${AGENT_MEM_VERSION:-${AGENT_MEMORY_V1_VERSION:-latest}}
 project=
 agents=
@@ -24,7 +24,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --help|-h)
-      printf '%s\n' 'Agent Mem native installer' '  curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-memory-v1/main/install.sh | sh -s -- --project "$PWD"' '  --project PATH  Configure this project immediately after the verified package is installed' '  --agents LIST   auto or comma-separated codex,opencode,copilot-cli'
+      printf '%s\n' 'Agent Mem native installer' '  curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh -s -- --project "$PWD"' '  --project PATH  Configure this project immediately after the verified package is installed' '  --agents LIST   auto or comma-separated codex,opencode,copilot-cli'
       exit 0
       ;;
     *)

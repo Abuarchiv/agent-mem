@@ -33,12 +33,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Download pinned models
-        run: npm run models:download
+        run: npm run models:download:all
       - name: Download pinned Node runtime
         run: npm run runtime:download
-      - name: Verify pinned inputs
+      - name: Verify pinned inputs (Unix)
+        if: runner.os != 'Windows'
         run: |
-          npm run models:verify
+          npm run models:verify:all
           npm run runtime:verify
       - name: Harden Windows model asset ACLs
         if: runner.os == 'Windows'
@@ -54,6 +55,29 @@ jobs:
             icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: Harden Windows reranker asset ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\rerank\cross-encoder\mmarco-mMiniLMv2-L12-H384-v1\1427fd652930e4ba29e8149678df786c240d8825"
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          foreach ($path in $paths) {
+            $item = Get-Item -LiteralPath $path
+            $permission = if ($item.PSIsContainer) { "(OI)(CI)F" } else { "F" }
+            icacls.exe $path /setowner "*${userSid}" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Verify pinned inputs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run models:verify:all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run runtime:verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run V1 gate (Unix)
         if: runner.os != 'Windows'
         run: npm test
@@ -64,15 +88,21 @@ jobs:
           npm run build
           node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js dist-v1/tests/v1-installer.test.js
       - name: Build package
-        run: npm run package -- --output "${{ runner.temp }}/agent-mem-package"
+        run: npm run package -- --output "${{ runner.temp }}/agent-mem-package" --with-reranker
       - name: Probe package
         if: runner.os != 'Windows'
-        run: npm run probe -- --package-dir "${{ runner.temp }}/agent-mem-package" --no-rerank
+        run: npm run probe -- --package-dir "${{ runner.temp }}/agent-mem-package"
       - name: Check Windows packaged launcher
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Probe Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          node scripts/v1-retrieval-probe.mjs --package-dir "${{ runner.temp }}/agent-mem-package"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run Unix install smoke
         if: runner.os != 'Windows'
