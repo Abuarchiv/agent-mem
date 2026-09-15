@@ -225,6 +225,31 @@ test("requires a head CAS replacement, keeps superseded rows, and retries withou
   }
 });
 
+test("merges new citations for same-content records while preserving immutable CAS and retry idempotency", () => {
+  const value = fixture();
+  try {
+    const firstSource = source(value, scopeA, "first answer");
+    const secondSource = source(value, scopeA, "second answer");
+    const input = recordInput(scopeA, [firstSource.captureId]);
+    const first = value.database.summaries.writeSourceRecord(value.binding, input);
+    const merged = value.database.summaries.writeSourceRecord(value.binding, recordInput(scopeA, [firstSource.captureId, secondSource.captureId]));
+    assert.notEqual(merged.revision_id, first.revision_id);
+    assert.deepEqual((JSON.parse(merged.content) as MemoryRecordInput).source_ids, [firstSource.captureId, secondSource.captureId]);
+    assert.equal(merged.dependencies.filter((dependency) => dependency.parent_type === "source_span").length, 2);
+    assert.equal(merged.dependencies.some((dependency) => dependency.parent_revision_id === spanIds(value.path, firstSource.captureId)[0]), true);
+    assert.equal(merged.dependencies.some((dependency) => dependency.parent_revision_id === spanIds(value.path, secondSource.captureId)[0]), true);
+    assert.equal(value.database.summaries.read(output(value, scopeA), first.revision_id)?.status_reason, "record_superseded");
+
+    const beforeRetry = scalar(value.path, "SELECT commit_seq AS count FROM vault_counter WHERE id = 1");
+    const retry = value.database.summaries.writeSourceRecord(value.binding, recordInput(scopeA, [firstSource.captureId, secondSource.captureId]));
+    assert.equal(retry.revision_id, merged.revision_id);
+    assert.equal(scalar(value.path, "SELECT commit_seq AS count FROM vault_counter WHERE id = 1"), beforeRetry);
+    assert.equal(errorCode(() => value.database.summaries.writeSourceRecord(value.binding, { ...input, summary: "Stale report" })), "revision_conflict");
+  } finally {
+    close(value);
+  }
+});
+
 test("rejects cross-scope sources and cannot read or write through a revoked assistant grant", () => {
   const value = fixture();
   try {
