@@ -70,6 +70,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Verify Windows model assets through Node
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
+          node --input-type=module -e 'import { assertPrivatePath } from "./dist-v1/src/v1/private-files.js"; try { assertPrivatePath(process.argv[1], undefined, "model_asset_unverified", "asset"); console.log("model_asset_ok"); } catch (error) { console.error(JSON.stringify({ message: error?.message, cause: error?.cause?.message, nestedCause: error?.cause?.cause?.message })); process.exit(1); }' -- "$modelRoot"
+
       - name: Build package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
