@@ -17,6 +17,7 @@ import {
 
 export const RRF_K = 60 as const;
 export const HYBRID_INITIAL_TOP = 40 as const;
+const HYBRID_OVERFETCH_FACTOR = 2 as const;
 
 export type FusionErrorCode =
   | "limit_invalid"
@@ -78,33 +79,37 @@ export function fuseRanks(
   const scores = new Map<string, { source_id: string; span_id: string | undefined; revision_id: string | null; score: number; lexical_rank: number | undefined; vector_rank: number | undefined }>();
   const seenLexical = new Set<string>();
   const seenVector = new Set<string>();
-  lexical.forEach((entry, rank) => {
-    const identity = `${entry.source_id}\u0000${entry.revision_id ?? ""}`;
+  let lexicalRank = 0;
+  lexical.forEach((entry) => {
+    const identity = entry.source_id;
     if (seenLexical.has(identity)) return;
     seenLexical.add(identity);
     const current = scores.get(identity) ?? { source_id: entry.source_id, span_id: entry.span_id, revision_id: entry.revision_id ?? null, score: 0, lexical_rank: undefined, vector_rank: undefined };
     scores.set(identity, {
       source_id: entry.source_id,
       span_id: entry.span_id,
-      revision_id: entry.revision_id ?? null,
-      score: current.score + rrfScore(rank, k),
-      lexical_rank: current.lexical_rank ?? rank,
+      revision_id: current.revision_id ?? entry.revision_id ?? null,
+      score: current.score + rrfScore(lexicalRank, k),
+      lexical_rank: current.lexical_rank ?? lexicalRank,
       vector_rank: current.vector_rank,
     });
+    lexicalRank += 1;
   });
-  vector.forEach((entry, rank) => {
-    const identity = `${entry.source_id}\u0000${entry.revision_id ?? ""}`;
+  let vectorRank = 0;
+  vector.forEach((entry) => {
+    const identity = entry.source_id;
     if (seenVector.has(identity)) return;
     seenVector.add(identity);
     const current = scores.get(identity) ?? { source_id: entry.source_id, span_id: entry.span_id, revision_id: entry.revision_id ?? null, score: 0, lexical_rank: undefined, vector_rank: undefined };
     scores.set(identity, {
       source_id: entry.source_id,
       span_id: entry.span_id,
-      revision_id: entry.revision_id ?? null,
-      score: current.score + rrfScore(rank, k),
+      revision_id: current.revision_id ?? entry.revision_id ?? null,
+      score: current.score + rrfScore(vectorRank, k),
       lexical_rank: current.lexical_rank,
-      vector_rank: current.vector_rank ?? rank,
+      vector_rank: current.vector_rank ?? vectorRank,
     });
+    vectorRank += 1;
   });
   return [...scores.entries()]
     .map(([, value]) => value)
@@ -116,14 +121,15 @@ export function fuseRanks(
 }
 
 function groupKey(result: LexicalResult | VectorResult): string {
-  return `${result.source_id}\u0000${("revision_id" in result ? result.revision_id : null) ?? ""}`;
+  return result.source_id;
 }
 
 /**
  * Hybrid recall: snapshot before candidates (via the store snapshot read in
- * each signal), fuse independent FTS/vector ranks with RRF k=60, then
- * revalidate before output. The initial per-signal Top-40 is expandable, not
- * a completeness cap: callers may raise `per_signal_limit` up to 200.
+ * each signal), fuse independent source-level FTS/vector ranks with RRF k=60,
+ * then revalidate before output. Each signal gets a bounded 2x row/chunk
+ * overfetch to keep repeated spans/chunks from crowding out other sources;
+ * the overfetch is capped at the existing 200-result bound.
  */
 export function hybridSearch(
   database: AgentMemoryDatabase,
@@ -141,6 +147,7 @@ export function hybridSearch(
   if (!Number.isSafeInteger(perSignal) || perSignal < limit || perSignal > VECTOR_MAX_RESULTS) {
     throw new FusionError("limit_invalid");
   }
+  const candidateLimit = Math.min(VECTOR_MAX_RESULTS, perSignal * HYBRID_OVERFETCH_FACTOR);
   const scopeIds = [...new Set(request.scope_ids)];
   const snapshot = database.getRecallSnapshot(scopeIds, binding);
   const vectorGeneration = database.getActiveVectorGeneration();
@@ -148,9 +155,9 @@ export function hybridSearch(
   let vector: VectorResult[];
   try {
     lexical = request.valid_at === undefined
-      ? lexicalSearch(database, binding, request, perSignal, options.lexical ?? {})
+      ? lexicalSearch(database, binding, request, candidateLimit, options.lexical ?? {})
       : [];
-    vector = vectorSearch(database, binding, queryVector, request, perSignal, options.vector ?? {});
+    vector = vectorSearch(database, binding, queryVector, request, candidateLimit, options.vector ?? {});
   } catch (error: unknown) {
     throw new FusionError("fusion_unavailable", error);
   }
@@ -164,7 +171,7 @@ export function hybridSearch(
   }
   const fused = fuseRanks(lexical, vector, limit);
   const output = fused.map((entry, rank) => {
-    const identity = `${entry.source_id}\u0000${entry.revision_id ?? ""}`;
+    const identity = entry.source_id;
     const lexicalEntry = lexicalBySource.get(identity);
     const vectorEntry = vectorBySource.get(identity);
     const primary = (lexicalEntry ?? vectorEntry);

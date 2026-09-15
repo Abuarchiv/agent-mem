@@ -19,6 +19,7 @@ const artifactStatus = z.enum(["active", "blocked", "purged"]);
 const sourceRecordFormat = "agent_memory_record_v1" as const;
 const sourceRecordOrigin = "agent_report" as const;
 const sourceRecordLimit = 50;
+const sourceRecordSourceLimit = 16;
 const sourceRecordPayloadSql = "CASE WHEN json_valid(json_extract(content_json, '$')) THEN json_extract(content_json, '$') ELSE 'null' END";
 
 export type DependencyType = z.infer<typeof dependencyType>;
@@ -176,6 +177,14 @@ function canonicalTargets(values: readonly string[]): readonly string[] {
 function intersect(left: readonly string[], right: readonly string[]): string[] {
   const rightSet = new Set(right);
   return left.filter((value) => rightSet.has(value));
+}
+
+function sameSourceRecordContent(left: MemoryRecord, right: MemoryRecordInput): boolean {
+  return left.scope_id === right.scope_id
+    && left.kind === right.kind
+    && left.key === right.key
+    && left.summary === right.summary
+    && JSON.stringify(left.next_steps) === JSON.stringify(right.next_steps);
 }
 
 function intervalIntersection(left: SummaryTemporalInterval, right: SummaryTemporalInterval): SummaryTemporalInterval | null {
@@ -379,22 +388,47 @@ export class SummaryRepository {
       throw new StoreError("output_not_allowed", error);
     }
     return this.transaction(() => {
-      const evidence = this.readSourceRecordEvidence(parsed.scope_id, parsed.source_ids);
-      const targets = this.sourceRecordEgress(parsed.scope_id, evidence.classes, readerTarget);
+      let record = parsed;
+      let evidence = this.readSourceRecordEvidence(record.scope_id, record.source_ids);
+      let targets = this.sourceRecordEgress(record.scope_id, evidence.classes, readerTarget);
       let content: string;
       try {
-        content = JSON.stringify(memoryRecordSchema.parse({ ...parsed, format: sourceRecordFormat, origin: sourceRecordOrigin }));
+        content = JSON.stringify(memoryRecordSchema.parse({ ...record, format: sourceRecordFormat, origin: sourceRecordOrigin }));
       } catch (error: unknown) {
         throw new StoreError("revision_invalid", error);
       }
       const head = this.findSourceRecordHead(parsed.scope_id, parsed.kind, parsed.key);
       if (head !== undefined) {
         if (head.status !== "active") throw new StoreError("revision_conflict");
+        if (!head.egress_targets.includes(readerTarget) || !this.outputStillAllowed(parsed.scope_id, head, readerTarget)) throw new StoreError("output_not_allowed");
         if (head.content === content) {
-          if (!head.egress_targets.includes(readerTarget) || !this.outputStillAllowed(parsed.scope_id, head, readerTarget)) throw new StoreError("output_not_allowed");
           return head;
         }
-        if (parsed.replaces !== head.revision_id) throw new StoreError("revision_conflict");
+        let headRecord: MemoryRecord;
+        try {
+          headRecord = memoryRecordSchema.parse(JSON.parse(head.content));
+        } catch (error: unknown) {
+          throw new StoreError("read_failed", error);
+        }
+        if (sameSourceRecordContent(headRecord, parsed)) {
+          const sourceIds = [...new Set([...headRecord.source_ids, ...parsed.source_ids])];
+          if (sourceIds.length > sourceRecordSourceLimit) throw new StoreError("revision_invalid");
+          // A retry may still carry the superseded revision in `replaces`.
+          // Once all requested citations are already on the active head, the
+          // write is idempotent and must not create another revision.
+          if (sourceIds.length === headRecord.source_ids.length) return head;
+          if (parsed.replaces !== undefined && parsed.replaces !== head.revision_id) throw new StoreError("revision_conflict");
+          record = { ...parsed, source_ids: sourceIds, replaces: head.revision_id };
+          evidence = this.readSourceRecordEvidence(record.scope_id, record.source_ids);
+          targets = this.sourceRecordEgress(record.scope_id, evidence.classes, readerTarget);
+          try {
+            content = JSON.stringify(memoryRecordSchema.parse({ ...record, format: sourceRecordFormat, origin: sourceRecordOrigin }));
+          } catch (error: unknown) {
+            throw new StoreError("revision_invalid", error);
+          }
+        } else if (parsed.replaces !== head.revision_id) {
+          throw new StoreError("revision_conflict");
+        }
       } else if (parsed.replaces !== undefined) {
         throw new StoreError("revision_conflict");
       }

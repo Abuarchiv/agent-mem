@@ -15,10 +15,19 @@ export interface SourceIntelligenceOptions {
 
 export const emptySignals = (): SignalValues => ({ lexical: 0, semantic: 0, graph: 0, procedure: 0, recency: 0 });
 
+export function retrievalAnchors(query: string): string[] {
+  const phrases = [...query.matchAll(/"([^"\r\n]{2,128})"/gu)].map(match => match[1]!.trim());
+  const technical = query.match(/[\p{L}\p{N}_.-]+(?:\/[\p{L}\p{N}_.-]+)+|[\p{L}\p{N}]+(?:[_-][\p{L}\p{N}]+)+/gu) ?? [];
+  return [...new Set([...phrases, ...technical].map(anchor => anchor.toLocaleLowerCase("und")))].slice(0, 4);
+}
+
 export function retrievalQuery(query: string): string {
   const tokens = [...new Set(query.match(/[\p{L}\p{N}_]+/gu) ?? [])];
   if (query.length <= 2048 && tokens.length <= 48 && tokens.every(token => token.length <= 128)) return query;
-  return tokens.filter(token => token.length <= 128).slice(0, 48).join(" ").slice(0, 2048) || "...";
+  const anchors = retrievalAnchors(query);
+  const anchorTokens = new Set(anchors.flatMap(anchor => anchor.match(/[\p{L}\p{N}_]+/gu) ?? []));
+  const remainder = tokens.filter(token => !anchorTokens.has(token.toLocaleLowerCase("und")) && token.length <= 128);
+  return [...anchors, ...remainder].slice(0, 48).join(" ").slice(0, 2048) || "...";
 }
 
 export function queryKind(query: string, mode: string): SearchKind {
@@ -39,6 +48,72 @@ function rankingPassage(group: RecallSourceGroup, query: string): string {
   if (start > 0 && /[\uDC00-\uDFFF]/u.test(text[start]!)) start--;
   if (end < text.length && /[\uDC00-\uDFFF]/u.test(text[end]!)) end--;
   return text.slice(start, end);
+}
+
+function rankingQueryTerms(query: string): string[] {
+  return [...new Set(query.toLocaleLowerCase("und").match(/[\p{L}\p{N}_-]{3,}/gu) ?? [])];
+}
+
+function queryFit(group: RecallSourceGroup, terms: readonly string[]): number {
+  if (terms.length === 0) return 0;
+  const textTokens = new Set(
+    [...new Set(group.spans.map(span => span.quote))]
+      .join("\n")
+      .toLocaleLowerCase("und")
+      .match(/[\p{L}\p{N}_-]+/gu) ?? [],
+  );
+  let total = 0;
+  let matched = 0;
+  for (const term of terms) {
+    const weight = /[\d_/-]/u.test(term) || term.length >= 12 ? 4 : 1;
+    total += weight;
+    if (textTokens.has(term)) matched += weight;
+  }
+  return total === 0 ? 0 : matched / total;
+}
+
+function queryAnchorScore(group: RecallSourceGroup, anchors: readonly string[]): number {
+  if (anchors.length === 0) return 0;
+  const spans = [...new Set(group.spans.map(span => span.quote))].map(quote => quote.toLocaleLowerCase("und"));
+  return anchors.reduce((score, anchor, index) => score + (spans.some(span => span.includes(anchor)) ? anchors.length - index : 0), 0);
+}
+
+function diversifyEquivalentMatches(
+  groups: readonly RecallSourceGroup[],
+  fit: ReadonlyMap<string, number>,
+  anchorScores: ReadonlyMap<string, number>,
+  skippedIds: ReadonlySet<string>,
+): { groups: RecallSourceGroup[]; changed: boolean } {
+  const positions = new Map<string, number[]>();
+  const buckets = new Map<string, RecallSourceGroup[]>();
+  groups.forEach((group, index) => {
+    if (skippedIds.has(group.capture_id)) return;
+    const queryCoverage = fit.get(group.capture_id) ?? 0;
+    if (queryCoverage <= 0) return;
+    const key = `${anchorScores.get(group.capture_id) ?? 0}\u0000${queryCoverage}`;
+    positions.set(key, [...(positions.get(key) ?? []), index]);
+    buckets.set(key, [...(buckets.get(key) ?? []), group]);
+  });
+  const ordered = [...groups];
+  let changed = false;
+  for (const [key, bucket] of buckets) {
+    const seen = new Set<string>();
+    const firstBySource = bucket.filter(group => {
+      const sourceKey = `${group.scope_id}\u0000${group.session_id}\u0000${group.evidence_class}`;
+      if (seen.has(sourceKey)) return false;
+      seen.add(sourceKey);
+      return true;
+    });
+    const replacement = [...firstBySource, ...bucket.filter(group => !firstBySource.includes(group))];
+    const slots = positions.get(key) ?? [];
+    slots.forEach((slot, index) => {
+      const next = replacement[index];
+      if (next === undefined) return;
+      if (ordered[slot]?.capture_id !== next.capture_id) changed = true;
+      ordered[slot] = next;
+    });
+  }
+  return { groups: ordered, changed };
 }
 
 function logicalMessageKey(group: RecallSourceGroup): string {
@@ -122,9 +197,12 @@ export async function improveSourceRanking(
     values.set(group.capture_id, value);
   }
   const baseOrder = new Map([...byId.keys()].map((id, index) => [id, index]));
+  const terms = rankingQueryTerms(request.query);
+  const fit = new Map([...byId.values()].map(group => [group.capture_id, queryFit(group, terms)]));
+  const anchors = retrievalAnchors(request.query);
+  const anchorScores = new Map([...byId.values()].map(group => [group.capture_id, queryAnchorScore(group, anchors)]));
   const score = (group: RecallSourceGroup) => SEARCH_SIGNALS.reduce((sum, key) => sum + weights[key] * values.get(group.capture_id)![key], 0);
-  const exact = (group: RecallSourceGroup) => kind === "identifier" && group.spans.some(span => span.quote.toLocaleLowerCase("und").includes(request.query.toLocaleLowerCase("und"))) ? 1 : 0;
-  let ordered = [...byId.values()].sort((a, b) => exact(b) - exact(a) || score(b) - score(a) || baseOrder.get(a.capture_id)! - baseOrder.get(b.capture_id)!);
+  let ordered = [...byId.values()].sort((a, b) => anchorScores.get(b.capture_id)! - anchorScores.get(a.capture_id)! || score(b) - score(a) || fit.get(b.capture_id)! - fit.get(a.capture_id)! || baseOrder.get(a.capture_id)! - baseOrder.get(b.capture_id)!);
   let reranker: SearchReport["reranker"] = options.reranker === undefined ? options.rerankerState ?? "disabled" : "skipped";
   if (options.reranker && !["identifier", "recent"].includes(kind) && ordered.length > 1 && deadline - Date.now() > 250) {
     const top = request.token_budget >= 16000 ? 20 : 12;
@@ -144,6 +222,12 @@ export async function improveSourceRanking(
       ordered = [...ranked.map(row => byId.get(row.id)!), ...ordered.filter(group => !poolIds.has(group.capture_id))];
       reranker = "applied"; stages.push("cross_encoder");
     } catch { check(); reranker = "unavailable"; stages.push("rerank_fallback"); }
+  }
+  if (kind !== "recent" && ordered.length > 1) {
+    const skippedIds = new Set([...validProcedures, ...atomicGroups.flat()]);
+    const diversity = diversifyEquivalentMatches(ordered, fit, anchorScores, skippedIds);
+    ordered = diversity.groups;
+    if (diversity.changed) stages.push("session_diversity");
   }
   if (validProcedures.length > 0) ordered.sort((a, b) => Number(validProcedures.includes(b.capture_id)) - Number(validProcedures.includes(a.capture_id)));
   const seen = new Set<string>(), primary: RecallSourceGroup[] = [], duplicates: RecallSourceGroup[] = [];

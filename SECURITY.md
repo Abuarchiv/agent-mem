@@ -21,7 +21,7 @@ Agent Mem stores data locally. Local storage is not automatically private.
 ## Limits
 
 - SQLite is not encrypted at rest.
-- Redaction is not complete data-loss prevention. Do not submit secrets to a host session.
+- Redaction does not prevent every data leak. Do not send secrets to a host session.
 - `memory_forget` cannot erase OS backups, snapshots, or copies made by another process.
 - Native Codex Desktop, Copilot, Windows, and Linux paths need separate verification.
 

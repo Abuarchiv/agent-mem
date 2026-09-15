@@ -19,7 +19,7 @@ Agent Mem is a local service for retaining and retrieving context from coding-ag
 - The local viewer, when enabled, is read-only and bound to the local service.
 - Historical schema and validation code is retained only for reading and purging older vaults.
 
-Local storage is not encrypted. Anyone who can read the data directory or a backup can read the SQLite vault. A host can also send recalled text to its own provider.
+The SQLite vault is not encrypted at rest. Anyone who can read the data directory or one of its backups can read the vault. A host can also send recalled text to its own provider.
 
 ## Requirements
 
@@ -77,6 +77,8 @@ npm run models:download
 npm run models:verify
 npm test
 ```
+
+`models:download`/`models:verify` default to the lean core profile (E5 only). Use `npm run models:download:all` and `npm run models:verify:all` for the full package (E5 plus optional reranker), or `npm run models:download:reranker` and `npm run models:verify:reranker` for the optional reranker only.
 
 `models:download` and `runtime:download` use the network. Capture and model loading do not.
 

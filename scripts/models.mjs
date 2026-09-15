@@ -7,10 +7,25 @@ const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const modelRoot = join(root, ".models");
 const e5Manifest = JSON.parse(await readFile(join(root, "src/models/model-manifest.json"), "utf8"));
 const rerankManifest = JSON.parse(await readFile(join(root, "src/models/rerank-manifest.json"), "utf8"));
-const specs = [
-  { repo: e5Manifest.model_id, revision: e5Manifest.revision, root: join(modelRoot, "e5", e5Manifest.model_id, e5Manifest.revision), artifacts: e5Manifest.artifacts },
-  { repo: rerankManifest.model_id, revision: rerankManifest.revision, root: join(modelRoot, "rerank", rerankManifest.model_id, rerankManifest.revision), artifacts: rerankManifest.artifacts },
-];
+const e5Spec = { repo: e5Manifest.model_id, revision: e5Manifest.revision, root: join(modelRoot, "e5", e5Manifest.model_id, e5Manifest.revision), artifacts: e5Manifest.artifacts };
+const rerankSpec = { repo: rerankManifest.model_id, revision: rerankManifest.revision, root: join(modelRoot, "rerank", rerankManifest.model_id, rerankManifest.revision), artifacts: rerankManifest.artifacts };
+const allSpecs = [e5Spec, rerankSpec];
+
+const USAGE = "usage: node scripts/models.mjs verify|download [core|all|reranker] [--profile=<core|all|reranker>]";
+
+function normalizeProfile(raw) {
+  const value = String(raw ?? "core").toLowerCase();
+  if (value === "core" || value === "e5") return "core";
+  if (value === "all" || value === "full") return "all";
+  if (value === "reranker" || value === "rerank") return "reranker";
+  throw new Error(`${USAGE} (unknown profile: ${raw}; expected core|all|reranker)`);
+}
+
+function selectSpecs(profile) {
+  if (profile === "core") return [e5Spec];
+  if (profile === "reranker") return [rerankSpec];
+  return allSpecs;
+}
 
 function artifactPath(spec, relativePath) {
   if (typeof relativePath !== "string" || relativePath.length === 0 || isAbsolute(relativePath) || relativePath.includes("\0")) throw new Error("model_artifact_path_invalid");
@@ -29,11 +44,11 @@ async function verifyArtifact(spec, artifact) {
   } catch { return false; }
 }
 
-async function verifyAll() {
+async function verifyAll(selected = allSpecs) {
   const missing = [];
-  for (const spec of specs) for (const artifact of spec.artifacts) if (!(await verifyArtifact(spec, artifact))) missing.push(`${spec.repo}@${spec.revision}/${artifact.path}`);
+  for (const spec of selected) for (const artifact of spec.artifacts) if (!(await verifyArtifact(spec, artifact))) missing.push(`${spec.repo}@${spec.revision}/${artifact.path}`);
   if (missing.length > 0) throw new Error(`model_artifacts_invalid:${missing.join(",")}`);
-  console.log(JSON.stringify({ status: "verified", models: specs.map((spec) => ({ model: spec.repo, revision: spec.revision, root: relative(root, spec.root) })) }));
+  console.log(JSON.stringify({ status: "verified", models: selected.map((spec) => ({ model: spec.repo, revision: spec.revision, root: relative(root, spec.root) })) }));
 }
 
 async function downloadArtifact(spec, artifact) {
@@ -56,19 +71,47 @@ async function downloadArtifact(spec, artifact) {
   return "downloaded";
 }
 
-const command = process.argv[2] ?? "verify";
+const args = process.argv.slice(2);
+let command = "verify";
+let flagProfile;
+let positionalProfile;
+{
+  const positional = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--profile") {
+      const next = args[index + 1];
+      if (next === undefined) throw new Error(USAGE);
+      flagProfile = next;
+      index += 1;
+    } else if (arg.startsWith("--profile=")) {
+      flagProfile = arg.slice("--profile=".length);
+      if (flagProfile.length === 0) throw new Error(USAGE);
+    } else if (arg.startsWith("--")) {
+      throw new Error(USAGE);
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length > 0) command = positional[0];
+  if (positional.length > 1) positionalProfile = positional[1];
+  if (positional.length > 2) throw new Error(USAGE);
+}
+if (command !== "verify" && command !== "download") throw new Error(USAGE);
+const profile = normalizeProfile(flagProfile ?? positionalProfile ?? "core");
+const specs = selectSpecs(profile);
 if (command === "verify") {
-  await verifyAll();
+  await verifyAll(specs);
 } else if (command === "download") {
   const results = [];
   try {
     for (const spec of specs) for (const artifact of spec.artifacts) results.push({ model: spec.repo, path: artifact.path, state: await downloadArtifact(spec, artifact) });
-    await verifyAll();
+    await verifyAll(specs);
     console.log(JSON.stringify({ status: "downloaded_or_existing", artifacts: results }));
   } catch (error) {
     for (const spec of specs) for (const artifact of spec.artifacts) await rm(`${artifactPath(spec, artifact.path)}.download-${process.pid}`, { force: true }).catch(() => undefined);
     throw error;
   }
 } else {
-  throw new Error("usage: node scripts/models.mjs verify|download");
+  throw new Error(USAGE);
 }

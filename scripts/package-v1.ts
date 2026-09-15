@@ -258,6 +258,7 @@ export async function packageV1(destination: string, options: PackageV1Options =
     copyFileSync(join(root, "src/licenses/rerank-Apache-2.0-LICENSE"), join(output, "licenses/rerank-Apache-2.0-LICENSE"));
   }
   copyFileSync(join(root, "src/package-readme.md"), join(output, "README.md"));
+  copyFileSync(join(root, "LICENSE"), join(output, "LICENSE"));
   for (const name of ["node-LICENSE", "e5-LICENSE", "onnxruntime-LICENSE", "onnxruntime-ThirdPartyNotices.txt", "sqlite-vec-LICENSE-MIT", "sharp-libvips-THIRD-PARTY-NOTICES.md"]) {
     copyFileSync(join(root, "src/licenses", name), join(output, "licenses", name));
   }

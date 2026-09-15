@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,8 +21,9 @@ import {
 import { bindingOwnerId, createTrustedBinding, type TrustedBinding } from "../src/host/contract.js";
 import { SearchState } from "../src/v1/search-state.js";
 import type { LocalReranker } from "../src/models/rerank.js";
+import { emptySignals, improveSourceRanking, retrievalQuery } from "../src/retrieval/source-intelligence.js";
 import { VECTOR_DIM, VectorSearchError } from "../src/retrieval/vector.js";
-import { AgentMemoryDatabase } from "../src/store/database.js";
+import { AgentMemoryDatabase, type RecallSourceGroup } from "../src/store/database.js";
 
 const scopeId = "11111111-1111-4111-8111-111111111111";
 const bindingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -159,6 +160,238 @@ test("recent wording does not replace topical search with an unrelated timeline"
     assert.equal(packet.items[0]?.item_id, sourceId);
     assert.notEqual(packet.mode, "timeline");
   } finally { close(database, directory); }
+});
+
+test("a distinctive exact term beats a misleading hybrid score", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const answerId = randomUUID();
+    const toolId = randomUUID();
+    capture(envelope(answerId, "CODEX_MEMORY_ANCHOR_7421 is the confirmed release decision.", "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    capture(envelope(toolId, "The tool output discusses memory context and the current release session.", "2026-09-14T08:02:00Z", "tool_result"), binding, database);
+    const snapshot = database.getRecallSnapshot([scopeId], binding);
+    const groups = database.getRecallSourceGroups([scopeId], binding, [toolId, answerId], snapshot.watermark);
+    const result = await improveSourceRanking(
+      database,
+      { query: "CODEX_MEMORY_ANCHOR_7421", scope_ids: [scopeId], mode: "current", token_budget: 4_000, known_at_seq: snapshot.watermark },
+      binding,
+      groups,
+      new Map([
+        [toolId, { ...emptySignals(), lexical: 1, semantic: 1 }],
+        [answerId, { ...emptySignals(), lexical: 0.1, semantic: 0.1 }],
+      ]),
+      { deadline_at: "2099-01-01T00:00:00Z", exclude_current_session_prompts: false, timeline: false },
+      {},
+    );
+    assert.equal(result.groups[0]?.capture_id, answerId);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("long queries retain technical anchors at the retrieval boundary", () => {
+  const query = `${Array.from({ length: 60 }, (_, index) => `filler${index}`).join(" ")} src/retrieval/lexical.ts`;
+  assert.match(retrievalQuery(query), /src\/retrieval\/lexical\.ts/);
+});
+
+test("anchor pass recovers a source when the primary candidate pass is empty", async () => {
+  const { database, binding, directory } = setup();
+  const originalSearch = database.searchLexicalCandidates.bind(database);
+  let calls = 0;
+  database.searchLexicalCandidates = ((...args: Parameters<AgentMemoryDatabase["searchLexicalCandidates"]>) => {
+    calls += 1;
+    return calls === 1 ? [] : originalSearch(...args);
+  }) as AgentMemoryDatabase["searchLexicalCandidates"];
+  try {
+    const sourceId = randomUUID();
+    capture(envelope(sourceId, "AXOLOTL_7421 is the exact release decision.", "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "AXOLOTL_7421", scope_ids: [scopeId], mode: "current", token_budget: 1_500 },
+      binding,
+      createPreparationContext(binding, { version: 1, kind: "session_start", deadline_at: "2099-01-01T00:00:00Z", capture_status: { state: "not_attempted" }, budget: { profile: { unit: "utf8_bytes", limit: 4_000 } } }),
+    );
+    assert.ok(calls >= 2);
+    assert.equal(packet.items[0]?.item_id, sourceId);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("automatically segments long event text without losing source provenance", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const original = `${"context line\n".repeat(260)}AXOLOTL_7421 exact decision\n${"tail line\n".repeat(80)}`;
+    capture(envelope(sourceId, original, "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    const snapshot = database.getRecallSnapshot([scopeId], binding);
+    const groups = database.getRecallSourceGroups([scopeId], binding, [sourceId], snapshot.watermark);
+    const spans = groups[0]?.spans ?? [];
+    const fullSpan = spans.find(span => span.start_utf16 === 0n && span.end_utf16 === BigInt(original.length));
+    const chunkSpans = spans.filter(span => span !== fullSpan);
+    assert.ok(fullSpan !== undefined && chunkSpans.length > 1);
+    assert.equal(fullSpan.quote, original);
+    assert.equal(chunkSpans.map(span => span.quote).join(""), original);
+    assert.ok(chunkSpans.some(span => span.quote.includes("AXOLOTL_7421 exact decision")));
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "AXOLOTL_7421 exact decision", scope_ids: [scopeId], mode: "current", token_budget: 4_000 },
+      binding,
+      createPreparationContext(binding, { version: 1, kind: "session_start", deadline_at: "2099-01-01T00:00:00Z", capture_status: { state: "not_attempted" }, budget: { profile: { unit: "utf8_bytes", limit: 4_000 } } }),
+    );
+    const item = packet.items[0];
+    assert.ok(item !== undefined && item.source_provenance !== undefined, JSON.stringify({ items: packet.items, diagnostics: packet.diagnostics, tokens: packet.tokens }));
+    assert.ok(item.source_provenance.length < chunkSpans.length, JSON.stringify({ spans: chunkSpans.length, provenance: item.source_provenance.length }));
+    assert.ok(item.content?.includes("AXOLOTL_7421 exact decision"), JSON.stringify(item));
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("automatic event segmentation stays within the hard span limit after boundary seeking", () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const original = `${"x".repeat(512)}\n`.repeat(1_000);
+    capture(envelope(sourceId, original, "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    const snapshot = database.getRecallSnapshot([scopeId], binding);
+    const spans = database.getRecallSourceGroups([scopeId], binding, [sourceId], snapshot.watermark)[0]?.spans ?? [];
+    const eventSpans = spans.filter((span) => span.root === "event" && span.path === "/text");
+    const fullSpan = eventSpans.find((span) => span.start_utf16 === 0n && span.end_utf16 === BigInt(original.length));
+    const chunks = eventSpans.filter((span) => span !== fullSpan);
+    assert.ok(chunks.length > 1);
+    assert.ok(fullSpan !== undefined);
+    assert.ok(eventSpans.length <= 128);
+    assert.equal(chunks.map((span) => span.quote).join(""), original);
+    assert.equal(fullSpan.quote, original);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("budgeted recall keeps payload and event provenance distinct", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const eventText = `ROOT_PATH_ANCHOR_7421${"E".repeat(1_480)}`;
+    const payloadText = "P".repeat(eventText.length);
+    const payloadSpanId = randomUUID();
+    const base = envelope(sourceId, eventText, "2026-09-14T08:01:00Z", "tool_result") as {
+      readonly event: Record<string, unknown>;
+      readonly payload: Record<string, unknown>;
+    };
+    capture(
+      { ...base, event: { ...base.event, text: eventText }, payload: { ...base.payload, text: payloadText } },
+      binding,
+      database,
+      { source_spans: [{
+        span_id: payloadSpanId,
+        root: "payload",
+        path: "/text",
+        start_utf16: 0,
+        end_utf16: payloadText.length,
+        digest: createHash("sha256").update(payloadText, "utf8").digest("hex"),
+      }] },
+    );
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "ANCHOR", scope_ids: [scopeId], mode: "current", token_budget: 16_000 },
+      binding,
+      createPreparationContext(binding, {
+        version: 1,
+        kind: "session_start",
+        deadline_at: "2099-01-01T00:00:00Z",
+        capture_status: { state: "not_attempted" },
+        budget: { profile: { unit: "utf8_bytes", limit: 16_000 } },
+      }),
+    );
+    const item = packet.items.find((candidate) => candidate.item_id === sourceId);
+    if (item?.source_provenance === undefined) throw new Error("source_item_missing");
+    assert.ok(item.source_provenance.some((span) => span.span_id === payloadSpanId));
+    assert.ok(item.source_provenance.some((span) => span.root === "event" && span.quote.includes("ROOT_PATH_ANCHOR_7421")));
+    assert.equal(item.source_provenance.some((span) => span.root === "event" && span.start_utf16 === 0 && span.end_utf16 === eventText.length), false);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("UTF-8-heavy event chunks remain useful under a byte budget", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const sourceId = randomUUID();
+    const original = `${"界".repeat(1_024)}UTF8_BUDGET_ANCHOR_7421`;
+    capture(envelope(sourceId, original, "2026-09-14T08:01:00Z", "tool_result"), binding, database);
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "BUDGET", scope_ids: [scopeId], mode: "current", token_budget: 1_800 },
+      binding,
+      createPreparationContext(binding, {
+        version: 1,
+        kind: "session_start",
+        deadline_at: "2099-01-01T00:00:00Z",
+        capture_status: { state: "not_attempted" },
+        budget: { profile: { unit: "utf8_bytes", limit: 1_800 } },
+      }),
+    );
+    const item = packet.items.find((candidate) => candidate.item_id === sourceId);
+    if (item === undefined) throw new Error(JSON.stringify({ packet: packet.items, diagnostics: packet.diagnostics }));
+    assert.ok(item.content?.includes("UTF8_BUDGET_ANCHOR_7421"), JSON.stringify({ packet: packet.items, diagnostics: packet.diagnostics }));
+    assert.ok(packet.tokens.used <= 1_800);
+    for (const span of item.source_provenance ?? []) assert.ok(Buffer.byteLength(span.quote, "utf8") <= 1_350);
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("lexical fallback keeps a distinctive technical anchor ahead of question filler", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const rareId = randomUUID();
+    const fillerId = randomUUID();
+    capture(envelope(rareId, "AXOLOTL_7421 release checklist is the relevant decision.", "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    capture(envelope(fillerId, "Where can I find the release document?", "2026-09-14T08:02:00Z", "tool_result"), binding, database);
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "Where can I find AXOLOTL_7421 document?", scope_ids: [scopeId], mode: "current", token_budget: 1_500 },
+      binding,
+      createPreparationContext(binding, { version: 1, kind: "session_start", deadline_at: "2099-01-01T00:00:00Z", capture_status: { state: "not_attempted" }, budget: { profile: { unit: "utf8_bytes", limit: 4_000 } } }),
+    );
+    assert.equal(packet.items[0]?.item_id, rareId, JSON.stringify(packet.items.map(item => ({ id: item.item_id, content: item.content }))));
+  } finally {
+    close(database, directory);
+  }
+});
+
+test("equal matches get a stable session and source-class diversity pass", async () => {
+  const { database, binding, directory } = setup();
+  try {
+    const group = (captureId: string, sessionId: string, evidenceClass: "prompt" | "assistant_output", commitSeq: string): RecallSourceGroup => ({
+      capture_id: captureId,
+      scope_id: scopeId,
+      session_id: sessionId,
+      commit_seq: commitSeq,
+      data_epoch: "0",
+      evidence_class: evidenceClass,
+      role: evidenceClass === "prompt" ? "user" : "assistant",
+      event_json: JSON.stringify({ native_ids: { message_id: captureId } }),
+      spans: [{ span_id: randomUUID(), quote: "release decision" }],
+    } as unknown as RecallSourceGroup);
+    const first = group(randomUUID(), "session-a", "prompt", "1");
+    const duplicate = group(randomUUID(), "session-a", "prompt", "2");
+    const otherSession = group(randomUUID(), "session-b", "assistant_output", "3");
+    const result = await improveSourceRanking(
+      database,
+      { query: "release decision", scope_ids: [scopeId], mode: "current", token_budget: 4_000, known_at_seq: "3" },
+      binding,
+      [first, duplicate, otherSession],
+      new Map([[first.capture_id, emptySignals()], [duplicate.capture_id, emptySignals()], [otherSession.capture_id, emptySignals()]]),
+      { deadline_at: "2099-01-01T00:00:00Z", exclude_current_session_prompts: false, timeline: false },
+      {},
+    );
+    assert.deepEqual(result.groups.map(group => group.capture_id), [first.capture_id, otherSession.capture_id, duplicate.capture_id]);
+  } finally {
+    close(database, directory);
+  }
 });
 
 test("snapshot revalidation retry performs at most one cross-encoder pass", async () => {
