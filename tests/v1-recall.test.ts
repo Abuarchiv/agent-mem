@@ -194,6 +194,30 @@ test("long queries retain technical anchors at the retrieval boundary", () => {
   assert.match(retrievalQuery(query), /src\/retrieval\/lexical\.ts/);
 });
 
+test("anchor pass recovers a source when the primary candidate pass is empty", async () => {
+  const { database, binding, directory } = setup();
+  const originalSearch = database.searchLexicalCandidates.bind(database);
+  let calls = 0;
+  database.searchLexicalCandidates = ((...args: Parameters<AgentMemoryDatabase["searchLexicalCandidates"]>) => {
+    calls += 1;
+    return calls === 1 ? [] : originalSearch(...args);
+  }) as AgentMemoryDatabase["searchLexicalCandidates"];
+  try {
+    const sourceId = randomUUID();
+    capture(envelope(sourceId, "AXOLOTL_7421 is the exact release decision.", "2026-09-14T08:01:00Z", "assistant_final"), binding, database);
+    const packet = await prepareSourceEvidencePacket(
+      database,
+      { query: "AXOLOTL_7421", scope_ids: [scopeId], mode: "current", token_budget: 1_500 },
+      binding,
+      createPreparationContext(binding, { version: 1, kind: "session_start", deadline_at: "2099-01-01T00:00:00Z", capture_status: { state: "not_attempted" }, budget: { profile: { unit: "utf8_bytes", limit: 4_000 } } }),
+    );
+    assert.ok(calls >= 2);
+    assert.equal(packet.items[0]?.item_id, sourceId);
+  } finally {
+    close(database, directory);
+  }
+});
+
 test("lexical fallback keeps a distinctive technical anchor ahead of question filler", async () => {
   const { database, binding, directory } = setup();
   try {

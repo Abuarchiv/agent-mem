@@ -10,9 +10,9 @@ import {
   type TrustedBinding,
 } from "../host/contract.js";
 import { FusionError, hybridSearch } from "../retrieval/fusion.js";
-import { LexicalSearchError, lexicalSearch } from "../retrieval/lexical.js";
+import { LexicalSearchError, lexicalSearch, type LexicalResult } from "../retrieval/lexical.js";
 import { VectorSearchError } from "../retrieval/vector.js";
-import { emptySignals, improveSourceRanking, retrievalQuery, type IntelligenceResult, type SourceIntelligenceOptions } from "../retrieval/source-intelligence.js";
+import { emptySignals, improveSourceRanking, retrievalAnchors, retrievalQuery, type IntelligenceResult, type SourceIntelligenceOptions } from "../retrieval/source-intelligence.js";
 import type { SignalValues } from "../retrieval/intelligence-types.js";
 import { recallMemoryRecords } from "./memory-records.js";
 import {
@@ -32,6 +32,8 @@ import {
 } from "./packet.js";
 
 const LEXICAL_CANDIDATE_LIMIT = 40;
+const ANCHOR_CANDIDATE_LIMIT = 8;
+const MAX_CANDIDATES = 64;
 // ponytail: keep session-start continuity to 20 recent groups; widen only after measured recall gaps.
 const TIMELINE_SOURCE_LIMIT = 20;
 
@@ -111,6 +113,41 @@ function lexicalSignal(rank: number): number {
   return relevance / (1 + relevance);
 }
 
+function anchorCandidates(
+  database: AgentMemoryDatabase,
+  binding: TrustedBinding,
+  request: RecallRequest,
+  anchors: readonly string[],
+  lexicalOptions: { readonly any_terms: boolean; readonly excluded_capture_id?: string; readonly exclude_current_session_prompts?: boolean },
+): LexicalResult[] {
+  const rows: LexicalResult[] = [];
+  for (const anchor of anchors) {
+    rows.push(...lexicalSearch(database, binding, { ...request, query: anchor }, ANCHOR_CANDIDATE_LIMIT, {
+      ...lexicalOptions,
+      any_terms: !anchor.includes(" "),
+    }));
+  }
+  return rows;
+}
+
+function mergeCandidateSearch(
+  primaryIds: readonly string[],
+  primarySignals: ReadonlyMap<string, SignalValues>,
+  anchors: readonly LexicalResult[],
+  projectionUnavailable: boolean,
+): CandidateSearchResult {
+  const candidateIds = [...new Set(primaryIds)].slice(0, MAX_CANDIDATES);
+  const seen = new Set(candidateIds);
+  const signals = new Map(primarySignals);
+  for (const row of anchors) {
+    if (seen.size >= MAX_CANDIDATES || seen.has(row.source_id)) continue;
+    seen.add(row.source_id);
+    candidateIds.push(row.source_id);
+    signals.set(row.source_id, { ...emptySignals(), lexical: lexicalSignal(row.rank) });
+  }
+  return { candidateIds, projectionUnavailable, signals };
+}
+
 function usesRecentTimeline(context: PreparationContext, request: RecallRequest): boolean {
   return request.mode === "timeline" || context.kind === "session_start" && (
     context.capture_status.state === "committed" ||
@@ -176,6 +213,7 @@ function searchCandidateIds(
   const boundedRequest = { ...request, query: retrievalQuery(request.query), known_at_seq: knownAtSeq };
   const lexicalOptions = { any_terms: true, ...(excluded === undefined ? {} : { excluded_capture_id: excluded }),
     ...(excludeCurrentSessionPrompts ? { exclude_current_session_prompts: true } : {}) };
+  const anchors = retrievalAnchors(request.query);
   if (usesRecentTimeline(context, request)) {
     if (request.mode !== "timeline") return automaticStartCandidates(database, request, binding, knownAtSeq, excluded, excludeCurrentSessionPrompts);
     return { candidateIds: database.getRecallTimelineGroups(request.scope_ids, binding, knownAtSeq, TIMELINE_SOURCE_LIMIT, excluded, excludeCurrentSessionPrompts).map(group => group.capture_id), projectionUnavailable: false, signals: new Map() };
@@ -187,18 +225,20 @@ function searchCandidateIds(
         lexical: lexicalOptions, vector: { ...(excluded === undefined ? {} : { excluded_capture_id: excluded }),
           ...(excludeCurrentSessionPrompts ? { exclude_current_session_prompts: true } : {}) },
       });
-      return { candidateIds: rows.map(row => row.source_id), projectionUnavailable: false,
-        signals: new Map(rows.map(row => [row.source_id, { ...emptySignals(),
-          lexical: row.lexical_rank === undefined ? 0 : 61 / (61 + row.lexical_rank),
-          semantic: row.vector_rank === undefined ? 0 : 61 / (61 + row.vector_rank) }])) };
+      const signals = new Map(rows.map(row => [row.source_id, { ...emptySignals(),
+        lexical: row.lexical_rank === undefined ? 0 : 61 / (61 + row.lexical_rank),
+        semantic: row.vector_rank === undefined ? 0 : 61 / (61 + row.vector_rank) }]));
+      const extra = anchors.length === 0 ? [] : anchorCandidates(database, binding, boundedRequest, anchors, lexicalOptions);
+      return mergeCandidateSearch(rows.map(row => row.source_id), signals, extra, false);
     } catch (error) {
       if (!isProjectionFailure(error)) throw error;
       ensureBeforeDeadline(context);
     }
   }
   const rows = lexicalSearch(database, binding, boundedRequest, LEXICAL_CANDIDATE_LIMIT, lexicalOptions);
-  return { candidateIds: rows.map(row => row.source_id), projectionUnavailable: queryVector !== undefined,
-    signals: new Map(rows.map(row => [row.source_id, { ...emptySignals(), lexical: lexicalSignal(row.rank) }])) };
+  const signals = new Map(rows.map(row => [row.source_id, { ...emptySignals(), lexical: lexicalSignal(row.rank) }]));
+  const extra = anchors.length === 0 ? [] : anchorCandidates(database, binding, boundedRequest, anchors, lexicalOptions);
+  return mergeCandidateSearch(rows.map(row => row.source_id), signals, extra, queryVector !== undefined);
 }
 
 function recordTrace(

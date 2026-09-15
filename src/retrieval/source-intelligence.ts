@@ -15,7 +15,7 @@ export interface SourceIntelligenceOptions {
 
 export const emptySignals = (): SignalValues => ({ lexical: 0, semantic: 0, graph: 0, procedure: 0, recency: 0 });
 
-function rankingAnchors(query: string): string[] {
+export function retrievalAnchors(query: string): string[] {
   const phrases = [...query.matchAll(/"([^"\r\n]{2,128})"/gu)].map(match => match[1]!.trim());
   const technical = query.match(/[\p{L}\p{N}_.-]+(?:\/[\p{L}\p{N}_.-]+)+|[\p{L}\p{N}]+(?:[_-][\p{L}\p{N}]+)+/gu) ?? [];
   return [...new Set([...phrases, ...technical].map(anchor => anchor.toLocaleLowerCase("und")))].slice(0, 4);
@@ -24,7 +24,7 @@ function rankingAnchors(query: string): string[] {
 export function retrievalQuery(query: string): string {
   const tokens = [...new Set(query.match(/[\p{L}\p{N}_]+/gu) ?? [])];
   if (query.length <= 2048 && tokens.length <= 48 && tokens.every(token => token.length <= 128)) return query;
-  const anchors = rankingAnchors(query);
+  const anchors = retrievalAnchors(query);
   const anchorTokens = new Set(anchors.flatMap(anchor => anchor.match(/[\p{L}\p{N}_]+/gu) ?? []));
   const remainder = tokens.filter(token => !anchorTokens.has(token.toLocaleLowerCase("und")) && token.length <= 128);
   return [...anchors, ...remainder].slice(0, 48).join(" ").slice(0, 2048) || "...";
@@ -199,7 +199,7 @@ export async function improveSourceRanking(
   const baseOrder = new Map([...byId.keys()].map((id, index) => [id, index]));
   const terms = rankingQueryTerms(request.query);
   const fit = new Map([...byId.values()].map(group => [group.capture_id, queryFit(group, terms)]));
-  const anchors = rankingAnchors(request.query);
+  const anchors = retrievalAnchors(request.query);
   const anchorScores = new Map([...byId.values()].map(group => [group.capture_id, queryAnchorScore(group, anchors)]));
   const score = (group: RecallSourceGroup) => SEARCH_SIGNALS.reduce((sum, key) => sum + weights[key] * values.get(group.capture_id)![key], 0);
   let ordered = [...byId.values()].sort((a, b) => anchorScores.get(b.capture_id)! - anchorScores.get(a.capture_id)! || score(b) - score(a) || fit.get(b.capture_id)! - fit.get(a.capture_id)! || baseOrder.get(a.capture_id)! - baseOrder.get(b.capture_id)!);
