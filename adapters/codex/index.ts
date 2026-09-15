@@ -42,6 +42,7 @@ import {
   type TrustedBinding,
 } from "../../src/host/contract.js";
 import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend, type AgentMemorySessionStatus, type SessionHost } from "../../src/v1/session-status.js";
+import { ensureOwnedBrokerForConnection } from "../../src/v1/recovery.js";
 
 export const CODEX_ADAPTER_VERSION = "1.0.0" as const;
 export const CODEX_SESSION_START_UTF8_BYTES = 4_000;
@@ -709,6 +710,12 @@ export async function runCodexHookFromStdin(configPath: string): Promise<void> {
   } catch {
     process.stdout.write(`${JSON.stringify({ continue: true, systemMessage: DEGRADED_MESSAGE })}\n`);
     return;
+  }
+  try {
+    const project = config.projects[0]?.workspace_roots[0];
+    if (project !== undefined) await ensureOwnedBrokerForConnection(configPath, project, "codex");
+  } catch {
+    // The adapter remains fail-open; the normal hook path reports degraded.
   }
   const adapter = new CodexHostAdapter(config);
   await runBoundedCommandHook({

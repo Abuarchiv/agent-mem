@@ -33,7 +33,7 @@ export function sessionStatusFromBackend(host: SessionHost, backend: unknown): A
   const e5 = state(embedding?.state);
   const core = root?.state === "core_ready" ? "ready" : root?.state === "degraded" || e5 === "degraded" ? "degraded" : e5 === "ready" ? "ready" : "unavailable";
   const reranker = rerankerValue?.state === "ready" ? "ready" : rerankerValue?.state === "disabled" ? "disabled" : "unavailable";
-  const selectedReason = reason(embedding?.reason) ?? reason(rerankerValue?.reason);
+  const selectedReason = reason(embedding?.reason) ?? (reranker === "unavailable" ? reason(rerankerValue?.reason) : undefined);
   return {
     version: 1,
     state: core === "ready" ? "connected" : "degraded",

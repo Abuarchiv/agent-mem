@@ -37,6 +37,7 @@ import {
   type TrustedBinding,
 } from "../../src/host/contract.js";
 import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend, type AgentMemorySessionStatus } from "../../src/v1/session-status.js";
+import { ensureOwnedBrokerForConnection } from "../../src/v1/recovery.js";
 import {
   normalizeNativeEvent,
   type NativeEventInput,
@@ -877,6 +878,12 @@ export async function runCopilotCliHookFromStdin(configPath: string, eventName: 
   } catch {
     process.stdout.write("{}\n");
     return;
+  }
+  try {
+    const project = config.projects[0]?.workspace_roots[0];
+    if (project !== undefined) await ensureOwnedBrokerForConnection(configPath, project, "copilot-cli");
+  } catch {
+    // Hooks must never block the host when recovery cannot prove ownership.
   }
   const adapter = new CopilotCliHostAdapter(config);
   await runBoundedCommandHook({
