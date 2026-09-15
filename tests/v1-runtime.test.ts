@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -89,6 +89,25 @@ function sourceOnlyOptions(vaultPath: string): RuntimeOwnerOptions {
     ], updatedAt),
   };
 }
+
+test("rejects an existing non-private vault before opening it", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX permission regression; Windows ACL coverage is tested separately");
+    return;
+  }
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-memory-v1-runtime-private-vault-"));
+  const vaultPath = resolve(directory, "vault.sqlite");
+  writeFileSync(vaultPath, "not a vault\n", { mode: 0o644 });
+  chmodSync(vaultPath, 0o644);
+  try {
+    await assert.rejects(
+      () => createRuntime(sourceOnlyOptions(vaultPath)),
+      /vault_file_must_be_owned_and_private/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 function fakeReranker(onDispose: () => void, failFirstDispose = false): LocalReranker {
   let state: "ready" | "disposing" | "disposed" = "ready";

@@ -27,6 +27,7 @@ const controlSchema = z.discriminatedUnion("operation", [
 ]);
 const mcpSchema = z.object({ kind: z.literal("mcp"), message: z.unknown() }).strict();
 const sourceClasses = ["prompt", "assistant_output", "tool_input", "tool_output", "lifecycle", "diagnostic"] as const;
+export const V1_OUTPUT_TARGETS = ["reader:codex_cli", "reader:opencode_cli", "reader:copilot_cli"] as const;
 
 export interface V1ServiceOptions {
   readonly rerank?: boolean;
@@ -91,7 +92,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     ...config.connections.map(entry => ({ binding: bindingFor(config, entry), secret: Buffer.from(entry.secret_hex, "hex"), allowNativeSessions: true })),
   ];
   const scopeIds = config.projects.map(p => p.scope_id);
-  const targets = ["reader:codex_cli", "reader:opencode_cli"] as const;
+  const targets = V1_OUTPUT_TARGETS;
   const policy = createPolicySetupBinding({ version: 1, setup_id: config.installation_id, allowed_scope_ids: scopeIds, allowed_output_targets: targets });
   const first = config.projects[0]!;
   const output = createPolicyOutputBinding(policy, { version: 1, setup_id: policy.setup_id, output_binding_id: randomUUID(), scope_id: first.scope_id, target: "reader:codex_cli" });

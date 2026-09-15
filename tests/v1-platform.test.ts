@@ -8,6 +8,11 @@ import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.j
 import { ipcEndpointPath } from "../src/host/ipc-path.js";
 import { packageRelativePath, sharpPlatformPackages, windowsLaunchers } from "../scripts/package-v1.js";
 import { isPrivateWindowsAcl } from "../src/v1/private-files.js";
+import { V1_OUTPUT_TARGETS } from "../src/v1/service.js";
+
+test("V1 output grants include every supported local host", () => {
+  assert.deepEqual([...V1_OUTPUT_TARGETS], ["reader:codex_cli", "reader:opencode_cli", "reader:copilot_cli"]);
+});
 
 test("package graph and dependency paths are portable and cannot escape the root", () => {
   assert.equal(packageRelativePath("C:\\repo\\dist-v1", "C:\\repo\\dist-v1\\src\\ui\\server.js", win32), "src/ui/server.js");
