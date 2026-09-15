@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { createRuntime, type RuntimeOwner } from "../app/runtime.js";
-import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
+import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setReaderOutputGrants, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
 import { AgentMemoryBroker, AgentMemoryBrokerClient } from "../host/broker.js";
 import { bindingOwnerId, validateBoundRecallRequest, type EvidencePacket, type TrustedBinding } from "../host/contract.js";
 import { createMemoryMcpServer, type MemoryMcpServer } from "../host/mcp.js";
@@ -262,6 +262,8 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
           if (!database.getScopeCapturePolicy(project.scope_id).enrolled) {
             setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
             setScopeCapturePolicy(database, policy, project.scope_id, sourceClasses.map(source_class => ({ source_class, retention: { mode: "until_deleted" } })), timestamp);
+          } else {
+            setReaderOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
           }
         }
       },

@@ -3794,6 +3794,82 @@ export class AgentMemoryDatabase {
     }
   }
 
+  replaceReaderOutputGrants(
+    binding: PolicySetupBinding,
+    scopeId: string,
+    grants: readonly ScopeOutputGrant[],
+    updatedAt: string,
+  ): string {
+    this.ensureOpen();
+    const parsedScopeId = parseContract(z.uuid(), scopeId, "scope-id");
+    requirePolicySetup(binding, parsedScopeId, "purge_scope_not_allowed");
+    const parsedAt = parseContract(z.iso.datetime({ offset: true }), updatedAt, "policy-updated-at");
+    let parsedGrants: readonly ScopeOutputGrant[];
+    try {
+      parsedGrants = parseScopeOutputGrants(grants);
+    } catch (error: unknown) {
+      throw new StoreError("policy_invalid", error);
+    }
+    if (parsedGrants.length === 0 || parsedGrants.some((grant) => !grant.target.startsWith("reader:"))) {
+      throw new StoreError("policy_invalid");
+    }
+    for (const grant of parsedGrants) policyTargetAllowed(binding, grant.target);
+    const desired = parsedGrants
+      .flatMap((grant) => grant.source_classes.map((sourceClass) => `${grant.target}\u0000${sourceClass}`))
+      .sort();
+
+    this.database.exec("BEGIN IMMEDIATE");
+    let committed = false;
+    try {
+      const scope = this.database
+        .prepare("SELECT privacy_epoch FROM scope WHERE scope_id = ?")
+        .get(parsedScopeId);
+      if (scope === undefined) throw new StoreError("scope_not_registered");
+      if (this.database.prepare("SELECT 1 AS present FROM scope_policy WHERE scope_id = ?").get(parsedScopeId) === undefined) {
+        throw new StoreError("schema_invalid");
+      }
+      const currentEpoch = sqlInteger(rowValue(scope, "privacy_epoch"), "privacy_epoch");
+      const current = this.database
+        .prepare("SELECT output_target, source_class FROM scope_output_grant WHERE scope_id = ? AND output_target LIKE 'reader:%' ORDER BY output_target, source_class")
+        .all(parsedScopeId)
+        .map((row) => `${sqlText(rowValue(row, "output_target"), "output-target")}\u0000${sqlText(rowValue(row, "source_class"), "source-class")}`);
+      if (current.length === desired.length && current.every((value, index) => value === desired[index])) {
+        this.database.exec("COMMIT");
+        committed = true;
+        return currentEpoch.toString(10);
+      }
+      const nextEpoch = nextPrivacyEpoch(currentEpoch);
+      this.database.prepare("DELETE FROM scope_output_grant WHERE scope_id = ? AND output_target LIKE 'reader:%'").run(parsedScopeId);
+      const insert = this.database.prepare(
+        "INSERT INTO scope_output_grant (scope_id, output_target, source_class, created_at) VALUES (?, ?, ?, ?)",
+      );
+      for (const grant of parsedGrants) {
+        for (const sourceClass of grant.source_classes) insert.run(parsedScopeId, grant.target, sourceClass, parsedAt);
+      }
+      const scopeUpdated = this.database
+        .prepare("UPDATE scope SET privacy_epoch = ? WHERE scope_id = ?")
+        .run(nextEpoch, parsedScopeId);
+      if (sqlInteger(scopeUpdated.changes, "scope_changes") !== 1n) throw new StoreError("policy_invalid");
+      const policyUpdated = this.database
+        .prepare("UPDATE scope_policy SET updated_at = ? WHERE scope_id = ?")
+        .run(parsedAt, parsedScopeId);
+      if (sqlInteger(policyUpdated.changes, "policy_changes") !== 1n) throw new StoreError("policy_invalid");
+      this.database.exec("COMMIT");
+      committed = true;
+      return nextEpoch.toString(10);
+    } catch (error: unknown) {
+      if (!committed) {
+        try {
+          this.database.exec("ROLLBACK");
+        } catch {
+          // Preserve the policy failure.
+        }
+      }
+      if (error instanceof StoreError) throw error;
+      throw new StoreError("policy_invalid", error);
+    }
+  }
+
   setCapturePaused(binding: PolicySetupBinding, scopeId: string, paused: boolean, updatedAt: string): string {
     this.ensureOpen();
     const parsedScopeId = parseContract(z.uuid(), scopeId, "scope-id");
