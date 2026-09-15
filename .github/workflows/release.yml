@@ -49,6 +49,8 @@ jobs:
           $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
           foreach ($path in $paths) {
             $permission = (Get-Item -LiteralPath $path).PSIsContainer ? "(OI)(CI)F" : "F"
+            icacls.exe $path /setowner "*${userSid}" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
