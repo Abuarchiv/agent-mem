@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -24,7 +24,7 @@ const noRerank = args.includes("--no-rerank");
 if (args.some((arg) => arg !== "--keep-temp" && arg !== "--no-rerank" && arg !== "--package-dir" && arg !== packageArgument)) {
   throw new Error("usage: node scripts/v1-retrieval-probe.mjs --package-dir ABSOLUTE_PACKAGE [--keep-temp]");
 }
-if (packageArgument === undefined || !resolve(packageArgument).startsWith(sep)) {
+if (packageArgument === undefined || !isAbsolute(packageArgument)) {
   throw new Error("package_dir_must_be_absolute");
 }
 

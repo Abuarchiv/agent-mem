@@ -85,6 +85,7 @@ test("release gates exercise the full profile on every supported OS job", () => 
   const release = readFileSync(new URL("../../.github/workflows/release.yml", import.meta.url), "utf8");
   const gates = readFileSync(new URL("../../.github/workflows/release-gates.yml", import.meta.url), "utf8");
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const probe = readFileSync(new URL("../../scripts/v1-retrieval-probe.mjs", import.meta.url), "utf8");
   for (const workflow of [release, gates, ci]) {
     assert.match(workflow, /models:download:all/u);
     assert.match(workflow, /--with-reranker/u);
@@ -95,4 +96,5 @@ test("release gates exercise the full profile on every supported OS job", () => 
   assert.match(gates, /\$env:PACKAGE_DIR/u);
   assert.match(ci, /Build and smoke-test full Windows package/u);
   for (const workflow of [release, gates, ci]) assert.match(workflow, /harden-windows-model-assets\.ps1/u);
+  assert.match(probe, /isAbsolute\(packageArgument\)/u);
 });
