@@ -85,7 +85,8 @@ test("Windows ACL validation rejects shared, ownerless, unknown or ineffective a
   const rule = { sid: user, allow: true, rights: 2032127, inheritOnly: false };
   const privateAcl = { owner: user, user, rules: [rule, { ...rule, sid: "S-1-5-18" }, { ...rule, sid: "S-1-5-32-544" }] };
   assert.equal(isPrivateWindowsAcl(privateAcl), true);
-  for (const value of [null, {}, { ...privateAcl, owner: "S-1-5-32-544" }, { ...privateAcl, rules: [] },
+  assert.equal(isPrivateWindowsAcl({ ...privateAcl, owner: "S-1-5-32-544" }), true);
+  for (const value of [null, {}, { ...privateAcl, owner: "S-1-5-18" }, { ...privateAcl, rules: [] },
     { ...privateAcl, rules: [{ ...rule, inheritOnly: true }] }, { ...privateAcl, rules: [{ ...rule, rights: 1 }] },
     { ...privateAcl, rules: [{ ...rule, allow: false }] }, { ...privateAcl, rules: [...privateAcl.rules, { ...rule, sid: "S-1-1-0" }] },
     { ...privateAcl, rules: [...privateAcl.rules, { ...rule, sid: "S-1-5-32-545" }] }, { ...privateAcl, rules: [{ ...rule, rights: "FullControl" }] }]) {
