@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$baseUrl = if ($env:AGENT_MEM_BASE_URL) { $env:AGENT_MEM_BASE_URL } elseif ($env:AGENT_MEMORY_V1_BASE_URL) { $env:AGENT_MEMORY_V1_BASE_URL } else { 'https://github.com/Abuarchiv/agent-mem/releases/latest/download' }
+$baseUrl = if ($env:AGENT_MEM_BASE_URL) { $env:AGENT_MEM_BASE_URL } elseif ($env:AGENT_MEMORY_V1_BASE_URL) { $env:AGENT_MEMORY_V1_BASE_URL } else { 'https://github.com/Abuarchiv/agent-memory-v1/releases/latest/download' }
 $version = if ($env:AGENT_MEM_VERSION) { $env:AGENT_MEM_VERSION } elseif ($env:AGENT_MEMORY_V1_VERSION) { $env:AGENT_MEMORY_V1_VERSION } else { 'latest' }
 if (-not $baseUrl.StartsWith('https://', [System.StringComparison]::OrdinalIgnoreCase)) { throw 'installer_requires_https' }
 if ($version -notmatch '^(latest|v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') { throw 'installer_version_invalid' }
