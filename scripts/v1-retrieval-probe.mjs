@@ -69,7 +69,8 @@ const [{ startService, connectClient }, configModule, eventModule, manifestModul
 ]);
 const { addConnection, bindingFor, loadConfig, saveConfig } = configModule;
 const { normalizeNativeEvent } = eventModule;
-const { E5_MODEL_MANIFEST } = manifestModule;
+const { E5_MODEL_MANIFEST, isNativeOnnxRuntimeSupported } = manifestModule;
+const nativeSemanticSearch = isNativeOnnxRuntimeSupported();
 
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 const digest = (text) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -255,13 +256,18 @@ try {
 
   const waitStarted = performance.now();
   let status = service.status();
-  while (status.embedding?.state !== "ready" || status.jobs.pending !== 0 || status.jobs.running !== 0) {
-    if (status.jobs.failed > 0) throw new Error(`e5_index_failed:${json(status.jobs)}`);
-    if (performance.now() - waitStarted > 120_000) throw new Error(`e5_index_timeout:${json(status)}`);
-    await delay(100);
-    status = service.status();
+  if (nativeSemanticSearch) {
+    while (status.embedding?.state !== "ready" || status.jobs.pending !== 0 || status.jobs.running !== 0) {
+      if (status.jobs.failed > 0) throw new Error(`e5_index_failed:${json(status.jobs)}`);
+      if (performance.now() - waitStarted > 120_000) throw new Error(`e5_index_timeout:${json(status)}`);
+      await delay(100);
+      status = service.status();
+    }
+  } else {
+    assert.equal(status.embedding?.state, "unavailable");
+    assert.equal(status.embedding?.reason, "model_load_failed");
   }
-  const indexingWaitMs = performance.now() - waitStarted;
+  const indexingWaitMs = nativeSemanticSearch ? performance.now() - waitStarted : 0;
 
   let rpcId = 1;
   const rpc = (message) => client.rpc({ kind: "mcp", message: { jsonrpc: "2.0", id: rpcId++, ...message } });
