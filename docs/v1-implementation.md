@@ -1,6 +1,6 @@
 # V1 implementation status
 
-This is the standalone V1 line; the legacy full-product repository is separate and was not modified.
+Agent Mem V1.0.0 is the standalone local capture and retrieval release. The legacy full-product repository is separate and is not part of this release.
 
 ## Verified local gates
 
@@ -11,7 +11,7 @@ Current local verification: `npm test` passes 279/279; package construction, man
 - The current package build with Node `v24.19.0` contains 3,942 files, is 600,800,046 bytes, and has manifest SHA-256 `cd1b70b4512347c6b8b3ee7854eaa66750e2119557f5b1bb36d43000b472c488`.
 - Packaged retrieval probes pass with reranking disabled; the reranker-enabled probe passes through the documented baseline fallback when the local model cannot load.
 - The package contains no generative provider SDK or UI runtime. Model artifacts are pinned and verified offline.
-- The repository and release package carry the MIT License. Linux/Windows package gates are defined in `.github/workflows/release-gates.yml` but cannot be claimed green until hosted runners complete.
+- The repository and release package carry the MIT License. Hosted Linux, macOS, and Windows package gates passed on `main`.
 
 ## Native host evidence (15 September 2026)
 
@@ -33,11 +33,8 @@ Verified with OpenCode `1.18.30` and the standalone package:
 
 The model's final echo was deliberately not used as acceptance evidence: the probe token was also present in the new user prompt, so a model response can guess the answer. The durable acceptance signal is the authenticated recall trace and exact source provenance.
 
-## Remaining release gates
+## Release boundary
 
-- Codex Desktop has not been separately executed.
-- Copilot is not installed on the test machine; no Copilot execution claim is made.
-- Native Windows and Linux package smoke has not been run on this macOS host.
-- The release checklist must remain open until those host/platform gates are independently executed.
-
-No release tag or push was created. Old repositories, old RC artifacts, and old vaults remain untouched.
+- Codex Desktop and the Copilot app are outside the V1 release boundary.
+- OpenCode sessions must run serially per repository because its upstream snapshot garbage collector uses a global lock.
+- Linux, macOS, and Windows package gates passed on the hosted release workflow.

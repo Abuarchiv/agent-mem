@@ -22,6 +22,10 @@ The installer verifies the package checksum, configures the selected host, start
 
 For Codex, open `/hooks`, trust the project hooks, and reopen the project. Capture starts after the hook is trusted.
 
+### OpenCode concurrency
+
+OpenCode's snapshot garbage collector uses a repository-global lock. Run OpenCode sessions serially per repository with this V1 release. This is an upstream host limitation; Agent Mem keeps capture and retrieval state separate from the snapshot store.
+
 ## Viewer
 
 The viewer is read-only and defaults to **All projects**.
@@ -78,4 +82,4 @@ npm run build
 npm test
 ```
 
-This checkout is an engineering preview. The local-first core is the supported V1 path; host surfaces and release targets require separate runtime verification.
+Agent Mem V1.0.0 supports the local capture and retrieval path. Codex Desktop, the Copilot app, and concurrent OpenCode sessions are outside the V1 release boundary.

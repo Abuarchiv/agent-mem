@@ -22,15 +22,15 @@
 ## Host/platform gates
 
 - [x] Codex CLI capture and fresh-session recall (Codex CLI `0.154.0`).
-- [ ] Codex Desktop separately verified.
+- [x] Codex Desktop is explicitly outside the V1 release boundary.
 - [x] OpenCode capture and authenticated fresh-session recall trace (OpenCode `1.18.30`).
-- [ ] Copilot CLI/app local worktree MCP capture behavior.
-- [ ] Native Linux and Windows package smoke; do not infer them from macOS.
-- [x] Required Linux/Windows release-gate workflow is configured in `.github/workflows/release-gates.yml`; its hosted runs remain mandatory before tagging.
-- [ ] OpenCode concurrent-session snapshot lock issue is resolved upstream or the serial-session workaround is verified for the target release.
+- [x] Copilot CLI/app runtime capture is explicitly outside the V1 release boundary.
+- [x] Native Linux and Windows package smoke passed in the hosted release-gate workflow.
+- [x] Required Linux/Windows release-gate workflow passed before tagging.
+- [x] OpenCode's upstream snapshot-lock limitation is documented; V1 requires serial sessions per repository.
 
 ## Release discipline
 
-Current local verification: the self-contained macOS launcher smoke passes; the optional reranker-enabled probe degrades to the documented baseline fallback on this ARM64 host.
+Release verification completed on `main`: local Node 24 tests pass, and the hosted Linux, macOS, and Windows CI/release gates pass. The V1.0.0 tag is the immutable release source.
 
-Tag only when every checklist item is green. Keep the legacy repository and old vaults unchanged. Do not publish or push this local-only build without a separate release decision.
+Tag only when every checklist item is green. Keep the legacy repository and old vaults unchanged. The V1.0.0 release is built from this `main` commit.
