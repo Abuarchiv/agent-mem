@@ -442,10 +442,10 @@ export async function loadE5Embedder(options: LoadE5EmbedderOptions): Promise<Lo
   const modelRoot = resolveOwnedModelRoot(options.modelRoot);
   const verified = await verifyE5Artifacts(modelRoot);
   assertNotAborted(options.signal);
-  assertNativeRuntime();
   let tokenizer: unknown;
   let model: CallableModel | undefined;
   try {
+    assertNativeRuntime();
     // These options are the pinned Transformers.js 4.2.0 API. The absolute
     // verified directory avoids the revisioned tokenizer-discovery path and
     // `local_files_only` remains explicit at both loader boundaries.

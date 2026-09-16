@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
 import test from "node:test";
 
-import { assertNativeOnnxRuntime } from "../src/models/manifest.js";
+import { assertNativeOnnxRuntime, isNativeOnnxRuntimeSupported } from "../src/models/manifest.js";
 import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.js";
 import { ipcEndpointPath } from "../src/host/ipc-path.js";
 import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageProfile, packageRelativePath, packageVectorCapability, sharpPlatformPackages, v1RuntimeGraph, windowsLaunchers } from "../scripts/package-v1.js";
@@ -158,5 +158,9 @@ test("Windows uses a stable named pipe instead of a filesystem socket", () => {
 });
 
 test("the installed ONNX runtime accepts the current V1 target", () => {
+  if (!isNativeOnnxRuntimeSupported()) {
+    assert.throws(() => assertNativeOnnxRuntime("1.24.3"), /runtime_unsupported_platform/u);
+    return;
+  }
   assert.doesNotThrow(() => assertNativeOnnxRuntime("1.24.3"));
 });

@@ -28,7 +28,7 @@ import { AgentMemoryDatabase } from "../src/store/database.js";
 import { createPreparationContext, serializeModelContext } from "../src/context/packet.js";
 import { prepareSourceEvidencePacket as prepareEvidencePacket } from "../src/context/source-only.js";
 import { loadE5Embedder, type E5EmbedderReport, type LocalE5Embedder } from "../src/models/embedding.js";
-import { E5_MODEL_MANIFEST } from "../src/models/manifest.js";
+import { assertNativeOnnxRuntime, E5_MODEL_MANIFEST, isNativeOnnxRuntimeSupported } from "../src/models/manifest.js";
 
 const scopeId = "11111111-1111-4111-8111-111111111111";
 const bindingAId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -692,6 +692,10 @@ test("passes one trusted warm embedding owner through broker shutdown", async ()
 });
 
 test("routes broker recall through the warm E5 hybrid path", async () => {
+  if (!isNativeOnnxRuntimeSupported()) {
+    assert.throws(() => assertNativeOnnxRuntime(E5_MODEL_MANIFEST.runtime.onnxruntime_node), /runtime_unsupported_platform/u);
+    return;
+  }
   const fixture = setup();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (() => { throw new Error("network disabled by broker hybrid test"); }) as typeof fetch;

@@ -8,7 +8,7 @@ Agent Mem captures source events from configured Codex CLI, OpenCode CLI, and Gi
 
 ## Quick start
 
-Requirements: Node.js 24.20.x, npm 11, and a local project or worktree.
+Requirements: Node.js 24.20.x, npm 11, and a local project or worktree. Published bundles target macOS arm64/x64, Linux x64, and Windows x64. Intel macOS uses lexical retrieval because the pinned ONNX runtime has no macOS Intel binding.
 
 macOS / Linux:
 
@@ -42,9 +42,9 @@ The page receives an embedded local snapshot. It has no REST API and does not wr
 
 The local core works without a generative model or provider API:
 
-- SQLite FTS5 for lexical search;
-- bundled multilingual E5 for semantic retrieval;
-- optional local reranking;
+- SQLite FTS5 for lexical search on every published target;
+- bundled multilingual E5 for semantic retrieval where the native ONNX binding is available;
+- optional local reranking with the same native-runtime fallback;
 - four stdio MCP tools: `memory_recall`, `memory_get`, `memory_forget`, and `memory_write`.
 
 ## Data and privacy

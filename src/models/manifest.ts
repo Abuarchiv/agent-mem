@@ -319,6 +319,12 @@ export class NativeRuntimeError extends Error {
   }
 }
 
+const supportedNativeOnnxTargets = new Set(["darwin-arm64", "linux-arm64", "linux-x64", "win32-x64"]);
+
+export function isNativeOnnxRuntimeSupported(target = `${process.platform}-${process.arch}`): boolean {
+  return supportedNativeOnnxTargets.has(target);
+}
+
 /**
  * Shared native ONNX runtime identity check for every pinned local model
  * profile: the tested stack is CPU inference on the validated platform with
@@ -327,7 +333,7 @@ export class NativeRuntimeError extends Error {
  */
 export function assertNativeOnnxRuntime(expectedVersion: string): void {
   const target = `${process.platform}-${process.arch}`;
-  if (!["darwin-arm64", "linux-arm64", "linux-x64", "win32-x64"].includes(target)) {
+  if (!isNativeOnnxRuntimeSupported(target)) {
     throw new NativeRuntimeError("runtime_unsupported_platform");
   }
   const require = createRequireFromMeta();
