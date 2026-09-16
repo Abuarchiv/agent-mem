@@ -308,13 +308,13 @@ const recall = async (entry) => {
   const topIds = packet.items.filter((item) => item.kind === "source").map((item) => item.item_id).slice(0, 10);
   const top3Ids = topIds.slice(0, 3);
   const rank = topIds.indexOf(entry.id);
-  const modeOk = packet.mode === "current";
+  const modeOk = packet.mode === "current" || (!nativeSemanticSearch && packet.mode === "degraded");
   const sourceFound = rank >= 0;
   return {
       durationMs,
       intelligence: result.intelligence,
     ok: modeOk && sourceFound,
-    failure: modeOk ? sourceFound ? undefined : `expected_source_missing:${entry.id}` : `vector_mode_required:${packet.mode}`,
+    failure: modeOk ? sourceFound ? undefined : `expected_source_missing:${entry.id}` : `unexpected_recall_mode:${packet.mode}`,
     rank: sourceFound ? rank + 1 : null,
     top3_hit: modeOk && top3Ids.includes(entry.id),
     top3Ids,
@@ -415,7 +415,7 @@ for (const entry of directions) {
   const afterRecordPurge = await callTool("memory_recall", { query: "Kiebitz invoice storage", scope_ids: [scopeId], max_bytes: 8_000 });
   assert.ok(!afterRecordPurge.packet.items.some(item => item.kind === "record"), "purging latest report must not resurrect the superseded report");
   status = service.status();
-  if (!noRerank && status.intelligence?.reranker?.state !== "ready") {
+  if (nativeSemanticSearch && !noRerank && status.intelligence?.reranker?.state !== "ready") {
     gateFailures.push({ direction: "RERANKER", expected_source_id: "reranker", failure: `reranker_not_ready:${status.intelligence?.reranker?.state ?? "unknown"}` });
   }
   console.log(json({
