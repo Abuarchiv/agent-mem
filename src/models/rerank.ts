@@ -96,7 +96,7 @@ export function parseRerankManifest(input: unknown): RerankModelManifest {
   const parsed = rerankManifestSchema.safeParse(input);
   if (!parsed.success) throw new RerankError("rerank_manifest_invalid");
   const paths = parsed.data.artifacts.map((artifact) => artifact.path);
-  const expectedPaths = ["config.json", "tokenizer_config.json", "tokenizer.json", "onnx/model_quint8_avx2.onnx"];
+  const expectedPaths = ["config.json", "tokenizer_config.json", "tokenizer.json", "onnx/model_quantized.onnx"];
   if (new Set(paths).size !== paths.length || paths.some((path) => !expectedPaths.includes(path))) {
     throw new RerankError("rerank_manifest_invalid");
   }

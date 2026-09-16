@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -24,20 +24,22 @@ const noRerank = args.includes("--no-rerank");
 if (args.some((arg) => arg !== "--keep-temp" && arg !== "--no-rerank" && arg !== "--package-dir" && arg !== packageArgument)) {
   throw new Error("usage: node scripts/v1-retrieval-probe.mjs --package-dir ABSOLUTE_PACKAGE [--keep-temp]");
 }
-if (packageArgument === undefined || !resolve(packageArgument).startsWith(sep)) {
+if (packageArgument === undefined || !isAbsolute(packageArgument)) {
   throw new Error("package_dir_must_be_absolute");
 }
 
 const packageDirectory = realpathSync(resolve(packageArgument));
 const packageNode = realpathSync(join(packageDirectory, "runtime", "bin", process.platform === "win32" ? "node.exe" : "node"));
+const packageLauncher = join(packageDirectory, process.platform === "win32" ? "agent-mem.cmd" : "agent-mem");
 const repoRoot = realpathSync(root);
 if (packageDirectory === repoRoot || packageDirectory.startsWith(`${repoRoot}${sep}`)) {
   throw new Error("package_must_be_outside_repository_ancestry");
 }
 if (process.env.NODE_PATH !== undefined) throw new Error("NODE_PATH_must_be_unset");
 
-if (process.env.AGENT_MEMORY_V1_PROBE_REEXEC !== "1" && realpathSync(process.execPath) !== packageNode) {
-  const environment = { ...process.env, AGENT_MEMORY_V1_PROBE_REEXEC: "1" };
+if ((process.env.AGENT_MEM_PROBE_REEXEC ?? process.env.AGENT_MEMORY_V1_PROBE_REEXEC) !== "1" && realpathSync(process.execPath) !== packageNode) {
+  const environment = { ...process.env, AGENT_MEM_PROBE_REEXEC: "1" };
+  delete environment.AGENT_MEMORY_V1_PROBE_REEXEC;
   delete environment.NODE_PATH;
   delete environment.NODE_OPTIONS;
   const child = spawnSync(packageNode, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
@@ -354,8 +356,11 @@ for (const entry of directions) {
   assert.ok(related.intelligence.graph_added <= 16);
   assert.ok(related.packet.items.every(item => captureIds.includes(item.item_id)));
   const command = async (...argumentsValue) => {
-    const result = await promisify(execFile)(join(packageDirectory, "memory"),
-      ["--data-dir", dataDirectory, ...argumentsValue], { timeout: 30_000 });
+    const result = await promisify(execFile)(packageLauncher,
+      ["--data-dir", dataDirectory, ...argumentsValue], {
+        timeout: process.platform === "win32" ? 120_000 : 30_000,
+        shell: process.platform === "win32",
+      });
     return JSON.parse(result.stdout);
   };
   const procedureSource = directions[0].id;
@@ -435,5 +440,12 @@ for (const entry of directions) {
 } finally {
   await client?.close().catch(() => undefined);
   await service?.close().catch(() => undefined);
-  if (!keepTemp) rmSync(temporary, { recursive: true, force: true });
+  if (!keepTemp) {
+    try {
+      rmSync(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (error) {
+      if (process.platform !== "win32") throw error;
+      console.warn(`probe_temp_cleanup_deferred:${temporary}:${error instanceof Error ? error.code ?? error.message : String(error)}`);
+    }
+  }
 }

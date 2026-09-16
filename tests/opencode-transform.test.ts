@@ -46,11 +46,18 @@ class FakeBridge implements OpenCodeBridge {
   holdCapture: Promise<CaptureAck> | undefined;
   holdRecall: Promise<EvidencePacket> | undefined;
   responsePacket: EvidencePacket | undefined;
+  statusCalls = 0;
+  backendStatus: unknown = undefined;
   private releaseRecallPromise: (() => void) | undefined;
 
   openSession(nativeSessionId: string, _cwd: string, _options?: OpenCodeBridgeCallOptions): Promise<void> {
     this.opened.push(nativeSessionId);
     return Promise.resolve();
+  }
+
+  status(_nativeSessionId: string, _cwd: string, _options?: OpenCodeBridgeCallOptions): Promise<unknown> {
+    this.statusCalls += 1;
+    return Promise.resolve(this.backendStatus);
   }
 
   capture(_nativeSessionId: string, _cwd: string, event: OpenCodeBridgeEvent, _options?: OpenCodeBridgeCallOptions): Promise<CaptureAck> {
@@ -467,9 +474,9 @@ test("tool and text hooks preserve native outcome distinctions and message-part 
       { tool: "synthetic-mcp", sessionID: "session-tools", callID: "call-3", args: { x: 3 } },
       { title: "mcp", output: [{ type: "text", text: "mcp tool text" }], metadata: {} } as never,
     );
-    await before({ tool: "agent-memory-v1_memory_recall", sessionID: "session-tools", callID: "own-call" }, { args: { query: "own" } });
+    await before({ tool: "agent-mem_memory_recall", sessionID: "session-tools", callID: "own-call" }, { args: { query: "own" } });
     await after(
-      { tool: "agent-memory-v1_memory_recall", sessionID: "session-tools", callID: "own-call", args: { query: "own" } },
+      { tool: "agent-mem_memory_recall", sessionID: "session-tools", callID: "own-call", args: { query: "own" } },
       { title: "own mcp", output: [{ type: "text", text: "own memory output" }], metadata: {} } as never,
     );
     await complete({ sessionID: "session-tools", messageID: "message-1", partID: "part-1" }, { text: "assistant output" });
@@ -497,7 +504,7 @@ test("v1 entrypoint exposes the current loader object and accepts supplied optio
   const configValue = config();
   try {
     assert.deepEqual(Object.keys(module), ["default"]);
-    assert.equal(entry.id, "agent-memory");
+    assert.equal(entry.id, "agent-mem");
     assert.equal(typeof entry.server, "function");
     const hooks = await entry.server(
       { directory: configValue.workspaceDirectory },
@@ -596,4 +603,21 @@ test("a recall resolving after dispose starts never mutates native messages", as
     assert.equal(message.parts.length, 1);
     assert.equal(bridge.closeCalls, 1);
   } finally { bridge.releaseRecall(); await runtime.dispose(); rmSync(setup.workspaceDirectory, { recursive: true, force: true }); }
+});
+test("OpenCode session status reflects the live broker on the first session context", async () => {
+ const bridge = new FakeBridge();
+ bridge.backendStatus = { state: "core_ready", embedding: { state: "ready" }, intelligence: { reranker: { state: "disabled" } } };
+ const configValue = config();
+ try {
+  const hooks = createOpenCodeHooks(configValue, { bridgeFactory: () => bridge });
+  const messages = [userMessage("session-status", "message-status", "status prompt")];
+  await captureChatMessage(hooks, messages[0] as MessageWithParts);
+  await transformHook(hooks)({}, { messages });
+  const synthetic = (messages[0]?.parts ?? []).find((part): part is TextPart => part.type === "text" && part.synthetic === true);
+  assert.ok(synthetic);
+  assert.equal(parseModelContextWrapper(synthetic.text).status, "Agent Mem: connected\nHost: OpenCode CLI\nCore: ready · E5: ready · Reranker: disabled\nMCP: verified");
+  assert.equal(bridge.statusCalls, 1);
+ } finally {
+  rmSync(configValue.workspaceDirectory, { recursive: true, force: true });
+ }
 });

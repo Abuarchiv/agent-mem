@@ -1,6 +1,6 @@
 # Security and privacy
 
-Agent Memory V1 stores data locally. Local storage is not automatically private.
+Agent Mem stores data locally. Local storage is not automatically private.
 
 ## Data flow
 

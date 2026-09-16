@@ -34,7 +34,11 @@ import type { BrokerOwner } from "../host/broker.js";
 
 const textSchema = z.string().trim().min(1).max(6_000).refine((text) => Buffer.byteLength(text, "utf8") <= 6_000, "text_exceeds_source_batch");
 const MAINTENANCE_DEADLINE_MS = 60_000;
-const defaultVaultPath = resolve(homedir(), "Library/Application Support/Agent Memory System/vault.sqlite");
+const defaultVaultPath = (): string => {
+  const current = resolve(homedir(), "Library/Application Support/Agent Mem System/vault.sqlite");
+  const legacy = resolve(homedir(), "Library/Application Support/Agent Memory System/vault.sqlite");
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
+};
 
 export interface RuntimeScope {
   readonly scope_id: string;
@@ -94,7 +98,7 @@ function lifecycleErrorCode(error: unknown, fallback: string): string {
 /** One shared source database, E5 owner and deterministic scheduler. */
 export async function createRuntime(options: RuntimeOwnerOptions) {
   validateOptions(options);
-  const vaultPath = resolve(options.vaultPath ?? defaultVaultPath);
+  const vaultPath = resolve(options.vaultPath ?? defaultVaultPath());
   ensurePrivateDirectory(dirname(vaultPath));
   if (existsSync(vaultPath)) assertPrivatePath(vaultPath, undefined, "vault_file_must_be_owned_and_private");
   if ((options.requireExisting ?? false) && !existsSync(vaultPath)) throw new StoreError("restore_quarantined");
@@ -399,9 +403,14 @@ export async function createRuntime(options: RuntimeOwnerOptions) {
       return closeInFlight;
     }
 
-    const runtime = {
-      database,
-      policyBinding: options.policyBinding,
+const runtime = {
+  database,
+  countContextTokens(text: string): number | undefined {
+    open();
+    if (typeof text !== "string") throw new Error("context_text_invalid");
+    return embedding?.countTokens?.({ kind: "passage", text });
+  },
+  policyBinding: options.policyBinding,
       outputBinding: options.outputBinding,
       scopeId,
       brokerOwner,

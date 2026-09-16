@@ -32,6 +32,9 @@ jobs:
         run: npm run runtime:download
       - name: Build
         run: npm run build
+      - name: Validate native Unix bootstrap
+        shell: bash
+        run: sh -n install.sh
       - name: Run tests
         run: npm test
       - name: Audit production dependencies
@@ -39,14 +42,14 @@ jobs:
       - name: Build and smoke-test core package
         shell: bash
         run: |
-          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-core-package"
-          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-core-package" --no-rerank
+          npm run package -- --output "$RUNNER_TEMP/agent-mem-core-package"
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-mem-core-package" --no-rerank
       - name: Build and smoke-test full package
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          npm run package -- --output "$RUNNER_TEMP/agent-memory-v1-full-package" --with-reranker
-          npm run probe -- --package-dir "$RUNNER_TEMP/agent-memory-v1-full-package"
+          npm run package -- --output "$RUNNER_TEMP/agent-mem-full-package" --with-reranker
+          npm run probe -- --package-dir "$RUNNER_TEMP/agent-mem-full-package"
 
   verify-windows-build:
     timeout-minutes: 20
@@ -67,5 +70,43 @@ jobs:
         run: npm run runtime:download
       - name: Build
         run: npm run build
+      - name: Validate native PowerShell bootstrap
+        shell: pwsh
+        run: |
+          [scriptblock]::Create((Get-Content -Raw install.ps1)) | Out-Null
+      - name: Harden Windows model assets
+        shell: pwsh
+        run: |
+          $modelRoots = @(
+            (Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"),
+            (Join-Path (Get-Location) ".models\rerank\cross-encoder\mmarco-mMiniLMv2-L12-H384-v1\1427fd652930e4ba29e8149678df786c240d8825")
+          )
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          foreach ($modelRoot in $modelRoots) {
+            $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+            foreach ($path in $paths) {
+              $item = Get-Item -LiteralPath $path
+              $permission = if ($item.PSIsContainer) { "(OI)(CI)F" } else { "F" }
+              icacls.exe $path /setowner "*${userSid}" /C
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
       - name: Run Windows platform tests
         run: node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js
+      - name: Normalize Windows model ACLs
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1"'
+      - name: Build and smoke-test full Windows package
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP "agent-mem-ci-package"
+          npm run models:verify:all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run package -- --output $packageDir --with-reranker
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$PWD/scripts/harden-windows-model-assets.ps1" -Root $packageDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/v1-retrieval-probe.mjs --package-dir $packageDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

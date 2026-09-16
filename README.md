@@ -1,60 +1,81 @@
-# Agent Memory V1
+# Agent Mem
 
-Local memory for Codex, OpenCode, and GitHub Copilot CLI/app worktrees.
+Local memory for coding agents.
 
-## What it does
+Agent Mem captures source events from configured Codex CLI, OpenCode CLI, and GitHub Copilot CLI worktrees. Original text, spans, timestamps, sessions, and provenance are stored in SQLite. Retrieval is available through stdio MCP and a local IPC broker.
 
-- Stores events from a configured host.
-- Keeps the original text, spans, timestamps, scope, and provenance.
-- Searches with SQLite/FTS5 and a bundled multilingual E5 model.
-- Supports bounded graph search, feedback, and an optional local reranker.
-- Provides four stdio MCP tools: `memory_recall`, `memory_get`, `memory_forget`, and `memory_write`.
-- Uses one authenticated local IPC broker.
+![Agent Mem architecture overview](assets/agent-mem-readme-hero.png)
 
-## What it does not do
+## Quick start
 
-The V1 runtime makes no generative LLM or provider calls. It has no subscription login, extraction worker, summary generator, UI, or HTTP server. Old schema and validation code remains only to read and purge older vaults.
+Requirements: Node.js 24.20.x, npm 11, and a local project or worktree.
 
-The SQLite vault is not encrypted at rest. Anyone who can read the data directory or one of its backups can read the vault. A host can also send recalled text to its own provider.
+macOS / Linux:
 
-## Requirements
+```sh
+curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh -s -- --project "$PWD"
+agent-mem install --project "$PWD" --agents codex --yes
+agent-mem view
+```
 
-- Node.js 24.20.x and npm 11.
-- A local project or worktree for each connected host.
-- Pinned E5 artifacts. The reranker is optional.
+The installer verifies the package checksum, configures the selected host, starts the local broker, and verifies MCP initialization. The viewer command prints a local URL.
 
-## Setup
+For Codex, open `/hooks`, trust the project hooks, and reopen the project. Capture starts after the hook is trusted.
+
+## Viewer
+
+The viewer is read-only and defaults to **All projects**.
+
+It shows:
+
+- sessions, source events, spans, jobs, memory records, privacy state, and query traces;
+- measured evidence reduction and token savings without imposing a webpage token budget;
+- a real interactive knowledge graph with scope, session, source, and source-backed semantic nodes.
+
+The page receives an embedded local snapshot. It has no REST API and does not write to the vault.
+
+## Retrieval
+
+The local core works without a generative model or provider API:
+
+- SQLite FTS5 for lexical search;
+- bundled multilingual E5 for semantic retrieval;
+- optional local reranking;
+- four stdio MCP tools: `memory_recall`, `memory_get`, `memory_forget`, and `memory_write`.
+
+## Data and privacy
+
+The vault is local, but it is not encrypted at rest. Anyone who can read the data directory or its backups can read the stored evidence. A host may also send recalled text to its own model provider.
+
+The default data directory is:
+
+```text
+~/Library/Application Support/Agent Mem   # macOS
+~/.local/share/Agent Mem                   # Linux
+%LOCALAPPDATA%\Agent Mem                   # Windows
+```
+
+Use `--data-dir /absolute/path` for another location.
+
+## Useful commands
+
+```sh
+agent-mem status --json
+agent-mem pause
+agent-mem resume
+agent-mem extras list
+agent-mem extras install reranker
+agent-mem repair --project "$PWD"
+```
+
+## Development
 
 ```sh
 npm ci --ignore-scripts
 npm run models:download
 npm run models:verify
+npm run build
 npm test
 ```
 
-`models:download`/`models:verify` default to the lean core profile (E5 only). Use `npm run models:download:all` and `npm run models:verify:all` for the full package (E5 plus optional reranker), or `npm run models:download:reranker` and `npm run models:verify:reranker` for the optional reranker only.
-
-`models:download` and `runtime:download` use the network. Capture and model loading do not.
-
-## Package
-
-```sh
-npm run package -- --output /absolute/path/agent-memory-v1-package
-```
-
-The command downloads and verifies the official Node 24.20.0 runtime when it is not cached. By default, the package contains the V1 core: the launcher, local broker, E5 model, native sqlite-vec asset, and licenses. Add `--with-reranker` to include the optional local reranker.
-
-## Connect a host
-
-```sh
-memory --data-dir /absolute/private-data connect codex --project /absolute/project
-memory --data-dir /absolute/private-data connect opencode --project /absolute/project
-memory --data-dir /absolute/private-data connect copilot-cli --project /absolute/project
-memory --data-dir /absolute/private-data start
-```
-
-Keep the data directory, vault, credentials, and IPC directory private. Cloud sessions cannot access this local vault.
-
-## Status
-
-This checkout is an engineering preview. The local build, tests, and macOS ARM64 package probe pass with Node 24.20.0. Full CI runs on Linux and macOS 14; a separate Windows job checks the build and platform code. The Windows private-data runtime, Codex Desktop, native Copilot, and concurrent OpenCode runs still need direct verification.
+This checkout is an engineering preview. The local-first core is the supported V1 path; host surfaces and release targets require separate runtime verification.

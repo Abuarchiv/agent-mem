@@ -258,7 +258,7 @@ test("attributes final Codex text to the assistant and excludes only own memory 
     assert.equal(stopped.event?.event.evidence_class, "assistant_output");
     for (const name of ["memory_recall", "memory_get", "memory_forget", "memory_write"]) {
       const own = await adapter.handleHook(withCwd(hook({}, "PostToolUse", {
-        turn_id: "memory-echo", tool_call_id: name, tool_name: `mcp__agent_memory_v1__${name}`,
+        turn_id: "memory-echo", tool_call_id: name, tool_name: `mcp__agent_mem__${name}`,
         tool_response: { text: "retrieved prior evidence" },
       }), fixture.projectDir));
       assert.equal(own.status, "completed");
@@ -267,7 +267,7 @@ test("attributes final Codex text to the assistant and excludes only own memory 
     }
     const other = await adapter.handleHook(withCwd(hook({}, "PostToolUse", {
       turn_id: "ordinary-tool", tool_call_id: "read", tool_name: "read_file",
-      tool_response: { text: "mcp__agent_memory_v1__memory_recall appears in a file" },
+      tool_response: { text: "mcp__agent_mem__memory_recall appears in a file" },
     }), fixture.projectDir));
     assert.equal(other.event?.event.stage, "tool_result");
   } finally { await cleanup(fixture, adapter); }

@@ -364,7 +364,7 @@ test("does not recapture Copilot's own memory MCP tools", async () => {
   const adapter = new CopilotCliHostAdapter(fixture.config);
   try {
     const result = await adapter.handleHook(
-      hookInput("preToolUse", fixture.projectDir, { toolName: "agent_memory_v1/memory_recall", toolArgs: { query: "prior work" } }),
+      hookInput("preToolUse", fixture.projectDir, { toolName: "agent_mem/memory_recall", toolArgs: { query: "prior work" } }),
       "preToolUse",
     );
     assert.equal(result.status, "completed");

@@ -80,7 +80,7 @@ function envelope(captureId: string, text: string, capturedAt: string, stage: "p
 }
 
 function setup(): { database: AgentMemoryDatabase; binding: TrustedBinding; directory: string } {
-  const directory = mkdtempSync(join(tmpdir(), "agent-memory-v1-recall-"));
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-recall-"));
   const database = new AgentMemoryDatabase(join(directory, "vault.sqlite"));
   const binding = bindingFor();
   const policy = createPolicySetupBinding({

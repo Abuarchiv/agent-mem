@@ -4,17 +4,18 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { createRuntime, type RuntimeOwner } from "../app/runtime.js";
-import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setReaderOutputGrants, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
+import { createPolicySetupBinding, createPolicyOutputBinding, readerOutputTarget, setLocalUiOutputGrants, setReaderOutputGrants, setScopeCapturePolicy, setScopeOutputGrants, setCapturePaused } from "../core/policy.js";
 import { AgentMemoryBroker, AgentMemoryBrokerClient } from "../host/broker.js";
 import { bindingOwnerId, validateBoundRecallRequest, type EvidencePacket, type TrustedBinding } from "../host/contract.js";
 import { createMemoryMcpServer, type MemoryMcpServer } from "../host/mcp.js";
 import { E5_MODEL_MANIFEST } from "../models/manifest.js";
-import { loadReranker, parseRerankManifest, RERANK_MODEL_ID, type LocalReranker } from "../models/rerank.js";
+import { loadReranker, parseRerankManifest, type LocalReranker } from "../models/rerank.js";
 import { retrievalQuery } from "../retrieval/source-intelligence.js";
 import type { RecallSnapshot } from "../store/database.js";
 import { SearchState } from "./search-state.js";
 import { acquireOwnerLock, clearStaleSocket } from "./lock.js";
 import { bindingFor, ensurePrivateDirectory, loadConfig, runtimeDirectory, saveConfig, socketPath, vaultPath, type V1Config, type V1Connection } from "./config.js";
+import { rerankerDataRoot } from "./extras.js";
 
 const controlSchema = z.discriminatedUnion("operation", [
   z.object({ kind: z.literal("control"), operation: z.literal("status") }).strict(),
@@ -32,6 +33,7 @@ export const V1_READER_SOURCE_CLASSES = ["prompt", "assistant_output"] as const;
 
 export interface V1ServiceOptions {
   readonly rerank?: boolean;
+  readonly local_ui?: boolean;
 }
 
 type RerankerStatus = { state: "disabled" | "loading" | "ready" | "disposing" | "disposed" | "unavailable"; reason: string | null };
@@ -41,36 +43,44 @@ function errorCode(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function pinnedRerankerFactory(update: (status: RerankerStatus) => void): () => Promise<LocalReranker> {
+function pinnedRerankerFactory(update: (status: RerankerStatus) => void, dataDirectory?: string): () => Promise<LocalReranker> {
   return async () => {
     update({ state: "loading", reason: null });
-    try {
-      const root = fileURLToPath(new URL("../../../", import.meta.url));
-      const base = join(root, ".models", "rerank", RERANK_MODEL_ID);
-      const manifestPath = fileURLToPath(new URL("../models/rerank-manifest.json", import.meta.url));
-      const manifest = parseRerankManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
-      const reranker = await loadReranker({ modelRoot: join(base, manifest.revision), manifest });
-      update({ state: "ready", reason: null });
-      return reranker;
-    } catch (error: unknown) {
-      update({ state: "unavailable", reason: errorCode(error, "source_reranker_unavailable") });
-      throw error;
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const manifestPath = fileURLToPath(new URL("../models/rerank-manifest.json", import.meta.url));
+    const manifest = parseRerankManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
+    const bundledBase = join(root, ".models", "rerank");
+    const candidates = dataDirectory === undefined
+      ? [bundledBase]
+      : [rerankerDataRoot(dataDirectory), bundledBase];
+    let lastError: unknown;
+    for (const base of candidates) {
+      try {
+        const reranker = await loadReranker({ modelRoot: join(base, manifest.model_id, manifest.revision), manifest });
+        update({ state: "ready", reason: null });
+        return reranker;
+      } catch (error: unknown) {
+        lastError = error;
+      }
     }
+    const failure = lastError ?? new Error("source_reranker_unavailable");
+    update({ state: "unavailable", reason: errorCode(failure, "source_reranker_unavailable") });
+    throw failure;
   };
 }
 
-export function connectClient(directory: string, config: V1Config, entry?: V1Connection): AgentMemoryBrokerClient {
+export function connectClient(directory: string, config: V1Config, entry?: V1Connection, requestTimeoutMs = 15_000): AgentMemoryBrokerClient {
   return new AgentMemoryBrokerClient({
     socketPath: socketPath(directory),
     credential: { binding: bindingFor(config, entry), secret: Buffer.from(entry?.secret_hex ?? config.operator.secret_hex, "hex") },
-    requestTimeoutMs: 15_000,
+    requestTimeoutMs,
   });
 }
 
 export async function startService(directory: string, modelRoot?: string, options: V1ServiceOptions = {}) {
   ensurePrivateDirectory(directory);
   ensurePrivateDirectory(runtimeDirectory(directory));
-  const releaseConfiguration = acquireOwnerLock(runtimeDirectory(directory), "agent-memory-v1-config", "config.lock");
+  const releaseConfiguration = acquireOwnerLock(runtimeDirectory(directory), "agent-mem-config", "config.lock");
   try { return await startConfiguredService(directory, modelRoot, options); }
   finally { releaseConfiguration(); }
 }
@@ -80,7 +90,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
   if (config.projects.length === 0 || config.connections.length === 0) throw new Error("connect_a_project_before_start");
   ensurePrivateDirectory(runtimeDirectory(directory));
   const operator = bindingFor(config);
-  const rerankEnabled = options.rerank === true;
+  const rerankEnabled = options.rerank ?? config.reranker_enabled ?? false;
   let rerankerStatus: RerankerStatus = rerankEnabled
     ? { state: "loading", reason: null }
     : { state: "disabled", reason: null };
@@ -95,7 +105,9 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
   ];
   const scopeIds = config.projects.map(p => p.scope_id);
   const targets = V1_OUTPUT_TARGETS;
-  const policy = createPolicySetupBinding({ version: 1, setup_id: config.installation_id, allowed_scope_ids: scopeIds, allowed_output_targets: targets });
+  const localUiEnabled = options.local_ui === true;
+  const allowedOutputTargets = localUiEnabled ? [...targets, "local_ui"] : [...targets];
+  const policy = createPolicySetupBinding({ version: 1, setup_id: config.installation_id, allowed_scope_ids: scopeIds, allowed_output_targets: allowedOutputTargets });
   const first = config.projects[0]!;
   const output = createPolicyOutputBinding(policy, { version: 1, setup_id: policy.setup_id, output_binding_id: randomUUID(), scope_id: first.scope_id, target: "reader:codex_cli" });
   let servers = new WeakMap<object, MemoryMcpServer>();
@@ -114,6 +126,17 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     scope_id: scopeId,
     target: readerOutputTarget(binding),
   });
+  const readerOutputBindingFor = (scopeId: string) => outputBindingFor(operator, scopeId);
+  const localUiBindingFor = (scopeId: string) => {
+    if (!localUiEnabled) throw new Error("local_ui_not_enabled");
+    return createPolicyOutputBinding(policy, {
+      version: 1,
+      output_binding_id: randomUUID(),
+      setup_id: policy.setup_id,
+      scope_id: scopeId,
+      target: "local_ui",
+    });
+  };
   const requireCurrentSource = (owner: RuntimeOwner, binding: TrustedBinding, scopeId: string, captureId: string): void => {
     if (!scopeIds.includes(scopeId)) throw new Error("scope_not_allowed");
     try {
@@ -157,7 +180,10 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     };
   };
 
-  function status() {
+  function status(requestingBinding: TrustedBinding = operator) {
+    const visibleScopes = requestingBinding.binding_id === operator.binding_id
+      ? new Set(scopeIds)
+      : new Set(requestingBinding.allowed_scope_ids.filter(scopeId => scopeIds.includes(scopeId)));
     const intelligence = {
       search_state: searchState === undefined
         ? { state: "disabled" as const, reason: searchStateError }
@@ -171,7 +197,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     return {
       version: 1, running: !closing, state: indexState === "ready" ? "core_ready" : indexState, pid: process.pid,
       embedding: { state: indexState, model_state: state.semantic_search.state, reason: state.semantic_search.reason ?? (state.jobs.failed > 0 ? "index_jobs_failed" : state.jobs.paused > 0 ? "index_jobs_paused" : null), model: E5_MODEL_MANIFEST.model_id }, jobs: state.jobs,
-      projects: config.projects.map(p => ({ root: p.root, scope_id: p.scope_id, capture_paused: runtime!.database.isCapturePaused(p.scope_id) })),
+      projects: config.projects.filter(project => visibleScopes.has(project.scope_id)).map(p => ({ root: p.root, scope_id: p.scope_id, capture_paused: runtime!.database.isCapturePaused(p.scope_id) })),
       intelligence,
     };
   }
@@ -179,9 +205,9 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
   async function rpc(binding: TrustedBinding, payload: unknown, signal?: AbortSignal, client?: object): Promise<unknown> {
     const control = controlSchema.safeParse(payload);
     if (control.success) {
-      if (binding.binding_id !== operator.binding_id) throw new Error("operator_binding_required");
       const request = control.data;
-      if (request.operation === "status") return status();
+      if (request.operation === "status") return status(binding);
+      if (binding.binding_id !== operator.binding_id) throw new Error("operator_binding_required");
       const owner = active();
       if (request.operation === "forget") {
         stateOrThrow();
@@ -255,16 +281,19 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
       embeddingModelRoot: modelRoot ?? fileURLToPath(new URL(`../../../.models/e5/${E5_MODEL_MANIFEST.model_id}/${E5_MODEL_MANIFEST.revision}`, import.meta.url)),
       scope: { scope_id: first.scope_id, kind: "project", owner_ref: config.installation_id, created_at: first.created_at },
       policyBinding: policy, outputBinding: output, hostBinding: operator,
-      ...(rerankEnabled ? { sourceReranker: pinnedRerankerFactory(updateRerankerStatus) } : {}),
+      ...(rerankEnabled ? { sourceReranker: pinnedRerankerFactory(updateRerankerStatus, directory) } : {}),
       ...(searchState === undefined ? {} : { searchState }),
       initialize(database, timestamp) {
         for (const project of config.projects) {
           database.registerScope({ scope_id: project.scope_id, kind: "project", owner_ref: config.installation_id, created_at: project.created_at });
           if (!database.getScopeCapturePolicy(project.scope_id).enrolled) {
-            setScopeOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
+            const grants: unknown[] = targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] }));
+            if (localUiEnabled) grants.push({ target: "local_ui", source_classes: [...sourceClasses] });
+            setScopeOutputGrants(database, policy, project.scope_id, grants, timestamp);
             setScopeCapturePolicy(database, policy, project.scope_id, sourceClasses.map(source_class => ({ source_class, retention: { mode: "until_deleted" } })), timestamp);
           } else {
             setReaderOutputGrants(database, policy, project.scope_id, targets.map(target => ({ target, source_classes: [...V1_READER_SOURCE_CLASSES] })), timestamp);
+            if (localUiEnabled) setLocalUiOutputGrants(database, policy, project.scope_id, sourceClasses, timestamp);
           }
         }
       },
@@ -278,12 +307,35 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
     closePromise = (async () => { await broker.stop(); await runtime?.close(); servers = new WeakMap(); releaseLock(); })();
     return closePromise;
   }
-  return { status, close, database: runtime.database, broker, config };
+  let countContextTokens: ((text: string) => number) | undefined;
+  try {
+    countContextTokens = runtime.countContextTokens(" ") === undefined
+      ? undefined
+      : (text: string): number => {
+        const count = runtime.countContextTokens(text);
+        if (count === undefined) throw new Error("tokenizer_unavailable");
+        return count;
+      };
+  } catch {
+    countContextTokens = undefined;
+  }
+  return {
+    status,
+    close,
+    database: runtime.database,
+    broker,
+    config,
+    policyBinding: policy,
+    readerOutputBindingFor,
+    localUiBindingFor: localUiEnabled ? localUiBindingFor : undefined,
+    countContextTokens,
+  };
 }
 
 export async function operatorCall(directory: string, payload: unknown): Promise<unknown> {
   const config = loadConfig(directory);
   if (process.platform !== "win32" && !existsSync(socketPath(directory))) throw new Error("v1_backend_not_running");
-  const client = connectClient(directory, config);
+  const requestTimeoutMs = typeof payload === "object" && payload !== null && "operation" in payload && payload.operation === "forget" ? 120_000 : 15_000;
+  const client = connectClient(directory, config, undefined, requestTimeoutMs);
   try { await client.connect(); return await client.rpc(payload); } finally { await client.close(); }
 }

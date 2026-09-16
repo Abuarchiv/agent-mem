@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, resolve } from "node:path";
 
@@ -10,6 +10,7 @@ import {
   parseEvidencePacketWrapper,
   parseModelContextWrapper,
   serializeModelContext,
+  serializeModelContextWithStatus,
 } from "../../src/context/packet.js";
 import {
   AgentMemoryBrokerClient,
@@ -40,12 +41,16 @@ import {
   type SourceCoverage,
   type TrustedBinding,
 } from "../../src/host/contract.js";
+import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend, type AgentMemorySessionStatus, type SessionHost } from "../../src/v1/session-status.js";
+import { ensureOwnedBrokerForConnection } from "../../src/v1/recovery.js";
+import { MEMORY_MCP_LEGACY_SERVER_KEYS, MEMORY_MCP_SERVER_KEY, MEMORY_MCP_SERVER_NAME } from "../../src/host/tool-schemas.js";
 
 export const CODEX_ADAPTER_VERSION = "1.0.0" as const;
 export const CODEX_SESSION_START_UTF8_BYTES = 4_000;
 export const CODEX_PROMPT_UTF8_BYTES = 8_000;
 export const CODEX_SESSION_START_MAX_BYTES = 24 * 1024;
 export const CODEX_PROMPT_MAX_BYTES = 64 * 1024;
+const ownMemoryMcpServerNames = [MEMORY_MCP_SERVER_KEY, MEMORY_MCP_SERVER_NAME, ...MEMORY_MCP_LEGACY_SERVER_KEYS] as const;
 /** Native hook names accepted by this adapter's versioned input contract. */
 export const CODEX_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "PostCompact"] as const;
 
@@ -54,7 +59,7 @@ const MAX_HOOK_NODES = 50_000;
 const MAX_HOOK_DEPTH = 20;
 const DEFAULT_HOOK_TIMEOUT_MS = 4_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 2_000;
-const DEGRADED_MESSAGE = "Agent Memory unavailable; Codex continued without memory context.";
+const DEGRADED_MESSAGE = "Agent Mem unavailable; Codex continued without memory context.";
 
 const codexSurfaceSchema = z.enum(["codex_cli", "codex_desktop"]);
 const versionSchema = z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
@@ -209,6 +214,7 @@ export interface CodexBrokerClient {
   capture(event: unknown): Promise<CaptureAck>;
   recall(request: unknown, context: unknown): Promise<EvidencePacket>;
   recognizeContext(context: unknown): Promise<boolean>;
+  readonly rpc?: (payload: unknown) => Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -466,15 +472,25 @@ function ownWrapperCandidate(text: string): unknown | undefined {
   }
 }
 
-function outputForPacket(hookEventName: string, packet: EvidencePacket, maxBytes: number): CodexHookOutput {
-  const additionalContext = serializeModelContext(packet);
+function outputForPacket(hookEventName: string, packet: EvidencePacket, maxBytes: number, status?: string): CodexHookOutput {
+  const additionalContext = status === undefined ? serializeModelContext(packet) : serializeModelContextWithStatus(packet, status);
   if (Buffer.byteLength(additionalContext, "utf8") > maxBytes) throw new CodexAdapterError("additional_context_too_large");
   return {
+    ...(status === undefined ? {} : { systemMessage: status }),
     hookSpecificOutput: {
       hookEventName,
       additionalContext,
     },
   };
+}
+
+async function sessionStatusFor(client: CodexBrokerClient, host: SessionHost): Promise<AgentMemorySessionStatus> {
+  if (client.rpc === undefined) return connectedSessionStatus(host);
+  try {
+    return sessionStatusFromBackend(host, await client.rpc({ kind: "control", operation: "status" }));
+  } catch {
+    return connectedSessionStatus(host);
+  }
 }
 
 function degradedResult(hookEventName: string | undefined, coverage: SourceCoverage, recognizedOwnContext?: boolean): CodexAdapterResult {
@@ -537,7 +553,7 @@ export class CodexHostAdapter {
     // These results already come from this memory store. Saving them again
     // would turn retrieved evidence into increasingly duplicated new evidence.
     if (hook.hook_event_name === "PostToolUse" &&
-      ["memory_recall", "memory_get", "memory_forget", "memory_write"].some(name => hook.tool_name === `mcp__agent_memory_v1__${name}`)) {
+      ["memory_recall", "memory_get", "memory_forget", "memory_write"].some(name => ownMemoryMcpServerNames.some(server => hook.tool_name === `mcp__${server}__${name}`))) {
       return { status: "completed", response: {}, hookEventName: hook.hook_event_name, coverage: { status: "complete" } };
     }
     try {
@@ -645,7 +661,10 @@ export class CodexHostAdapter {
       // wire schema.
       const packet = await client.recall(request, contextInput);
       deadline?.throwIfExpired();
-      const response = outputForPacket(hook.hook_event_name, packet, maxBytes);
+      const status = kind === "session_start"
+        ? formatSessionStatus(await sessionStatusFor(client, this.config.surface === "codex_desktop" ? "Codex Desktop" : "Codex CLI"))
+        : undefined;
+      const response = outputForPacket(hook.hook_event_name, packet, maxBytes, status);
       return { status: "completed", response, hookEventName: hook.hook_event_name, captureAck: ack, event, coverage: mapped.coverage };
     } catch {
       return degradedResult(hook.hook_event_name, mapped.coverage);
@@ -694,6 +713,12 @@ export async function runCodexHookFromStdin(configPath: string): Promise<void> {
     process.stdout.write(`${JSON.stringify({ continue: true, systemMessage: DEGRADED_MESSAGE })}\n`);
     return;
   }
+  try {
+    const project = config.projects[0]?.workspace_roots[0];
+    if (project !== undefined) await ensureOwnedBrokerForConnection(configPath, project, "codex");
+  } catch {
+    // The adapter remains fail-open; the normal hook path reports degraded.
+  }
   const adapter = new CodexHostAdapter(config);
   await runBoundedCommandHook({
     timeoutMs: config.hookTimeoutMs,
@@ -716,6 +741,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   await runCodexHookFromStdin(argv[1]);
 }
 
-if (process.argv[1] !== undefined && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
+if (process.argv[1] !== undefined && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]))) {
   void main();
 }

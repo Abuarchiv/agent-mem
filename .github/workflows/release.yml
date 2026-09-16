@@ -1,0 +1,175 @@
+name: Release V1 bundles
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: darwin-arm64
+          - os: macos-13
+            target: darwin-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: windows-latest
+            target: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.20.x
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Download pinned models
+        run: npm run models:download:all
+      - name: Download pinned Node runtime
+        run: npm run runtime:download
+      - name: Verify pinned inputs (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          npm run models:verify:all
+          npm run runtime:verify
+      - name: Harden Windows model asset ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          foreach ($path in $paths) {
+            $permission = (Get-Item -LiteralPath $path).PSIsContainer ? "(OI)(CI)F" : "F"
+            icacls.exe $path /setowner "*${userSid}" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Harden Windows reranker asset ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\rerank\cross-encoder\mmarco-mMiniLMv2-L12-H384-v1\1427fd652930e4ba29e8149678df786c240d8825"
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          foreach ($path in $paths) {
+            $item = Get-Item -LiteralPath $path
+            $permission = if ($item.PSIsContainer) { "(OI)(CI)F" } else { "F" }
+            icacls.exe $path /setowner "*${userSid}" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Verify pinned inputs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run models:verify:all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run runtime:verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Normalize Windows model ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1"'
+      - name: Run V1 gate (Unix)
+        if: runner.os != 'Windows'
+        run: npm test
+      - name: Run Windows build and platform gate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run build
+          node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js dist-v1/tests/v1-installer.test.js
+      - name: Build package
+        run: npm run package -- --output "${{ runner.temp }}/agent-mem-package" --with-reranker
+      - name: Probe package
+        if: runner.os != 'Windows'
+        run: npm run probe -- --package-dir "${{ runner.temp }}/agent-mem-package"
+      - name: Check Windows packaged launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "${{ runner.temp }}/agent-mem-package/agent-mem.cmd" help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Normalize packaged Windows model ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1" -Root "${{ runner.temp }}/agent-mem-package"'
+      - name: Probe Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          node scripts/v1-retrieval-probe.mjs --package-dir "${{ runner.temp }}/agent-mem-package"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run Unix install smoke
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          smoke="${RUNNER_TEMP}/agent-mem-install-smoke"
+          mkdir -p "${smoke}/project"
+          "${RUNNER_TEMP}/agent-mem-package/agent-mem" --data-dir "${smoke}/data" install --project "${smoke}/project" --agents codex,opencode,copilot-cli --no-rerank --yes
+          "${RUNNER_TEMP}/agent-mem-package/agent-mem" --data-dir "${smoke}/data" stop
+      - name: Archive Unix bundle
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive="agent-mem-${{ matrix.target }}.tar.gz"
+          tar -czf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" agent-mem-package
+          check="$(mktemp -d)"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${check}"
+          test -f "${check}/agent-mem-package/agent-mem" || { echo unix_archive_layout_invalid >&2; exit 1; }
+          test -f "${check}/agent-mem-package/manifest.json" || { echo unix_archive_layout_invalid >&2; exit 1; }
+          shasum -a 256 "${RUNNER_TEMP}/${archive}" | sed "s#${RUNNER_TEMP}/##" > "${RUNNER_TEMP}/${archive}.sha256"
+      - name: Archive Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "agent-mem-${{ matrix.target }}.zip"
+          Compress-Archive -LiteralPath "${{ runner.temp }}/agent-mem-package" -DestinationPath "${{ runner.temp }}/$archive"
+          $check = Join-Path $env:RUNNER_TEMP 'agent-mem-archive-check'
+          Expand-Archive -LiteralPath "${{ runner.temp }}/$archive" -DestinationPath $check -Force
+          if (-not (Test-Path (Join-Path $check 'agent-mem-package/agent-mem.cmd'))) { throw 'windows_archive_layout_invalid' }
+          if (-not (Test-Path (Join-Path $check 'agent-mem-package/manifest.json'))) { throw 'windows_archive_layout_invalid' }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "${{ runner.temp }}/$archive").Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -LiteralPath "${{ runner.temp }}/$archive.sha256" -Encoding ASCII
+      - name: Upload bundle assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-mem-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/agent-mem-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download bundle assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-mem-*
+          path: assets
+          merge-multiple: true
+      - name: Verify published asset set
+        shell: bash
+        run: |
+          test "$(find assets -maxdepth 1 -type f -name 'agent-mem-*' | wc -l | tr -d ' ')" -eq 8
+          for target in darwin-arm64 darwin-x64 linux-x64 win-x64; do
+            test -f "assets/agent-mem-${target}.sha256"
+            test -f "assets/agent-mem-${target}.tar.gz" || test -f "assets/agent-mem-${target}.zip"
+          done
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" assets/* --repo "${GITHUB_REPOSITORY}" --title "Agent Mem ${GITHUB_REF_NAME}" --generate-notes

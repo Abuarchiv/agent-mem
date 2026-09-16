@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { Message, Part } from "@opencode-ai/sdk";
 
 import { validateBoundedJson, type NativeObservationIdentity, type NativeReconcileCursor, type SourceCoverage } from "../../src/host/contract.js";
-import { MEMORY_MCP_SERVER_NAME, memoryToolNames } from "../../src/host/tool-schemas.js";
+import { MEMORY_MCP_LEGACY_SERVER_KEYS, MEMORY_MCP_SERVER_KEY, MEMORY_MCP_SERVER_NAME, memoryToolNames } from "../../src/host/tool-schemas.js";
 import type {
   OpenCodeBridgeEvent,
   OpenCodeReconcileObservation,
@@ -31,7 +31,7 @@ export interface OpenCodeReconcilePlanOptions {
   readonly cursor?: NativeReconcileCursor | null;
 }
 
-const ownMemoryMcpServerNames = [MEMORY_MCP_SERVER_NAME, "agent_memory_v1", "agent-memory", "agentmemory"] as const;
+const ownMemoryMcpServerNames = [MEMORY_MCP_SERVER_NAME, MEMORY_MCP_SERVER_KEY, ...MEMORY_MCP_LEGACY_SERVER_KEYS] as const;
 const ownMemoryMcpSeparators = [".", "_", ":", "/", "__"] as const;
 
 /** Match OpenCode's common MCP tool-name renderings without filtering foreign tools. */

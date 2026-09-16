@@ -1,4 +1,4 @@
-# Agent Memory V1
+# Agent Mem
 
 This repository is the standalone V1 line. The older product is outside this checkout.
 

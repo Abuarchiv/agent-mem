@@ -16,16 +16,25 @@ const connection = credential.extend({ host: z.enum(V1_HOSTS), scope_id: z.uuid(
 const schema = z.object({
   version: z.literal(1), installation_id: z.uuid(), created_at: z.iso.datetime({ offset: true }),
   vault_initialized: z.boolean(), operator: credential,
+  reranker_enabled: z.boolean().optional(),
   projects: z.array(project).max(32), connections: z.array(connection).max(64),
 }).strict();
 export type V1Config = z.infer<typeof schema>;
 export type V1Connection = V1Config["connections"][number];
+const CURRENT_DATA_DIRECTORY_NAME = "Agent Mem";
+const LEGACY_DATA_DIRECTORY_NAME = "Agent Memory V1";
 export const defaultDataDirectory = (): string => {
-  if (process.platform === "win32") return join(process.env.LOCALAPPDATA ?? process.env.APPDATA ?? join(homedir(), "AppData", "Local"), "Agent Memory V1");
-  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Agent Memory V1");
-  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "Agent Memory V1");
+  const base = process.platform === "win32"
+    ? process.env.LOCALAPPDATA ?? process.env.APPDATA ?? join(homedir(), "AppData", "Local")
+    : process.platform === "darwin"
+      ? join(homedir(), "Library", "Application Support")
+      : process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+  const current = join(base, CURRENT_DATA_DIRECTORY_NAME);
+  const legacy = join(base, LEGACY_DATA_DIRECTORY_NAME);
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
 };
 export const configFile = (directory: string) => join(resolve(directory), "config.json");
+export const installJournalFile = (directory: string) => join(resolve(directory), "install.json");
 export const runtimeDirectory = (directory: string) => join(resolve(directory), "ipc");
 export const socketPath = (directory: string): string => ipcEndpointPath(runtimeDirectory(directory));
 export const vaultPath = (directory: string) => join(resolve(directory), "vault.sqlite");

@@ -6,7 +6,7 @@ import test from "node:test";
 import { assertNativeOnnxRuntime } from "../src/models/manifest.js";
 import { sqliteVecAssetFilename, sqliteVecTarget } from "../src/retrieval/vec0.js";
 import { ipcEndpointPath } from "../src/host/ipc-path.js";
-import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageProfile, packageRelativePath, sharpPlatformPackages, v1RuntimeGraph, windowsLaunchers } from "../scripts/package-v1.js";
+import { nodeRuntimeArchive, nodeRuntimeDirectory, nodeRuntimeTarget, packageProfile, packageRelativePath, packageVectorCapability, sharpPlatformPackages, v1RuntimeGraph, windowsLaunchers } from "../scripts/package-v1.js";
 import { isPrivateWindowsAcl } from "../src/v1/private-files.js";
 import { V1_OUTPUT_TARGETS, V1_READER_SOURCE_CLASSES } from "../src/v1/service.js";
 
@@ -20,9 +20,16 @@ test("Node runtime packaging uses the pinned portable release for each target", 
   assert.equal(nodeRuntimeTarget("linux", "arm64"), "linux-arm64");
   assert.equal(nodeRuntimeTarget("linux", "x64"), "linux-x64");
   assert.equal(nodeRuntimeTarget("win32", "x64"), "win-x64");
+  assert.equal(nodeRuntimeTarget("win32", "arm64"), "win-arm64");
   assert.equal(nodeRuntimeDirectory("darwin", "arm64"), "node-v24.20.0-darwin-arm64");
   assert.equal(nodeRuntimeArchive("darwin", "arm64"), "node-v24.20.0-darwin-arm64.tar.gz");
-  assert.throws(() => nodeRuntimeTarget("win32", "arm64"), /node_runtime_platform_unsupported/);
+  assert.equal(nodeRuntimeArchive("win32", "arm64"), "node-v24.20.0-win-arm64.zip");
+});
+
+test("unsupported native vector targets use an explicit package fallback", () => {
+  assert.deepEqual(packageVectorCapability("darwin", "arm64").state, "bundled");
+  assert.deepEqual(packageVectorCapability("darwin", "x64"), { state: "fallback", reason: "sqlite_vec_platform_unsupported" });
+  assert.deepEqual(packageVectorCapability("win32", "arm64"), { state: "fallback", reason: "sqlite_vec_platform_unsupported" });
 });
 
 test("V1 package profile excludes optional reranker artifacts by default", () => {
@@ -78,7 +85,8 @@ test("Windows ACL validation rejects shared, ownerless, unknown or ineffective a
   const rule = { sid: user, allow: true, rights: 2032127, inheritOnly: false };
   const privateAcl = { owner: user, user, rules: [rule, { ...rule, sid: "S-1-5-18" }, { ...rule, sid: "S-1-5-32-544" }] };
   assert.equal(isPrivateWindowsAcl(privateAcl), true);
-  for (const value of [null, {}, { ...privateAcl, owner: "S-1-5-32-544" }, { ...privateAcl, rules: [] },
+  assert.equal(isPrivateWindowsAcl({ ...privateAcl, owner: "S-1-5-32-544" }), true);
+  for (const value of [null, {}, { ...privateAcl, owner: "S-1-5-18" }, { ...privateAcl, rules: [] },
     { ...privateAcl, rules: [{ ...rule, inheritOnly: true }] }, { ...privateAcl, rules: [{ ...rule, rights: 1 }] },
     { ...privateAcl, rules: [{ ...rule, allow: false }] }, { ...privateAcl, rules: [...privateAcl.rules, { ...rule, sid: "S-1-1-0" }] },
     { ...privateAcl, rules: [...privateAcl.rules, { ...rule, sid: "S-1-5-32-545" }] }, { ...privateAcl, rules: [{ ...rule, rights: "FullControl" }] }]) {
@@ -114,11 +122,13 @@ test("asset ACLs reject untrusted mutation, deletion, takeover and unknown right
   }
 });
 
-test("asset ACLs still require the current owner and a readable, verifiable ACL", () => {
+test("asset ACLs accept trusted owners and require a readable, verifiable ACL", () => {
   const user = "S-1-5-21-100-200-300-1001";
   const rule = { sid: user, allow: true, rights: 0x20089, inheritOnly: false };
   const acl = { owner: user, user, rules: [rule] };
-  for (const value of [null, {}, { ...acl, owner: "S-1-5-32-544" }, { ...acl, rules: [] },
+  assert.equal(isPrivateWindowsAcl({ ...acl, owner: "S-1-5-32-544" }, "asset"), true);
+  assert.equal(isPrivateWindowsAcl({ ...acl, owner: "S-1-5-32-544", rules: [{ ...rule, sid: "S-1-5-32-544" }] }, "asset"), true);
+  for (const value of [null, {}, { ...acl, owner: "S-1-1-0" }, { ...acl, rules: [] },
     { ...acl, rules: [{ ...rule, inheritOnly: true }] }, { ...acl, rules: [{ ...rule, allow: false }] },
     { ...acl, rules: [{ ...rule, rights: 0x20000 }] }, { ...acl, rules: [rule, { ...rule, sid: "Users" }] }]) {
     assert.equal(isPrivateWindowsAcl(value, "asset"), false);
@@ -143,7 +153,7 @@ test("the current checkout contains the selected sqlite-vec asset", () => {
 test("Windows uses a stable named pipe instead of a filesystem socket", () => {
   const first = ipcEndpointPath("/tmp/v1-platform-data", "win32");
   assert.equal(first, ipcEndpointPath("/tmp/v1-platform-data", "win32"));
-  assert.match(first, /^\\\\\.\\pipe\\agent-memory-v1-[a-f0-9]{32}$/);
+  assert.match(first, /^\\\\\.\\pipe\\agent-mem-[a-f0-9]{32}$/);
   assert.match(ipcEndpointPath("/tmp/v1-platform-data", "linux"), /broker\.sock$/);
 });
 

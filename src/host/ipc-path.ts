@@ -9,7 +9,7 @@ export function ipcEndpointPath(directory: string, platform = process.platform):
   const root = resolve(directory);
   if (platform === "win32") {
     const digest = createHash("sha256").update(root, "utf8").digest("hex").slice(0, 32);
-    return `\\\\.\\pipe\\agent-memory-v1-${digest}`;
+    return `\\\\.\\pipe\\agent-mem-${digest}`;
   }
   return join(root, "broker.sock");
 }

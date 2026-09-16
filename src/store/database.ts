@@ -27,6 +27,7 @@ import type { AttemptRepository } from "./attempt-repository.js";
 import { RuntimeArtifactRepository } from "./runtime-artifact-repository.js";
 import { SummaryRepository } from "./derived-repository.js";
 import { recordCommitClock, resolveWallTimeToSequence, type WallClockResolution } from "../core/time.js";
+import { savingsFromCounts } from "../context/token-savings.js";
 import { qualifySqliteVec, type SqliteVecQualification } from "../retrieval/vec0.js";
 import type { ExtractionCandidate, VerificationReceipt } from "../extraction/schema.js";
 import type { ExecutionResult } from "../execution/types.js";
@@ -122,9 +123,9 @@ const legacyCodexStop = `COALESCE((
 const recallEvidenceClass = `CASE WHEN ${legacyCodexStop} THEN 'assistant_output' ELSE e.evidence_class END`;
 const recallSourceRole = `CASE WHEN ${legacyCodexStop} THEN 'assistant' ELSE e.role END`;
 
-// Exact V1 identities in native metadata only; file contents mentioning these
-// names remain evidence. Both configured and canonical server names occur.
-const legacyMemoryToolNames = ["agent_memory_v1", "agent-memory-v1", "agent-memory", "agentmemory"].flatMap(server =>
+// Exact memory identities in native metadata only; file contents mentioning
+// these names remain evidence. New and legacy server names are recognized.
+const ownMemoryToolNames = ["agent_mem", "agent-mem", "agent_memory_v1", "agent-memory-v1", "agent-memory", "agentmemory"].flatMap(server =>
   ["memory_recall", "memory_get", "memory_forget", "memory_write"].flatMap(tool => [
     ...[".", "_", ":", "/", "__"].map(separator => `${server}${separator}${tool}`),
     `mcp__${server}__${tool}`, `mcp.${server}.${tool}`,
@@ -139,7 +140,7 @@ const recallSourceEligibility = `NOT EXISTS (
     json_extract(e.payload_json, '$.native_part.tool'),
  json_extract(e.payload_json, '$.input.tool'),
  json_extract(e.payload_json, '$.toolName')
-  )) AS own_tool WHERE own_tool.value IN (${legacyMemoryToolNames})
+  )) AS own_tool WHERE own_tool.value IN (${ownMemoryToolNames})
 ) AND (NOT ${legacyCodexStop} OR EXISTS (
   SELECT 1 FROM scope_output_grant AS assistant_grant
   WHERE assistant_grant.scope_id = e.scope_id
@@ -1128,6 +1129,28 @@ export interface UiGraphSourceRow {
   readonly commit_seq: string;
 }
 
+export interface UiGraphNode {
+  readonly entity_id: string;
+  readonly label: string;
+  readonly resolution_state: "resolved" | "candidate";
+  readonly created_commit_seq: string;
+}
+
+export interface UiGraphEdge {
+  readonly edge_id: string;
+  readonly source_entity: string;
+  readonly target_entity: string;
+  readonly predicate: string;
+  readonly evidence_revision: string;
+  readonly status: "active" | "superseded" | "purged";
+  readonly created_commit_seq: string;
+}
+
+export interface UiGraphSnapshot {
+  readonly nodes: readonly UiGraphNode[];
+  readonly edges: readonly UiGraphEdge[];
+}
+
 export interface UiGraphSessionRow {
   readonly session_id: string;
   readonly scope_id: string;
@@ -1163,6 +1186,27 @@ export interface UiSavingsSnapshot {
   readonly stored_chars: number;
   readonly evidence_chars: number;
   readonly span_count: number;
+  readonly measurement_status?: "computed" | "unobserved";
+  readonly measurement_unit?: "tokens" | "utf8_bytes";
+  readonly measurement_method?: "tokenizer" | "utf8_bytes";
+  readonly stored_units?: number;
+  readonly evidence_units?: number;
+  readonly saved_units?: number;
+  readonly savings_percent?: number | null;
+  readonly measurement_reason?: string;
+}
+
+export interface UiTokenSavingsSnapshot {
+  readonly status: "computed" | "unobserved";
+  readonly unit: "tokens" | "utf8_bytes";
+  readonly method: "tokenizer" | "utf8_bytes";
+  readonly baseline_units: number;
+  readonly memory_units: number;
+  readonly saved_units: number;
+  readonly savings_percent: number | null;
+  readonly measured_sources: number;
+  readonly measured_spans: number;
+  readonly reason?: string;
 }
 
 
@@ -3899,6 +3943,74 @@ export class AgentMemoryDatabase {
       for (const grant of parsedGrants) {
         for (const sourceClass of grant.source_classes) insert.run(parsedScopeId, grant.target, sourceClass, parsedAt);
       }
+      const scopeUpdated = this.database
+        .prepare("UPDATE scope SET privacy_epoch = ? WHERE scope_id = ?")
+        .run(nextEpoch, parsedScopeId);
+      if (sqlInteger(scopeUpdated.changes, "scope_changes") !== 1n) throw new StoreError("policy_invalid");
+      const policyUpdated = this.database
+        .prepare("UPDATE scope_policy SET updated_at = ? WHERE scope_id = ?")
+        .run(parsedAt, parsedScopeId);
+      if (sqlInteger(policyUpdated.changes, "policy_changes") !== 1n) throw new StoreError("policy_invalid");
+      this.database.exec("COMMIT");
+      committed = true;
+      return nextEpoch.toString(10);
+    } catch (error: unknown) {
+      if (!committed) {
+        try {
+          this.database.exec("ROLLBACK");
+        } catch {
+          // Preserve the policy failure.
+        }
+      }
+      if (error instanceof StoreError) throw error;
+      throw new StoreError("policy_invalid", error);
+    }
+  }
+
+  replaceLocalUiOutputGrants(
+    binding: PolicySetupBinding,
+    scopeId: string,
+    grants: readonly ScopeOutputGrant[],
+    updatedAt: string,
+  ): string {
+    this.ensureOpen();
+    const parsedScopeId = parseContract(z.uuid(), scopeId, "scope-id");
+    requirePolicySetup(binding, parsedScopeId, "purge_scope_not_allowed");
+    const parsedAt = parseContract(z.iso.datetime({ offset: true }), updatedAt, "policy-updated-at");
+    let parsedGrants: readonly ScopeOutputGrant[];
+    try {
+      parsedGrants = parseScopeOutputGrants(grants);
+    } catch (error: unknown) {
+      throw new StoreError("policy_invalid", error);
+    }
+    if (parsedGrants.length !== 1 || parsedGrants[0]?.target !== "local_ui") throw new StoreError("policy_invalid");
+    policyTargetAllowed(binding, "local_ui");
+    const desired = [...parsedGrants[0].source_classes].sort();
+
+    this.database.exec("BEGIN IMMEDIATE");
+    let committed = false;
+    try {
+      const scope = this.database.prepare("SELECT privacy_epoch FROM scope WHERE scope_id = ?").get(parsedScopeId);
+      if (scope === undefined) throw new StoreError("scope_not_registered");
+      if (this.database.prepare("SELECT 1 AS present FROM scope_policy WHERE scope_id = ?").get(parsedScopeId) === undefined) {
+        throw new StoreError("schema_invalid");
+      }
+      const currentEpoch = sqlInteger(rowValue(scope, "privacy_epoch"), "privacy_epoch");
+      const current = this.database
+        .prepare("SELECT source_class FROM scope_output_grant WHERE scope_id = ? AND output_target = 'local_ui' ORDER BY source_class")
+        .all(parsedScopeId)
+        .map((row) => sqlText(rowValue(row, "source_class"), "source-class"));
+      if (current.length === desired.length && current.every((value, index) => value === desired[index])) {
+        this.database.exec("COMMIT");
+        committed = true;
+        return currentEpoch.toString(10);
+      }
+      const nextEpoch = nextPrivacyEpoch(currentEpoch);
+      this.database.prepare("DELETE FROM scope_output_grant WHERE scope_id = ? AND output_target = 'local_ui'").run(parsedScopeId);
+      const insert = this.database.prepare(
+        "INSERT INTO scope_output_grant (scope_id, output_target, source_class, created_at) VALUES (?, 'local_ui', ?, ?)",
+      );
+      for (const sourceClass of desired) insert.run(parsedScopeId, sourceClass, parsedAt);
       const scopeUpdated = this.database
         .prepare("UPDATE scope SET privacy_epoch = ? WHERE scope_id = ?")
         .run(nextEpoch, parsedScopeId);
@@ -7050,7 +7162,84 @@ export class AgentMemoryDatabase {
     };
   }
 
-  /** Policy-checked job state distribution for the local UI. */
+  /** Exact evidence reduction, using a supplied tokenizer when available. */
+  getTokenSavingsForUi(
+    binding: PolicyOutputBinding,
+    options: { readonly countUnits?: ((text: string) => number) | undefined } = {},
+  ): UiTokenSavingsSnapshot {
+    this.ensureOpen();
+    const checked = requireLocalUiOutput(binding);
+    this.assertLocalUiGrant(checked.scope_id);
+    const sourceRows = this.database.prepare(
+      `SELECT e.payload_json, e.event_json
+         FROM source_event AS e
+         JOIN scope_output_grant AS g
+           ON g.scope_id = e.scope_id AND g.output_target = 'local_ui' AND g.source_class = e.evidence_class
+         LEFT JOIN purge_tombstone AS t
+           ON t.scope_id = e.scope_id AND t.capture_id = e.capture_id
+        WHERE e.scope_id = ? AND t.capture_id IS NULL`,
+    ).all(checked.scope_id);
+    const spanRows = this.database.prepare(
+      `SELECT s.root, s.path, s.start_utf16, s.end_utf16, s.digest, e.payload_json, e.event_json
+         FROM source_span AS s
+         JOIN source_event AS e ON e.capture_id = s.source_id AND e.scope_id = s.scope_id
+         JOIN scope_output_grant AS g
+           ON g.scope_id = e.scope_id AND g.output_target = 'local_ui' AND g.source_class = e.evidence_class
+         LEFT JOIN purge_tombstone AS t
+           ON t.scope_id = s.scope_id AND t.capture_id = s.source_id
+        WHERE s.scope_id = ? AND t.capture_id IS NULL`,
+    ).all(checked.scope_id);
+    if (sourceRows.length === 0) {
+      return {
+        status: "unobserved",
+        unit: options.countUnits === undefined ? "utf8_bytes" : "tokens",
+        method: options.countUnits === undefined ? "utf8_bytes" : "tokenizer",
+        baseline_units: 0,
+        memory_units: 0,
+        saved_units: 0,
+        savings_percent: null,
+        measured_sources: 0,
+        measured_spans: spanRows.length,
+        reason: "no_authorized_source_text",
+      };
+    }
+    const sourceTexts = sourceRows.map((row) => `${sqlText(rowValue(row, "payload_json"), "savings-payload")}\n${sqlText(rowValue(row, "event_json"), "savings-event")}`);
+    const spanTexts = spanRows.map((row) => {
+      const root = sqlText(rowValue(row, "root"), "savings-root");
+      const source = root === "payload" ? sqlText(rowValue(row, "payload_json"), "savings-payload") : sqlText(rowValue(row, "event_json"), "savings-event");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(source) as unknown;
+      } catch (error: unknown) {
+        throw new StoreError("read_failed", error);
+      }
+      const excerpt = resolveTextAtPath(parsed, sqlText(rowValue(row, "path"), "savings-path"));
+      return validateSpanExcerpt(
+        excerpt,
+        Number(sqlInteger(rowValue(row, "start_utf16"), "savings-start")),
+        Number(sqlInteger(rowValue(row, "end_utf16"), "savings-end")),
+        sqlText(rowValue(row, "digest"), "savings-digest"),
+      );
+    });
+    const countUnits = options.countUnits ?? ((text: string) => Buffer.byteLength(text, "utf8"));
+    const baseline = sourceTexts.reduce((sum, text) => sum + countUnits(text), 0);
+    const memory = spanTexts.reduce((sum, text) => sum + countUnits(text), 0);
+    const measurement = savingsFromCounts(baseline, memory);
+    if (measurement.status !== "computed") throw new StoreError("read_failed");
+    return {
+      status: "computed",
+      unit: options.countUnits === undefined ? "utf8_bytes" : "tokens",
+      method: options.countUnits === undefined ? "utf8_bytes" : "tokenizer",
+      baseline_units: measurement.baselineUnits,
+      memory_units: measurement.memoryUnits,
+      saved_units: measurement.savedUnits,
+      savings_percent: measurement.savingsPercent,
+      measured_sources: sourceRows.length,
+      measured_spans: spanRows.length,
+    };
+  }
+
+/** Policy-checked job state distribution for the local UI. */
   getUiJobStateCounts(binding: PolicyOutputBinding): readonly UiJobStateCount[] {
     this.ensureOpen();
     const checked = requireLocalUiOutput(binding);
@@ -7089,6 +7278,65 @@ export class AgentMemoryDatabase {
       observed_stage: sqlText(rowValue(row, "observed_stage"), "observed_stage"),
       commit_seq: sqlInteger(rowValue(row, "commit_seq"), "commit_seq").toString(10),
     }));
+  }
+
+  /** Policy-checked semantic graph for the local viewer; edges require live evidence. */
+  getGraphForUi(binding: PolicyOutputBinding, limit: number): UiGraphSnapshot {
+    this.ensureOpen();
+    const checked = requireLocalUiOutput(binding);
+    const capped = localUiLimit(limit);
+    this.assertLocalUiGrant(checked.scope_id);
+    const nodes = this.database
+      .prepare(
+        `SELECT entity_id, label, resolution_state, created_commit_seq
+           FROM entity
+          WHERE scope_id = ?
+          ORDER BY created_commit_seq DESC, entity_id DESC LIMIT ?`,
+      )
+      .all(checked.scope_id, capped)
+      .map((row) => ({
+        entity_id: sqlText(rowValue(row, "entity_id"), "ui-graph-entity"),
+        label: sqlText(rowValue(row, "label"), "ui-graph-label"),
+        resolution_state: parseJobColumn(rowValue(row, "resolution_state"), "ui-graph-resolution", ["resolved", "candidate"]),
+        created_commit_seq: sqlInteger(rowValue(row, "created_commit_seq"), "ui-graph-created").toString(10),
+      })) as UiGraphNode[];
+    const edges = this.database
+      .prepare(
+        `SELECT e.edge_id, e.source_entity, e.target_entity, e.predicate,
+                e.evidence_revision, e.status, e.created_commit_seq
+           FROM semantic_edge AS e
+          WHERE e.scope_id = ?
+            AND e.status = 'active'
+            AND EXISTS (
+              SELECT 1
+                FROM revision_source AS rs
+                JOIN source_span AS ss
+                  ON ss.scope_id = rs.scope_id AND ss.span_id = rs.source_span_id
+                JOIN source_event AS se
+                  ON se.scope_id = ss.scope_id AND se.capture_id = ss.source_id
+                JOIN scope_output_grant AS grant_row
+                  ON grant_row.scope_id = se.scope_id
+                 AND grant_row.output_target = 'local_ui'
+                 AND grant_row.source_class = se.evidence_class
+                LEFT JOIN purge_tombstone AS tombstone
+                  ON tombstone.scope_id = se.scope_id AND tombstone.capture_id = se.capture_id
+               WHERE rs.scope_id = e.scope_id
+                 AND rs.revision_id = e.evidence_revision
+                 AND tombstone.capture_id IS NULL
+            )
+          ORDER BY e.created_commit_seq DESC, e.edge_id DESC LIMIT ?`,
+      )
+      .all(checked.scope_id, capped)
+      .map((row) => ({
+        edge_id: sqlText(rowValue(row, "edge_id"), "ui-graph-edge"),
+        source_entity: sqlText(rowValue(row, "source_entity"), "ui-graph-source"),
+        target_entity: sqlText(rowValue(row, "target_entity"), "ui-graph-target"),
+        predicate: sqlText(rowValue(row, "predicate"), "ui-graph-predicate"),
+        evidence_revision: sqlText(rowValue(row, "evidence_revision"), "ui-graph-evidence"),
+        status: parseJobColumn(rowValue(row, "status"), "ui-graph-status", ["active", "superseded", "purged"]),
+        created_commit_seq: sqlInteger(rowValue(row, "created_commit_seq"), "ui-graph-created-edge").toString(10),
+      })) as UiGraphEdge[];
+    return { nodes, edges };
   }
 
   /** Policy-checked bounded sessions for one scope, newest start first. */
@@ -7151,6 +7399,48 @@ export class AgentMemoryDatabase {
         updated_at: sqlText(rowValue(row, "updated_at"), "updated_at"),
       })),
     };
+  }
+
+  /** Policy-checked current memory revisions for the local viewer. */
+  listMemoryItemsForUi(binding: PolicyOutputBinding, limit: number): readonly RevisionDetail[] {
+    this.ensureOpen();
+    const checked = requireLocalUiOutput(binding);
+    const capped = localUiLimit(limit);
+    this.assertLocalUiGrant(checked.scope_id);
+    const rows = this.database
+      .prepare(
+        `SELECT current_revision_id
+           FROM memory_item
+          WHERE scope_id = ? AND current_revision_id IS NOT NULL
+          ORDER BY created_commit_seq DESC, item_id DESC LIMIT ?`,
+      )
+      .all(checked.scope_id, capped);
+    return rows.flatMap((row) => {
+      const revisionId = rowValue(row, "current_revision_id");
+      if (revisionId === null) return [];
+      const revision = this.revisions.readDetail(checked, sqlText(revisionId, "ui-memory-revision"));
+      return revision === undefined ? [] : [revision];
+    });
+  }
+
+  /** Policy-checked query-trace metadata; source text never enters traces. */
+  listQueryTracesForUi(binding: PolicyOutputBinding, limit: number): readonly QueryTraceRecord[] {
+    this.ensureOpen();
+    const checked = requireLocalUiOutput(binding);
+    const capped = localUiLimit(limit);
+    this.assertLocalUiGrant(checked.scope_id);
+    const rows = this.database
+      .prepare(
+        `SELECT injection_id
+           FROM query_trace
+          WHERE EXISTS (SELECT 1 FROM json_each(scope_ids_json) WHERE value = ?)
+          ORDER BY created_at DESC, injection_id DESC LIMIT ?`,
+      )
+      .all(checked.scope_id, capped);
+    return rows.flatMap((row) => {
+      const trace = this.getQueryTrace(sqlText(rowValue(row, "injection_id"), "ui-query-trace"));
+      return trace === undefined ? [] : [trace];
+    });
   }
 
   getJobByCaptureId(captureId: string): StoredJob | undefined {

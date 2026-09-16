@@ -41,13 +41,13 @@
     }
   },
   "eventMapping": {
-    "session.created": "session_start_capture_only",
+    "session.created": "session_start_capture; live_status_injected_once_on_first_session_context",
     "chat.message": "prompt_submitted_capture; transform_reuses_ack",
     "tool.execute.before": "tool_started_capture_only",
     "tool.execute.after": "tool_result_unknown_capture; undefined output remains unknown",
     "experimental.text.complete": "message_part_assistant_output_capture; not assistant_final",
     "experimental.session.compacting": "capture_its_lifecycle_event_and_ACK_only",
-    "experimental.chat.messages.transform": "one_common_8000_utf8_byte_profile_after_exact_chat.message_ACK; no_mode_guess",
+    "experimental.chat.messages.transform": "one_common_8000_utf8_byte_profile_after_exact_chat.message_ACK; live_status_once_per_session; no_mode_guess",
     "session.idle": "stop_capture_without_invented_assistant_text",
     "session.compacted": "compaction_capture_only",
     "session.error": "error_capture_with_native_error_text_when_present",

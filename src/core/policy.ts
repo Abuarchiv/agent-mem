@@ -156,6 +156,22 @@ export function setReaderOutputGrants(
   return database.replaceReaderOutputGrants(binding, scopeId, parseScopeOutputGrants(grants), updatedAt);
 }
 
+/** Replace only local viewer grants while preserving reader/export/provider grants. */
+export function setLocalUiOutputGrants(
+  database: AgentMemoryDatabase,
+  binding: PolicySetupBinding,
+  scopeId: string,
+  sourceClasses: unknown,
+  updatedAt: string,
+): string {
+  return database.replaceLocalUiOutputGrants(
+    binding,
+    scopeId,
+    parseScopeOutputGrants([{ target: "local_ui", source_classes: sourceClasses }]),
+    updatedAt,
+  );
+}
+
 export function setScopeCapturePolicy(
   database: AgentMemoryDatabase,
   binding: PolicySetupBinding,

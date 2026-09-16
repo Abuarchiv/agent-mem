@@ -14,9 +14,10 @@ import {
   type OpenCodeBridgeCallOptions,
   type OpenCodeBridgeEvent,
 } from "./bridge-client.js";
-import { parseDirectedEvidenceHandoff, parseModelContextWrapper, serializeModelContext } from "../../src/context/packet.js";
+import { parseDirectedEvidenceHandoff, parseModelContextWrapper, serializeModelContext, serializeModelContextWithStatus } from "../../src/context/packet.js";
 import { validateBoundedJson, type CaptureAck, type NativeObservationIdentity, type NativeReconcileCursor, type SourceCoverage, type NativeReconcileCoverage } from "../../src/host/contract.js";
 import { createOpenCodePartObservation, createOpenCodeReconcilePlan, isOwnMemoryMcpTool } from "./reconcile.js";
+import { connectedSessionStatus, formatSessionStatus, sessionStatusFromBackend } from "../../src/v1/session-status.js";
 
 export const OPENCODE_PLUGIN_VERSION = "1.0.0" as const;
 export const OPENCODE_NATIVE_VERSION = "1.18.30" as const;
@@ -128,6 +129,7 @@ interface SessionState {
   opening: Promise<void> | undefined;
   transformTail: Promise<void>;
   transformPending: number;
+  statusInjected: boolean;
 }
 
 interface MessageWithParts {
@@ -330,6 +332,20 @@ function currentUserMessage(messages: readonly MessageWithParts[]): { readonly m
 
 function optionsFor(deadline: HookDeadline): OpenCodeBridgeCallOptions {
   return { signal: deadline.signal, deadlineAt: deadline.deadlineAt };
+}
+
+async function sessionStatusFor(
+  bridge: OpenCodeBridge,
+  nativeSessionId: string,
+  cwd: string,
+  options: OpenCodeBridgeCallOptions,
+) {
+  if (bridge.status === undefined) return connectedSessionStatus("OpenCode CLI");
+  try {
+    return sessionStatusFromBackend("OpenCode CLI", await bridge.status(nativeSessionId, cwd, options));
+  } catch {
+    return connectedSessionStatus("OpenCode CLI");
+  }
 }
 
 function ownSyntheticPart(sessionId: string, messageId: string, wrapper: string): TextPart {
@@ -536,6 +552,7 @@ export class OpenCodePluginRuntime {
         opening: undefined,
         transformTail: Promise.resolve(),
         transformPending: 0,
+        statusInjected: false,
       };
       this.sessions.set(sessionId, state);
     }
@@ -998,7 +1015,8 @@ export class OpenCodePluginRuntime {
       );
       deadline.throwIfExpired();
       if (this.closing) return;
-      const wrapper = serializeModelContext(packet);
+      const status = state.statusInjected ? undefined : formatSessionStatus(await sessionStatusFor(this.bridge, sessionId, this.config.workspaceDirectory, optionsFor(deadline)));
+      const wrapper = status === undefined ? serializeModelContext(packet) : serializeModelContextWithStatus(packet, status);
       deadline.throwIfExpired();
       if (Buffer.byteLength(wrapper, "utf8") > OPENCODE_CONTEXT_MAX_BYTES) throw new OpenCodePluginError("context_too_large");
       const target = currentUserMessage(messages);
@@ -1018,6 +1036,7 @@ export class OpenCodePluginRuntime {
         }
       }
       targetParts.push(ownSyntheticPart(sessionId, messageId, wrapper));
+      if (status !== undefined) state.statusInjected = true;
       state.ownedInjectionDigests.add(createHash("sha256").update(wrapper, "utf8").digest("hex"));
       while (state.ownedInjectionDigests.size > 64) {
         const oldest = state.ownedInjectionDigests.values().next().value;

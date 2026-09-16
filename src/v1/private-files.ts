@@ -2,11 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 
-/** Private data excludes other users; assets permit only their known read/execute rights. */
+/** Private data excludes other users; assets permit trusted system owners and known read/execute rights. */
 export function isPrivateWindowsAcl(value: unknown, mode: "private" | "asset" = "private"): boolean {
   if (!value || typeof value !== "object" || !("owner" in value) || !("user" in value) || !("rules" in value)) return false;
-  if (typeof value.user !== "string" || !/^S-\d+(?:-\d+)+$/.test(value.user) || value.owner !== value.user || !Array.isArray(value.rules)) return false;
+  if (typeof value.user !== "string" || typeof value.owner !== "string" || !/^S-\d+(?:-\d+)+$/.test(value.user) || !/^S-\d+(?:-\d+)+$/.test(value.owner) || !Array.isArray(value.rules)) return false;
   const allowed = new Set([value.user, "S-1-5-18", "S-1-5-32-544"]);
+  if (mode === "private" ? !new Set([value.user, "S-1-5-32-544"]).has(value.owner) : !allowed.has(value.owner)) return false;
   const readExecute = 0x1200a9; // FileSystemRights.ReadAndExecute | Synchronize; no write/delete/ACL rights.
   const ownerRights = mode === "asset" ? 1 : 2032127; // ReadData/ListDirectory vs FullControl.
   let ownerAccess = false;
@@ -14,9 +15,27 @@ export function isPrivateWindowsAcl(value: unknown, mode: "private" | "asset" = 
     if (!rule || typeof rule !== "object" || typeof rule.sid !== "string" || !/^S-\d+(?:-\d+)+$/.test(rule.sid) || rule.allow !== true || !Number.isSafeInteger(rule.rights) || rule.rights <= 0 || typeof rule.inheritOnly !== "boolean") return false;
     // A whitelist also rejects generic/unknown rights and large values that would truncate in bitwise operations.
     if (!allowed.has(rule.sid) && (mode === "private" || (rule.rights & readExecute) !== rule.rights)) return false;
-    if (rule.sid === value.user && !rule.inheritOnly && (rule.rights & ownerRights) === ownerRights) ownerAccess = true;
+    const accessSid = mode === "asset" ? allowed.has(rule.sid) : rule.sid === value.user;
+    if (accessSid && !rule.inheritOnly && (rule.rights & ownerRights) === ownerRights) ownerAccess = true;
   }
   return ownerAccess;
+}
+
+function powershellExecutable(systemRoot: string): string {
+  const candidates = [
+    process.env.ProgramW6432 === undefined ? undefined : join(process.env.ProgramW6432, "PowerShell", "7", "pwsh.exe"),
+    process.env.ProgramFiles === undefined ? undefined : join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe"),
+    join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+  ].filter((candidate): candidate is string => candidate !== undefined);
+  for (const candidate of candidates) {
+    try {
+      const info = lstatSync(candidate);
+      if (info.isFile() && !info.isSymbolicLink()) return candidate;
+    } catch {
+      // Try the next known system location.
+    }
+  }
+  throw new Error("windows_powershell_missing");
 }
 
 function windowsAcl(path: string, initialize = false, mode: "private" | "asset" = "private"): void {
@@ -24,8 +43,8 @@ function windowsAcl(path: string, initialize = false, mode: "private" | "asset" 
 $sidType = [System.Security.Principal.SecurityIdentifier]
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 ${initialize ? `# Only an empty application directory is changed; its ACL is set to the current user.
-$existing = Get-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH
-if (@(Get-ChildItem -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
+$existing = Get-Acl -LiteralPath $env:AGENT_MEM_PRIVATE_PATH
+if (@(Get-ChildItem -LiteralPath $env:AGENT_MEM_PRIVATE_PATH -Force).Count -ne 0) { throw 'new_private_directory_unverified' }
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $acl.SetOwner($user)
 $acl.SetAccessRuleProtection($true, $false)
@@ -34,8 +53,8 @@ foreach ($sid in @($user.Value, 'S-1-5-18', 'S-1-5-32-544')) {
   $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')
   $acl.AddAccessRule($rule)
 }
-Set-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH -AclObject $acl
-` : ""}$acl = Get-Acl -LiteralPath $env:AGENT_MEMORY_PRIVATE_PATH
+Set-Acl -LiteralPath $env:AGENT_MEM_PRIVATE_PATH -AclObject $acl
+` : ""}$acl = Get-Acl -LiteralPath $env:AGENT_MEM_PRIVATE_PATH
 $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
   @{ sid = $_.IdentityReference.Value; allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights; inheritOnly = (($_.PropagationFlags -band 2) -ne 0) }
 })
@@ -44,11 +63,12 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
   try {
     const systemRoot = process.env.SystemRoot;
     if (!systemRoot) throw new Error("windows_system_root_missing");
-    const output = execFileSync(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
-      env: { ...process.env, AGENT_MEMORY_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    const output = execFileSync(powershellExecutable(systemRoot), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
+      env: { ...process.env, AGENT_MEM_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
-    if (!isPrivateWindowsAcl(JSON.parse(output.replace(/^\uFEFF/, "")), mode)) throw new Error("windows_acl_not_safe");
-  } catch { throw new Error(`windows_${mode}_acl_unverified`); }
+    const acl = JSON.parse(output.replace(/^\uFEFF/, ""));
+    if (!isPrivateWindowsAcl(acl, mode)) throw new Error("windows_acl_not_safe", { cause: new Error(JSON.stringify(acl)) });
+  } catch (error) { throw new Error(`windows_${mode}_acl_unverified`, { cause: error }); }
 }
 
 /** Also checks an opened descriptor still names the same non-symlink entry. */

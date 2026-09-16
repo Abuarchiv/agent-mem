@@ -1,6 +1,7 @@
 {
-  "name": "agent-memory-v1",
+  "name": "agent-mem",
   "version": "1.0.0",
+  "description": "Local service for capturing and retrieving source-backed coding-agent context.",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.19.0",

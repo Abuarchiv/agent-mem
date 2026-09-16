@@ -33,44 +33,100 @@ jobs:
 
       - name: Download and verify pinned models
         run: |
-          npm run models:download
-          npm run models:verify
+          npm run models:download:all
+      - name: Verify pinned models (Unix)
+        if: runner.os != 'Windows'
+        run: npm run models:verify:all
 
-      - name: Run full test suite
+      - name: Run full test suite (Unix)
+        if: runner.os != 'Windows'
         run: npm test
+
+      - name: Run Windows build and platform gates
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run build
+          node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js dist-v1/tests/v1-installer.test.js
 
       - name: Build package (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          package_dir="$RUNNER_TEMP/agent-memory-v1-package"
-          npm run package -- --output "$package_dir"
+          package_dir="$RUNNER_TEMP/agent-mem-package"
+          npm run package -- --output "$package_dir" --with-reranker
           echo "PACKAGE_DIR=$package_dir" >> "$GITHUB_ENV"
 
+      - name: Harden Windows model asset ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\e5\Xenova\multilingual-e5-small\761b726dd34fb83930e26aab4e9ac3899aa1fa78"
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          foreach ($path in $paths) {
+            $permission = (Get-Item -LiteralPath $path).PSIsContainer ? "(OI)(CI)F" : "F"
+            icacls.exe $path /setowner "*${userSid}" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+
+      - name: Harden Windows reranker asset ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $modelRoot = Join-Path (Get-Location) ".models\rerank\cross-encoder\mmarco-mMiniLMv2-L12-H384-v1\1427fd652930e4ba29e8149678df786c240d8825"
+          $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $paths = @($modelRoot) + @(Get-ChildItem -LiteralPath $modelRoot -Recurse -Force | ForEach-Object { $_.FullName })
+          foreach ($path in $paths) {
+            $item = Get-Item -LiteralPath $path
+            $permission = if ($item.PSIsContainer) { "(OI)(CI)F" } else { "F" }
+            icacls.exe $path /setowner "*${userSid}" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            icacls.exe $path /inheritance:r /grant:r "*${userSid}:$permission" "*S-1-5-18:$permission" "*S-1-5-32-544:$permission" /C
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Verify pinned models (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run models:verify:all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Normalize Windows model ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1"'
       - name: Build package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $packageDir = Join-Path $env:RUNNER_TEMP "agent-memory-v1-package"
-          npm run package -- --output $packageDir
+          $packageDir = Join-Path $env:RUNNER_TEMP "agent-mem-package"
+          npm run package -- --output $packageDir --with-reranker
           "PACKAGE_DIR=$packageDir" >> $env:GITHUB_ENV
 
       - name: Check packaged launcher (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: "$PACKAGE_DIR/memory help"
+        run: "$PACKAGE_DIR/agent-mem help"
 
       - name: Check packaged launcher (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: '& "$env:PACKAGE_DIR\memory.cmd" help'
+        run: '& "$env:PACKAGE_DIR\agent-mem.cmd" help'
+      - name: Normalize packaged Windows model ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1" -Root "$env:PACKAGE_DIR"'
 
       - name: Run packaged retrieval probe (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: node scripts/v1-retrieval-probe.mjs --package-dir "$PACKAGE_DIR" --no-rerank
-
+        run: node scripts/v1-retrieval-probe.mjs --package-dir "$PACKAGE_DIR"
       - name: Run packaged retrieval probe (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: node scripts/v1-retrieval-probe.mjs --package-dir "$env:PACKAGE_DIR" --no-rerank
+        run: |
+          node scripts/v1-retrieval-probe.mjs --package-dir "$env:PACKAGE_DIR"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

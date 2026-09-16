@@ -4,6 +4,7 @@ import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 
 import { V1_HOSTS, type V1Host } from "./config.js";
+import { memoryToolNames } from "../host/tool-schemas.js";
 
 export const INSTALLABLE_HOSTS = V1_HOSTS;
 export type InstallHostSelection = "auto" | readonly V1Host[];
@@ -120,6 +121,20 @@ export function detectInstallHostProbe(project: string): InstallHostProbe {
     opencode: existsSync(join(project, "opencode.json")) || existsSync(join(project, "opencode.jsonc")) || commandExists("opencode"),
     "copilot-cli": existsSync(join(project, ".github")) || commandExists("copilot"),
   };
+}
+
+/** Validate the stable V1 MCP surface before declaring an installation ready. */
+export function validateMcpToolList(value: unknown): number {
+  if (!Array.isArray(value)) throw new InstallError("install_mcp_tools_failed");
+  const names = new Set<string>();
+  for (const tool of value) {
+    if (typeof tool !== "object" || tool === null || Array.isArray(tool)) throw new InstallError("install_mcp_tools_failed");
+    const name = (tool as { readonly name?: unknown }).name;
+    if (typeof name !== "string" || name.length === 0 || names.has(name)) throw new InstallError("install_mcp_tools_failed");
+    names.add(name);
+  }
+  if (memoryToolNames.some((name) => !names.has(name))) throw new InstallError("install_mcp_tools_failed");
+  return value.length;
 }
 
 export interface OwnedServiceLauncher {

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,6 +47,7 @@ import type {
   OpenCodeReconcileObservation,
   OpenCodeReconcileResult,
 } from "./bridge-client.js";
+import { ensureOwnedBrokerForConnection } from "../../src/v1/recovery.js";
 
 export const OPENCODE_NATIVE_VERSION = "1.18.30" as const;
 export const OPENCODE_ADAPTER_VERSION = "1.0.0" as const;
@@ -118,6 +119,16 @@ const bridgeRequestSchema = z.discriminatedUnion("kind", [
     .object({
       version: z.literal(1),
       kind: z.literal("open_session"),
+      request_id: z.uuid(),
+      seq: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+      native_session_id: opaqueIdSchema,
+      cwd: pathSchema,
+    })
+    .strict(),
+  z
+    .object({
+      version: z.literal(1),
+      kind: z.literal("status"),
       request_id: z.uuid(),
       seq: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
       native_session_id: opaqueIdSchema,
@@ -346,6 +357,7 @@ interface BridgeSessionClient extends NativeSessionClient {
   nativeObserve?(operation: unknown): Promise<unknown>;
   recall(request: unknown, context: unknown): Promise<EvidencePacket>;
   recognizeContext(context: unknown): Promise<boolean>;
+  rpc(payload: unknown): Promise<unknown>;
   createHandoff?(targetBindingId: string, context: unknown): Promise<string>;
 }
 
@@ -406,6 +418,12 @@ export class OpenCodeBridgeService {
         this.resolveRoute(request.data.cwd);
         await this.clientFor(request.data.native_session_id);
         return { kind: "session_ready", native_session_id: request.data.native_session_id };
+      }
+      case "status": {
+        const route = this.resolveRoute(request.data.cwd);
+        const client = await this.clientFor(request.data.native_session_id);
+        if (!client.registeredSessionIds.has(route.scope_id)) throw new OpenCodeBridgeServerError("session_registration_missing");
+        return { kind: "status_response", status: await client.rpc({ kind: "control", operation: "status" }) };
       }
       case "capture":
         return { kind: "capture_ack", ack: await this.capture(request.data) };
@@ -700,6 +718,12 @@ export async function runOpenCodeBridgeFromStdin(configPath: string): Promise<vo
     process.exitCode = 1;
     return;
   }
+  try {
+    const project = config.projects[0]?.workspace_roots[0];
+    if (project !== undefined) await ensureOwnedBrokerForConnection(configPath, project, "opencode");
+  } catch {
+    // The bridge remains fail-open when the owner cannot be proven or repaired.
+  }
   const service = new OpenCodeBridgeService(config);
   const decoder = new NdjsonDecoder(config.maxFrameBytes);
   const inFlight = new Set<Promise<void>>();
@@ -792,6 +816,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   await runOpenCodeBridgeFromStdin(argv[1]);
 }
 
-if (process.argv[1] !== undefined && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
+if (process.argv[1] !== undefined && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]))) {
   void main();
 }

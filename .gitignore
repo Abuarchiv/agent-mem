@@ -20,5 +20,13 @@ coverage/
 .models
 artifacts/
 # Local planning and release notes are intentionally not published.
-/docs
-/release
+/docs/
+/release/
+
+# Local host configuration and generated presentation artifacts.
+.codex/
+/presentation/
+/agent-mem-demo-workflow.*
+/agent-mem-session-context-sequence.*
+/agent-mem-session-injection-sequence.*
+/agent-mem-storage-dataflow.*

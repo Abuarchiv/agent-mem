@@ -4,7 +4,7 @@ import { nonNegativeInt64Schema, parseContract, validateBoundedJson } from "./co
 import { memoryRecordInputSchema } from "../core/memory-record.js";
 
 /**
- * Tool schemas for the agent-memory stdio MCP adapter (plan §14 row T19).
+ * Tool schemas for the agent-mem stdio MCP adapter (plan §14 row T19).
  *
  * The zod schemas in this file are the authoritative runtime validation at
  * the tool boundary. The JSON Schema descriptors further below mirror them
@@ -18,7 +18,9 @@ import { memoryRecordInputSchema } from "../core/memory-record.js";
  * constructed. Arguments may only narrow an authorized scope selection.
  */
 
-export const MEMORY_MCP_SERVER_NAME = "agent-memory-v1";
+export const MEMORY_MCP_SERVER_NAME = "agent-mem";
+export const MEMORY_MCP_SERVER_KEY = "agent_mem";
+export const MEMORY_MCP_LEGACY_SERVER_KEYS = ["agent_memory_v1", "agent-memory-v1", "agent-memory", "agentmemory"] as const;
 export const MEMORY_MCP_SERVER_VERSION = "1.0.0-rc.4";
 /**
  * MCP protocol versions this framing speaks, newest first. The MCP stdio

@@ -35,7 +35,7 @@ function setupDatabase(database: AgentMemoryDatabase, binding: TrustedBinding): 
 }
 
 test("capture strips nested and unmatched private blocks before source and FTS persistence", () => {
-  const directory = mkdtempSync(join(tmpdir(), "agent-memory-v1-private-"));
+  const directory = mkdtempSync(join(tmpdir(), "agent-mem-private-"));
   const path = join(directory, "vault.sqlite");
   const binding = bindingFor();
   const rawText = "PUBLIC_BEFORE <private>PRIVATE_OUTER <private>PRIVATE_NESTED</private> PRIVATE_OUTER_TAIL</private> PUBLIC_MIDDLE <private>PRIVATE_UNMATCHED PUBLIC_AFTER_UNMATCHED";
