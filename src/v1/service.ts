@@ -69,11 +69,11 @@ function pinnedRerankerFactory(update: (status: RerankerStatus) => void, dataDir
   };
 }
 
-export function connectClient(directory: string, config: V1Config, entry?: V1Connection): AgentMemoryBrokerClient {
+export function connectClient(directory: string, config: V1Config, entry?: V1Connection, requestTimeoutMs = 15_000): AgentMemoryBrokerClient {
   return new AgentMemoryBrokerClient({
     socketPath: socketPath(directory),
     credential: { binding: bindingFor(config, entry), secret: Buffer.from(entry?.secret_hex ?? config.operator.secret_hex, "hex") },
-    requestTimeoutMs: 15_000,
+    requestTimeoutMs,
   });
 }
 
@@ -335,6 +335,7 @@ async function startConfiguredService(directory: string, modelRoot?: string, opt
 export async function operatorCall(directory: string, payload: unknown): Promise<unknown> {
   const config = loadConfig(directory);
   if (process.platform !== "win32" && !existsSync(socketPath(directory))) throw new Error("v1_backend_not_running");
-  const client = connectClient(directory, config);
+  const requestTimeoutMs = typeof payload === "object" && payload !== null && "operation" in payload && payload.operation === "forget" ? 120_000 : 15_000;
+  const client = connectClient(directory, config, undefined, requestTimeoutMs);
   try { await client.connect(); return await client.rpc(payload); } finally { await client.close(); }
 }
