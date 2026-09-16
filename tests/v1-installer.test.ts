@@ -97,4 +97,5 @@ test("release gates exercise the full profile on every supported OS job", () => 
   assert.match(ci, /Build and smoke-test full Windows package/u);
   for (const workflow of [release, gates, ci]) assert.match(workflow, /harden-windows-model-assets\.ps1/u);
   assert.match(probe, /isAbsolute\(packageArgument\)/u);
+  assert.match(probe, /agent-mem\.cmd/u);
 });

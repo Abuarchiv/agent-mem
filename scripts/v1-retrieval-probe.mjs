@@ -30,6 +30,7 @@ if (packageArgument === undefined || !isAbsolute(packageArgument)) {
 
 const packageDirectory = realpathSync(resolve(packageArgument));
 const packageNode = realpathSync(join(packageDirectory, "runtime", "bin", process.platform === "win32" ? "node.exe" : "node"));
+const packageLauncher = join(packageDirectory, process.platform === "win32" ? "agent-mem.cmd" : "agent-mem");
 const repoRoot = realpathSync(root);
 if (packageDirectory === repoRoot || packageDirectory.startsWith(`${repoRoot}${sep}`)) {
   throw new Error("package_must_be_outside_repository_ancestry");
@@ -355,8 +356,8 @@ for (const entry of directions) {
   assert.ok(related.intelligence.graph_added <= 16);
   assert.ok(related.packet.items.every(item => captureIds.includes(item.item_id)));
   const command = async (...argumentsValue) => {
-    const result = await promisify(execFile)(join(packageDirectory, "agent-mem"),
-      ["--data-dir", dataDirectory, ...argumentsValue], { timeout: 30_000 });
+    const result = await promisify(execFile)(packageLauncher,
+      ["--data-dir", dataDirectory, ...argumentsValue], { timeout: 30_000, shell: process.platform === "win32" });
     return JSON.parse(result.stdout);
   };
   const procedureSource = directions[0].id;
