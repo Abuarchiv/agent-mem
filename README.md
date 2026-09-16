@@ -4,6 +4,8 @@ Local memory for coding agents.
 
 Agent Mem captures source events from configured Codex CLI, OpenCode CLI, and GitHub Copilot CLI worktrees. Original text, spans, timestamps, sessions, and provenance are stored in SQLite. Retrieval is available through stdio MCP and a local IPC broker.
 
+![Agent Mem architecture overview](assets/agent-mem-readme-hero.png)
+
 ## Quick start
 
 Requirements: Node.js 24.20.x, npm 11, and a local project or worktree.
