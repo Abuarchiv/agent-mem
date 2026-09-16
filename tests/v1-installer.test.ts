@@ -16,9 +16,9 @@ test("native Unix installer has valid shell syntax and verifies archives before 
   assert.match(script, /installer_version_invalid/u);
   assert.match(script, /native_target_not_published \(supported: \$supported_targets\)/u);
   assert.match(script, /agent-mem/iu);
-  assert.match(script, /github\.com\/Abuarchiv\/agent-memory-v1/u);
-  assert.equal(script.includes("Abuarchiv/agent-mem/releases"), false);
-  assert.equal(script.includes("Abuarchiv/agent-mem/main"), false);
+  assert.match(script, /github\.com\/Abuarchiv\/agent-mem/u);
+  assert.match(script, /Abuarchiv\/agent-mem\/releases/u);
+  assert.match(script, /Abuarchiv\/agent-mem\/main/u);
   assert.match(script, /memory compatibility alias/u);
   assert.match(script, /darwin-arm64/u);
   assert.match(script, /native_target_not_published/u);
@@ -40,9 +40,8 @@ test("native Windows installer covers both supported Node architectures", () => 
   assert.match(script, /PROCESSOR_ARCHITEW6432/u);
   assert.match(script, /LOCALAPPDATA/u);
   assert.match(script, /agent-mem\.cmd/u);
-  assert.match(script, /github\.com\/Abuarchiv\/agent-memory-v1/u);
-  assert.equal(script.includes("Abuarchiv/agent-mem/releases"), false);
-  assert.equal(script.includes("Abuarchiv/agent-mem/main"), false);
+  assert.match(script, /github\.com\/Abuarchiv\/agent-mem/u);
+  assert.match(script, /Abuarchiv\/agent-mem\/releases/u);
   assert.match(script, /memory\.cmd/u);
 });
 
@@ -67,7 +66,7 @@ test("native Unix installer serializes activation with a private dead-PID-recove
   assert.match(script, /chmod 600/u);
   assert.match(script, /project_status=\$?/u);
   assert.match(script, /exit "\$project_status"/u);
-  assert.match(script, /raw\.githubusercontent\.com\/Abuarchiv\/agent-memory-v1\/main\/install\.sh/u);
+  assert.match(script, /raw\.githubusercontent\.com\/Abuarchiv\/agent-mem\/main\/install\.sh/u);
 });
 
 test("native Windows installer serializes activation with a bounded named mutex", () => {
