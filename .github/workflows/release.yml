@@ -166,8 +166,12 @@ jobs:
         run: |
           test "$(find assets -maxdepth 1 -type f -name 'agent-mem-*' | wc -l | tr -d ' ')" -eq 8
           for target in darwin-arm64 darwin-x64 linux-x64 win-x64; do
-            test -f "assets/agent-mem-${target}.sha256"
-            test -f "assets/agent-mem-${target}.tar.gz" || test -f "assets/agent-mem-${target}.zip"
+            if test -f "assets/agent-mem-${target}.tar.gz"; then
+              test -f "assets/agent-mem-${target}.tar.gz.sha256"
+            else
+              test -f "assets/agent-mem-${target}.zip"
+              test -f "assets/agent-mem-${target}.zip.sha256"
+            fi
           done
       - name: Publish GitHub release
         env:
