@@ -67,7 +67,7 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
       env: { ...process.env, AGENT_MEM_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
     if (!isPrivateWindowsAcl(JSON.parse(output.replace(/^\uFEFF/, "")), mode)) throw new Error("windows_acl_not_safe");
-  } catch { throw new Error(`windows_${mode}_acl_unverified`); }
+  } catch (error) { throw new Error(`windows_${mode}_acl_unverified`, { cause: error }); }
 }
 
 /** Also checks an opened descriptor still names the same non-symlink entry. */
