@@ -115,6 +115,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: '& "$env:PACKAGE_DIR\agent-mem.cmd" help'
+      - name: Normalize packaged Windows model ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1" -Root "$env:PACKAGE_DIR"'
 
       - name: Run packaged retrieval probe (Unix)
         if: runner.os != 'Windows'

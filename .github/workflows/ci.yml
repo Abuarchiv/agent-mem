@@ -106,5 +106,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run package -- --output $packageDir --with-reranker
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$PWD/scripts/harden-windows-model-assets.ps1" -Root $packageDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/v1-retrieval-probe.mjs --package-dir $packageDir
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

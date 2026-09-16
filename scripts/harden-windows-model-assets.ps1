@@ -1,9 +1,14 @@
+param(
+  [string]$Root = (Get-Location).Path
+)
+
 $ErrorActionPreference = 'Stop'
 
-$root = (Get-Location).Path
+$root = (Resolve-Path -LiteralPath $Root).Path
+$sourceRoot = if (Test-Path -LiteralPath (Join-Path $root 'src/models')) { Join-Path $root 'src/models' } else { Join-Path $root 'dist-v1/src/models' }
 $manifests = @(
-  (Join-Path $root 'src/models/model-manifest.json'),
-  (Join-Path $root 'src/models/rerank-manifest.json')
+  (Join-Path $sourceRoot 'model-manifest.json'),
+  (Join-Path $sourceRoot 'rerank-manifest.json')
 )
 $modelRoots = foreach ($manifestPath in $manifests) {
   $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
