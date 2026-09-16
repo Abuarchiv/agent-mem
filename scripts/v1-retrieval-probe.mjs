@@ -357,7 +357,10 @@ for (const entry of directions) {
   assert.ok(related.packet.items.every(item => captureIds.includes(item.item_id)));
   const command = async (...argumentsValue) => {
     const result = await promisify(execFile)(packageLauncher,
-      ["--data-dir", dataDirectory, ...argumentsValue], { timeout: 30_000, shell: process.platform === "win32" });
+      ["--data-dir", dataDirectory, ...argumentsValue], {
+        timeout: process.platform === "win32" ? 120_000 : 30_000,
+        shell: process.platform === "win32",
+      });
     return JSON.parse(result.stdout);
   };
   const procedureSource = directions[0].id;
