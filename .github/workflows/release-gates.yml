@@ -94,6 +94,10 @@ jobs:
         run: |
           npm run models:verify:all
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Normalize Windows model ACLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1"'
       - name: Build package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -95,6 +95,9 @@ jobs:
           }
       - name: Run Windows platform tests
         run: node --test --test-timeout=120000 dist-v1/tests/v1-platform.test.js
+      - name: Normalize Windows model ACLs
+        shell: pwsh
+        run: '& "$PWD/scripts/harden-windows-model-assets.ps1"'
       - name: Build and smoke-test full Windows package
         shell: pwsh
         run: |
