@@ -437,5 +437,12 @@ for (const entry of directions) {
 } finally {
   await client?.close().catch(() => undefined);
   await service?.close().catch(() => undefined);
-  if (!keepTemp) rmSync(temporary, { recursive: true, force: true });
+  if (!keepTemp) {
+    try {
+      rmSync(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (error) {
+      if (process.platform !== "win32") throw error;
+      console.warn(`probe_temp_cleanup_deferred:${temporary}:${error instanceof Error ? error.code ?? error.message : String(error)}`);
+    }
+  }
 }
