@@ -33,6 +33,7 @@ import {
   type E5TokenizerLike,
 } from "../src/retrieval/vector.js";
 import { fuseRanks, hybridSearch } from "../src/retrieval/fusion.js";
+import { isNativeOnnxRuntimeSupported } from "../src/models/manifest.js";
 
 const scopeA = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1";
 const scopeB = "b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2";
@@ -880,7 +881,7 @@ test("chunker bounds tokenizer calls for long exact sources", () => {
   assert.equal(cursor, sourceText.length);
 });
 
-test("chunker counts the real E5 tokenizer including prefix and special tokens", async () => {
+test("chunker counts the real E5 tokenizer including prefix and special tokens", { skip: !isNativeOnnxRuntimeSupported() }, async () => {
   const transformers = (await import("@huggingface/transformers")) as unknown as {
     readonly env: Record<string, boolean | string>;
     readonly AutoTokenizer: {
