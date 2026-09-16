@@ -66,7 +66,8 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
     const output = execFileSync(powershellExecutable(systemRoot), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
       env: { ...process.env, AGENT_MEM_PRIVATE_PATH: resolve(path) }, encoding: "utf8", timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
-    if (!isPrivateWindowsAcl(JSON.parse(output.replace(/^\uFEFF/, "")), mode)) throw new Error("windows_acl_not_safe");
+    const acl = JSON.parse(output.replace(/^\uFEFF/, ""));
+    if (!isPrivateWindowsAcl(acl, mode)) throw new Error("windows_acl_not_safe", { cause: new Error(JSON.stringify(acl)) });
   } catch (error) { throw new Error(`windows_${mode}_acl_unverified`, { cause: error }); }
 }
 
