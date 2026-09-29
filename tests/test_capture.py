@@ -1,6 +1,7 @@
 import json
+import os
 
-from agent_mem import capture, db
+from agent_mem import capture, db, identity
 from agent_mem.events import Event
 from tests.conftest import Driver
 
@@ -131,3 +132,20 @@ def test_own_memory_tools_are_not_captured(driver: Driver, conn):
     driver.prompt("s1", "x")
     driver.send("s1", "tool", tool="mcp__agent-mem__mem_search", tool_input={"query": "x"}, tool_output="...")
     assert conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'tool'").fetchone()[0] == 0
+
+
+def test_excluded_projects_are_not_captured(driver: Driver, config, project):
+    config.excluded_projects = [str(project).upper() if os.name == "nt" else str(project)]
+    assert not driver.prompt("s1", "should not be stored").stored
+    config.excluded_projects = [str(project) + "-other"]
+    assert driver.prompt("s1", "stored now").stored
+
+
+def test_is_within_handles_prefixes_and_case(tmp_path):
+    root = tmp_path / "repo"
+    (root / "sub").mkdir(parents=True)
+    assert identity.is_within(root / "sub", root)
+    assert identity.is_within(root, root)
+    assert not identity.is_within(tmp_path / "repo-other", root)
+    if os.name == "nt":
+        assert identity.is_within(str(root / "sub").upper(), root)

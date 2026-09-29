@@ -251,9 +251,11 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM entities WHERE project_id = ?", (project.id,))
                 conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
-            root = str(project.root)
             removed = spool.purge_matching(
-                config.spool_dir, lambda r: str((r.get("event") or {}).get("cwd") or "").startswith(root)
+                config.spool_dir,
+                lambda r: (
+                    bool((r.get("event") or {}).get("cwd")) and identity.is_within(str(r["event"]["cwd"]), project.root)
+                ),
             )
             print(f"Deleted project {project.name} ({len(owners)} items, {removed} spooled events).")
         else:

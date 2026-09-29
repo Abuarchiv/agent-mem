@@ -178,7 +178,7 @@ def restore(config: Config, source: Path) -> None:
     """Replace the live database with ``source``. The current file is kept as ``memory.db.replaced``."""
     probe = sqlite3.connect(source)
     try:
-        if probe.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+        if probe.execute("PRAGMA quick_check").fetchone()[0] != "ok":  # raises DatabaseError if unreadable
             raise ValueError(f"backup {source} failed its integrity check")
     finally:
         probe.close()

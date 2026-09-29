@@ -39,12 +39,13 @@ def recover_if_corrupt(config: Config) -> bool:
     """Returns True if a corrupt database was replaced by the latest backup."""
     if not config.db_path.exists():
         return False
+    probe = sqlite3.connect(config.db_path)
     try:
-        probe = sqlite3.connect(config.db_path)
         ok = probe.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-        probe.close()
     except sqlite3.DatabaseError:
         ok = False
+    finally:
+        probe.close()  # an open handle would block the rename on Windows
     if ok:
         return False
     stamp = timeutil.iso().replace(":", "")

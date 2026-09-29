@@ -111,6 +111,13 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None) -> Project | None:
     return Project(id=project_id, root=root, name=name, remote=remote)
 
 
+def is_within(path: str | Path, root: str | Path) -> bool:
+    """True if ``path`` is ``root`` or inside it (case-insensitive on Windows, symlinks resolved)."""
+    candidate = _canonical(Path(path))
+    base = _canonical(Path(root)).rstrip("/\\")
+    return candidate == base or candidate.startswith(base + os.sep) or candidate.startswith(base + "/")
+
+
 def read_branch(root: Path) -> str | None:
     """Read the current branch from .git/HEAD without spawning git."""
     dot_git = root / ".git"

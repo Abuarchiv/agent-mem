@@ -53,4 +53,4 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Audit dependencies
         shell: bash
-        run: uvx pip-audit --strict -r <(uv export --no-dev --no-hashes --all-extras --locked)
+        run: uvx pip-audit --strict -r <(uv export --no-dev --no-hashes --no-emit-project --all-extras --locked)

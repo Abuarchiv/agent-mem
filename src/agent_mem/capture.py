@@ -57,9 +57,8 @@ def capture_allowed(conn: sqlite3.Connection, config: Config, project: identity.
     if paused and (paused == "forever" or (timeutil.parse(paused) or timeutil.now()) > timeutil.now()):
         return False
     if project is not None:
-        root = str(project.root)
         for excluded in config.excluded_projects:
-            if root == excluded or root.startswith(excluded.rstrip("/\\") + "/"):
+            if identity.is_within(project.root, excluded):
                 return False
         if not load_project_settings(project.root).capture:
             return False
