@@ -14,6 +14,7 @@ First release.
 - Reliability: hook deadline, write-behind spool, idempotent replay, migrations with automatic backup, downgrade protection, daily backups, corruption recovery.
 - Privacy: redaction, private sections, exclude globs, per-project opt-out, pause, purge including backups and spool.
 - CLI: `status`, `doctor`, `search`, `show`, `rules`, `lessons`, `pause`, `resume`, `import` (Claude Code, Codex, claude-mem, agentmemory), `export`, `purge`, `backup`, `restore`, `consolidate`, `models`, `setup`, `eval`.
+- `agent-mem view`: a read-only HTML page of the local memory (overview, timeline, memories, rules, error fixes, preferences, association graph, capture health). One self-contained file in the private data directory, no server, no open port; a Content Security Policy blocks all network requests. Bundled fonts under the SIL Open Font License. `purge` deletes the page as well.
 - Plugins and marketplaces for Claude Code (`.claude-plugin`), Codex (`.agents/plugins`), Copilot CLI (`.github/plugin`) and an OpenCode plugin.
 - Python 3.11–3.14 on Linux, macOS and Windows.
 - Optional, off by default: session summaries through the user's own harness.

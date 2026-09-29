@@ -32,6 +32,7 @@ def dispatch(ns: argparse.Namespace, config: Config) -> int:
         "lessons": cmd_lessons,
         "models": cmd_models,
         "setup": cmd_setup,
+        "view": cmd_view,
     }[ns.command]
     return handler(ns, config)
 
@@ -217,6 +218,10 @@ def _delete_owners(conn: sqlite3.Connection, owners: list[tuple[str, int]]) -> N
 
 
 def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
+    from . import viewer
+
+    # A written page holds a copy of the data; it must not outlive a purge.
+    viewer.discard(config)
     if ns.all:
         if not _confirm(ns, "delete ALL agent-mem data"):
             return 1
@@ -372,6 +377,25 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
         print(f"Semantic search unavailable: {reason}. Lexical search keeps working.")
         return 1 if ns.action == "install" else 0
     print(f"Model ready: {embedder.model} (cache {config.model_dir}).")
+    return 0
+
+
+def cmd_view(ns: argparse.Namespace, config: Config) -> int:
+    from . import viewer
+
+    with _conn(config) as conn:
+        project = _project(conn, ns.project) if ns.project else None
+        if ns.project and project is None:
+            print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
+            return 2
+        snapshot = viewer.build_snapshot(conn, config, project.id if project else None)
+    target = viewer.write(config, viewer.render(snapshot), ns.output)
+    print(f"Wrote {target}. It is a local file with a copy of your memory; it makes no network requests.")
+    if not ns.no_open:
+        import webbrowser
+
+        if not webbrowser.open(target.as_uri()):
+            print("Open it in a browser to view it.")
     return 0
 
 

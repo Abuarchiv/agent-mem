@@ -18,6 +18,7 @@ Please report vulnerabilities privately through GitHub security advisories on th
 | Other local users | Data directory `0700` on macOS/Linux; on Windows the per-user `%LOCALAPPDATA%`. |
 | Command injection via hooks | Hook commands are fixed strings; payloads are passed on stdin and never interpolated into shell commands. |
 | Supply chain | Few dependencies, lockfile, `pip-audit` in CI; the release workflow builds in CI and publishes with PyPI trusted publishing. |
+| Viewer page | `agent-mem view` writes a snapshot to `view/agent-mem.html` in the private data directory; its Content Security Policy blocks all network requests; `purge` deletes it. With `--output` the user chooses another location. |
 | Resource exhaustion | Size limits for stdin, prompts, outputs and payloads; hook deadline; bounded result counts. |
 | Data exfiltration | No telemetry. Agent Mem itself only goes online for the optional model download. The optional summaries (off by default) run through the harness the user already uses. |
 
