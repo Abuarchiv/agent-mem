@@ -40,9 +40,9 @@ def recover_if_corrupt(config: Config) -> bool:
     if not config.db_path.exists():
         return False
     try:
-        probe = sqlite3.connect(config.db_path)
-        ok = probe.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-        probe.close()
+        # Close the probe even when the file is not a database; an open handle blocks the rename on Windows.
+        with contextlib.closing(sqlite3.connect(config.db_path)) as probe:
+            ok = probe.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     except sqlite3.DatabaseError:
         ok = False
     if ok:

@@ -6,6 +6,17 @@
 
 - `agent-mem view`: a read-only HTML page of the local memory with overview, timeline (turns with their actions and results), memories, learned rules, error fixes and preferences, the association graph, and capture health. It is one self-contained file in the private data directory, opened in the browser; no server, no open port, and a Content Security Policy that blocks all network requests. Light and dark mode, narrow screens, bundled fonts (SIL Open Font License). `purge` deletes the page as well.
 
+### Fixed
+
+- Corruption recovery on Windows: the integrity probe kept the damaged database open, so it could not be moved aside and the backup was not restored.
+- `purge --project` on Windows left spooled events behind because paths were compared without normalising case and separators. Paths are now compared by whole segments on every platform, so `/proj` no longer matches `/proj2`.
+- `agent-mem view --project` no longer registers an unknown directory as a new project.
+- CI: the dependency audit no longer tries to look up `agent-mem` itself on PyPI; the retired `macos-13` runner is replaced by `macos-15-intel`; `setup-uv` moves to v7 (Node 24).
+
+### Removed
+
+- V1 release notes and implementation notes under `docs/`; V1 lives on under the tag `v1.0.0`.
+
 ## 2.0.0 — 2026-09-29
 
 Complete rewrite in Python. V1 (TypeScript) remains available under the tag `v1.0.0`.

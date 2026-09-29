@@ -256,9 +256,8 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM entities WHERE project_id = ?", (project.id,))
                 conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
-            root = str(project.root)
             removed = spool.purge_matching(
-                config.spool_dir, lambda r: str((r.get("event") or {}).get("cwd") or "").startswith(root)
+                config.spool_dir, lambda r: identity.contains(project.root, (r.get("event") or {}).get("cwd"))
             )
             print(f"Deleted project {project.name} ({len(owners)} items, {removed} spooled events).")
         else:
@@ -383,7 +382,8 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
     from . import viewer
 
     with _conn(config) as conn:
-        project = _project(conn, ns.project) if ns.project else None
+        # Look the project up only; viewing must not register a directory as a new project.
+        project = identity.find(conn, os.path.abspath(ns.project)) if ns.project else None
         if ns.project and project is None:
             print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
             return 2

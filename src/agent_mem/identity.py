@@ -61,6 +61,21 @@ def _canonical(path: Path) -> str:
     return text.lower() if os.name == "nt" else text
 
 
+def contains(root: Path, path: str | Path | None) -> bool:
+    """True when ``path`` is ``root`` or lies below it, compared as canonical paths (case-insensitive on Windows)."""
+    if not path:
+        return False
+    base = _canonical(Path(root))
+    candidate = _canonical(Path(path))
+    return candidate == base or candidate.startswith(base.rstrip("\\/") + os.sep)
+
+
+def find(conn: sqlite3.Connection, cwd: str | Path) -> Project | None:
+    """Known project for ``cwd`` without registering a new one."""
+    path = Path(cwd)
+    return _lookup(conn, path) if path.is_absolute() else None
+
+
 def _lookup(conn: sqlite3.Connection, cwd: Path) -> Project | None:
     candidates = [_canonical(cwd), *(_canonical(parent) for parent in cwd.parents)]
     placeholders = ",".join("?" for _ in candidates)

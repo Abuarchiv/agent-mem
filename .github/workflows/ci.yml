@@ -14,12 +14,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, macos-13, windows-latest]
+        os: [ubuntu-latest, macos-14, macos-15-intel, windows-latest]
         python: ["3.11", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install
@@ -50,7 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Audit dependencies
-        run: uvx pip-audit --strict -r <(uv export --no-dev --no-hashes --all-extras --locked)
+        # The project itself is not on PyPI; audit only its locked dependencies.
+        run: uvx pip-audit --strict -r <(uv export --no-dev --no-hashes --all-extras --locked --no-emit-project)
         shell: bash
