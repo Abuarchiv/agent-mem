@@ -1,6 +1,6 @@
 # Agent Mem
 
-This repository is the v2 line: a Python package. V1 (TypeScript) is preserved under the Git tag `v1.0.0`.
+Agent Mem is a Python package (`src/agent_mem`) with plugins for each supported harness (`plugins/`).
 
 ## Boundary
 

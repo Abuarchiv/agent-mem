@@ -71,7 +71,6 @@ agent-mem import claude            # ~/.claude/projects/*/*.jsonl
 agent-mem import codex             # ~/.codex/sessions/**/*.jsonl
 agent-mem import claude-mem ~/.claude-mem/claude-mem.db
 agent-mem import agentmemory export.json
-agent-mem import v1 "<old vault>.sqlite"
 ```
 
 If you used claude-mem or agentmemory, disable them afterwards; otherwise hooks run twice and context is injected twice.

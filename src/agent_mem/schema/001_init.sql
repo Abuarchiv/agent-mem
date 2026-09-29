@@ -1,4 +1,4 @@
--- Agent Mem v2 schema, version 1.
+-- Agent Mem database schema, version 1.
 -- Owners are addressed as (owner_type, owner_id): owner_type 't' = turn, 'm' = memory.
 
 CREATE TABLE meta (
@@ -127,7 +127,7 @@ CREATE TABLE links (
   entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
   PRIMARY KEY (owner_type, owner_id, entity_id)
 );
-CREATE INDEX links_entity ON links(entity_id);
+CREATE INDEX links_entity_owner ON links(entity_id, owner_id);
 
 CREATE TABLE edges (
   a INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,

@@ -46,7 +46,7 @@ def _main(args: list[str]) -> int:
     p.add_argument("--for", dest="duration", help="e.g. 30m, 2h, 1d (default: until resume)")
     sub.add_parser("resume", help="resume capturing")
     p = sub.add_parser("import", help="import history")
-    p.add_argument("source", choices=["claude", "codex", "v1", "claude-mem", "agentmemory"])
+    p.add_argument("source", choices=["claude", "codex", "claude-mem", "agentmemory"])
     p.add_argument("path", nargs="?", type=Path)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("export", help="export memory as JSON")

@@ -170,21 +170,18 @@ def test_purge_removes_data_everywhere(config: Config, project: Path, conn, monk
         assert b"zebra-unique-marker" not in backup.read_bytes()
 
 
-def test_upgrade_from_schema_v1_keeps_data_and_backs_up(config: Config):
-    config.data_dir.mkdir(parents=True)
-    legacy = sqlite3.connect(config.db_path)
-    for statement in db._split_sql(db.MIGRATIONS[0][1]):
-        legacy.execute(statement)
-    legacy.execute("INSERT INTO meta(key, value) VALUES ('probe', 'kept')")
-    legacy.execute("PRAGMA user_version = 1")
-    legacy.commit()
-    legacy.close()
+def test_upgrade_migration_keeps_data_and_backs_up(config: Config, monkeypatch: pytest.MonkeyPatch):
     conn = db.connect(config)
-    assert db.user_version(conn) == db.SCHEMA_VERSION >= 2
+    db.set_meta(conn, "probe", "kept")
+    conn.close()
+    upgrade = (db.SCHEMA_VERSION + 1, "CREATE INDEX upgrade_probe ON meta(value);")
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, upgrade])
+    monkeypatch.setattr(db, "SCHEMA_VERSION", upgrade[0])
+    conn = db.connect(config)
+    assert db.user_version(conn) == upgrade[0]
     assert db.get_meta(conn, "probe") == "kept"
-    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
-    assert "links_entity_owner" in indexes and "links_entity" not in indexes
-    assert list(config.backup_dir.glob("*pre-migration-v1*.db"))
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'upgrade_probe'").fetchone()
+    assert list(config.backup_dir.glob(f"*pre-migration-v{upgrade[0] - 1}*.db"))
     conn.close()
 
 

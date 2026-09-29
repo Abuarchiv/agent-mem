@@ -154,7 +154,6 @@ def cmd_import(ns: argparse.Namespace, config: Config) -> int:
                 print(f"import {ns.source} needs a path", file=sys.stderr)
                 return 2
             function = {
-                "v1": importers.import_v1,
                 "claude-mem": importers.import_claude_mem,
                 "agentmemory": importers.import_agentmemory,
             }[ns.source]
