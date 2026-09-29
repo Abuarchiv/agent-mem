@@ -384,7 +384,8 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
     from . import viewer
 
     with _conn(config) as conn:
-        project = _project(conn, ns.project) if ns.project else None
+        # Look the project up only; viewing must not register a directory as a new project.
+        project = identity.find(conn, os.path.abspath(ns.project)) if ns.project else None
         if ns.project and project is None:
             print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
             return 2

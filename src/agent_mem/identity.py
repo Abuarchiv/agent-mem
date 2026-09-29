@@ -61,6 +61,12 @@ def _canonical(path: Path) -> str:
     return text.lower() if os.name == "nt" else text
 
 
+def find(conn: sqlite3.Connection, cwd: str | Path) -> Project | None:
+    """Known project for ``cwd`` without registering a new one."""
+    path = Path(cwd)
+    return _lookup(conn, path) if path.is_absolute() else None
+
+
 def _lookup(conn: sqlite3.Connection, cwd: Path) -> Project | None:
     candidates = [_canonical(cwd), *(_canonical(parent) for parent in cwd.parents)]
     placeholders = ",".join("?" for _ in candidates)
