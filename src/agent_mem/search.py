@@ -7,12 +7,12 @@ candidates are supplied by callers that may import numpy.
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import PurePosixPath
 
 from . import learn, timeutil
 from .config import Config
@@ -216,20 +216,25 @@ def fts_candidates(conn: sqlite3.Connection, terms: Sequence[str], limit: int = 
 
 
 def matching_entities(conn: sqlite3.Connection, project_id: str | None, terms: Sequence[str]) -> list[int]:
-    if not terms:
+    """Entities named in the query: exact key, file basename, or (for longer terms) a substring. Matched in SQL."""
+    usable = [t.lower() for t in terms if len(t) >= 3][:12]
+    if not usable:
         return []
+    clauses: list[str] = []
+    params: list[object] = [project_id or ""]
+    for term in usable:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("lower(key) = ? OR lower(key) LIKE ? ESCAPE '\\'")
+        params.extend([term, f"%/{escaped}"])
+        if len(term) >= 5:
+            clauses.append("instr(lower(key), ?) > 0")
+            params.append(term)
     rows = conn.execute(
-        "SELECT id, kind, key FROM entities WHERE project_id IN (?, '') AND kind IN ('file', 'command', 'package')",
-        (project_id or "",),
+        f"SELECT id FROM entities WHERE project_id IN (?, '') AND kind IN ('file', 'command', 'package') "
+        f"AND ({' OR '.join(clauses)}) LIMIT 30",
+        params,
     ).fetchall()
-    found: list[int] = []
-    lowered = [t.lower() for t in terms]
-    for row in rows:
-        key = str(row["key"]).lower()
-        name = PurePosixPath(key).name if row["kind"] == "file" else key
-        if any(term in (name, key) or (len(term) >= 5 and term in key) for term in lowered):
-            found.append(int(row["id"]))
-    return found[:30]
+    return [int(row[0]) for row in rows]
 
 
 def graph_candidates_sql(
@@ -245,24 +250,30 @@ def graph_candidates_sql(
         f"WHERE a IN ({placeholders}) OR b IN ({placeholders}) GROUP BY other ORDER BY w DESC LIMIT 20",
         (*seeds, *seeds, *seeds),
     ).fetchall()
-    weights = {seed: 1.0 for seed in seeds}
+    weights = dict.fromkeys(seeds, 1.0)
     for row in neighbours:
         weights.setdefault(int(row["other"]), float(row["w"]) * 0.5)
     return owners_for_entities(conn, weights, limit)
 
 
+LINKS_PER_ENTITY = 50
+
+
 def owners_for_entities(conn: sqlite3.Connection, weights: dict[int, float], limit: int) -> list[Owner]:
-    if not weights:
-        return []
-    ids = list(weights)
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        f"SELECT owner_type, owner_id, entity_id FROM links WHERE entity_id IN ({placeholders})", ids
-    ).fetchall()
+    """Rank owners by linked entity weight. Frequent "hub" entities (e.g. a test command used in every
+    turn) are down-weighted like IDF, and only their most recent links are read."""
     scores: dict[Owner, float] = {}
-    for row in rows:
-        owner = (row["owner_type"], int(row["owner_id"]))
-        scores[owner] = scores.get(owner, 0.0) + weights[int(row["entity_id"])]
+    for entity, weight in weights.items():
+        degree = conn.execute("SELECT COUNT(*) FROM links WHERE entity_id = ?", (entity,)).fetchone()[0]
+        if not degree:
+            continue
+        adjusted = weight / (1.0 + math.log1p(degree))
+        for row in conn.execute(
+            "SELECT owner_type, owner_id FROM links WHERE entity_id = ? ORDER BY owner_id DESC LIMIT ?",
+            (entity, LINKS_PER_ENTITY),
+        ):
+            owner = (row["owner_type"], int(row["owner_id"]))
+            scores[owner] = scores.get(owner, 0.0) + adjusted
     ranked = sorted(scores, key=lambda o: (scores[o], o[1]), reverse=True)
     return ranked[:limit]
 

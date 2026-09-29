@@ -618,6 +618,11 @@ def _on_compact(conn, config, event, project, project_id, session_id, event_id, 
     turn = _open_turn(conn, session_id)
     if turn is not None:
         conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], event_id))
+    if with_context:
+        # Harnesses that accept context before compaction (OpenCode) keep the essentials in the summary.
+        block = inject.compact(conn, config, session_id)
+        if block:
+            response.context = block.text
 
 
 def _on_session_end(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):

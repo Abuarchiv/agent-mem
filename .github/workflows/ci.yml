@@ -46,6 +46,20 @@ jobs:
           agent-mem status --json
           agent-mem doctor || true
 
+  opencode-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Type-check the OpenCode plugin against its SDK
+        working-directory: plugins/opencode
+        run: |
+          npm install --no-save --no-audit --no-fund @opencode-ai/plugin@^1.18 typescript@^7 @types/node@^24
+          npx tsc --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext \
+            --skipLibCheck --types node agent-mem.ts
+
   audit:
     runs-on: ubuntu-latest
     steps:

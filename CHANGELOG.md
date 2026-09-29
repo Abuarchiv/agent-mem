@@ -18,6 +18,7 @@ Complete rewrite in Python. V1 (TypeScript) remains available under the tag `v1.
 - CLI: `status`, `doctor`, `search`, `show`, `rules`, `lessons`, `pause`, `resume`, `import` (Claude, Codex, V1, claude-mem, agentmemory), `export`, `purge`, `backup`, `restore`, `consolidate`, `models`, `setup`, `eval`.
 - Plugins and marketplaces for Claude Code (`.claude-plugin`), Codex (`.agents/plugins`), Copilot CLI (`.github/plugin`) and an OpenCode plugin.
 - Supports Python 3.11–3.14; built on the MCP Python SDK 2.x.
+- Scales to large histories: entity matching in SQL, capped and IDF-weighted hub entities (prompt hook ~100 ms with 20,000 stored turns).
 - Optional, off by default: session summaries through the user's own harness.
 
 ### Removed

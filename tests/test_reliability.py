@@ -168,3 +168,21 @@ def test_purge_removes_data_everywhere(config: Config, project: Path, conn, monk
     assert spool.count(config.spool_dir) == 0
     for backup in config.backup_dir.glob("*.db"):
         assert b"zebra-unique-marker" not in backup.read_bytes()
+
+
+def test_upgrade_from_schema_v1_keeps_data_and_backs_up(config: Config):
+    config.data_dir.mkdir(parents=True)
+    legacy = sqlite3.connect(config.db_path)
+    for statement in db._split_sql(db.MIGRATIONS[0][1]):
+        legacy.execute(statement)
+    legacy.execute("INSERT INTO meta(key, value) VALUES ('probe', 'kept')")
+    legacy.execute("PRAGMA user_version = 1")
+    legacy.commit()
+    legacy.close()
+    conn = db.connect(config)
+    assert db.user_version(conn) == db.SCHEMA_VERSION >= 2
+    assert db.get_meta(conn, "probe") == "kept"
+    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert "links_entity_owner" in indexes and "links_entity" not in indexes
+    assert list(config.backup_dir.glob("*pre-migration-v1*.db"))
+    conn.close()

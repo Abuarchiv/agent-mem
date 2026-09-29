@@ -149,3 +149,13 @@ def test_is_within_handles_prefixes_and_case(tmp_path):
     assert not identity.is_within(tmp_path / "repo-other", root)
     if os.name == "nt":
         assert identity.is_within(str(root / "sub").upper(), root)
+
+
+def test_pre_compaction_context_for_opencode(conn, config, project):
+    from agent_mem import hook
+
+    oc = Driver(conn, config, project, harness="opencode")
+    oc.prompt("o1", "Port the scheduler to asyncio")
+    oc.edit("o1", "scheduler.py")
+    output = hook.run("opencode", "session.compacting", json.dumps({"sessionID": "o1", "cwd": str(project)}), config)
+    assert "Port the scheduler to asyncio" in json.loads(output)["context"]
