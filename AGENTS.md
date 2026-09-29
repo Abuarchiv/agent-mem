@@ -6,7 +6,7 @@ Agent Mem is a Python package (`src/agent_mem`) with plugins for each supported 
 
 Agent Mem captures harness hooks (Claude Code, Codex, Copilot CLI, OpenCode) into one local SQLite database, learns deterministically (activation, feedback, recipes, rules, graph, consolidation) and serves memory through injected context and a stdio MCP server.
 
-- No daemon, no HTTP server, no open ports.
+- No daemon, no HTTP server, no open ports. `agent-mem view` writes a static page; it must stay offline (no network requests, CSP by script hash).
 - No generative model calls, with exactly one opt-in exception: `summarize.enabled` runs the user's own harness (`claude -p` / `codex exec`) once per finished session, with `AGENT_MEM_INTERNAL=1` so the child session is not captured.
 - Agent Mem itself only goes online for the optional embedding model download.
 
@@ -27,6 +27,7 @@ Agent Mem captures harness hooks (Claude Code, Codex, Copilot CLI, OpenCode) int
 - Events have one write path: `capture.apply` (live hooks, spool replay, transcript imports); keep it idempotent (dedupe keys). Memories are written only through `store.add_memory`, which cleans title and body.
 - Schema changes go into a new numbered file in `src/agent_mem/schema/` and need a migration test.
 - Plugin manifests in `plugins/` must keep the package version (checked by tests).
+- `viewer/` is loaded by the CLI only. Its page escapes every stored string; `purge` must delete written pages.
 
 ## Development
 
