@@ -61,6 +61,12 @@ def _canonical(path: Path) -> str:
     return text.lower() if os.name == "nt" else text
 
 
+def find(conn: sqlite3.Connection, cwd: str | Path) -> Project | None:
+    """Known project for ``cwd`` without registering a new one."""
+    path = Path(cwd)
+    return _lookup(conn, path) if path.is_absolute() else None
+
+
 def _lookup(conn: sqlite3.Connection, cwd: Path) -> Project | None:
     candidates = [_canonical(cwd), *(_canonical(parent) for parent in cwd.parents)]
     placeholders = ",".join("?" for _ in candidates)
@@ -109,6 +115,13 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None) -> Project | None:
         (_canonical(root), project_id),
     )
     return Project(id=project_id, root=root, name=name, remote=remote)
+
+
+def is_within(path: str | Path, root: str | Path) -> bool:
+    """True if ``path`` is ``root`` or inside it (case-insensitive on Windows, symlinks resolved)."""
+    candidate = _canonical(Path(path))
+    base = _canonical(Path(root)).rstrip("/\\")
+    return candidate == base or candidate.startswith(base + os.sep) or candidate.startswith(base + "/")
 
 
 def read_branch(root: Path) -> str | None:

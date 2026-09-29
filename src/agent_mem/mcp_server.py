@@ -6,9 +6,9 @@ import os
 import sqlite3
 from typing import Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-from . import db, identity, learn, semantic, store, views
+from . import __version__, db, identity, semantic, store, views
 from .config import Config, load
 
 INSTRUCTIONS = (
@@ -31,9 +31,9 @@ class State:
         return self.project.id if self.project else None
 
 
-def build(config: Config | None = None) -> FastMCP:
+def build(config: Config | None = None) -> MCPServer:
     state = State(config or load())
-    server = FastMCP("agent-mem", instructions=INSTRUCTIONS, log_level="WARNING")
+    server = MCPServer("agent-mem", instructions=INSTRUCTIONS, version=__version__, log_level="WARNING")
 
     @server.tool()
     def mem_search(query: str, limit: int = 8, all_projects: bool = False) -> str:
@@ -110,8 +110,8 @@ def main() -> int:
         server = build()
     except (sqlite3.Error, db.SchemaTooNewError) as error:
         raise SystemExit(f"agent-mem mcp: database unavailable: {error}") from error
-    server.run()
+    server.run(transport="stdio")
     return 0
 
 
-__all__ = ["build", "learn", "main"]
+__all__ = ["build", "main"]

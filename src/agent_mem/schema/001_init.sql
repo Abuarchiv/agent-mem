@@ -1,4 +1,4 @@
--- Agent Mem v2 schema, version 1.
+-- Agent Mem database schema, version 1.
 -- Owners are addressed as (owner_type, owner_id): owner_type 't' = turn, 'm' = memory.
 
 CREATE TABLE meta (
@@ -83,7 +83,7 @@ CREATE TABLE memories (
   )),
   title TEXT NOT NULL,
   body TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('hook', 'agent', 'native', 'harness_summary', 'import', 'user')),
+  source TEXT NOT NULL CHECK (source IN ('hook', 'agent', 'native', 'harness_summary', 'import')),
   trust TEXT NOT NULL,
   importance REAL NOT NULL DEFAULT 0.5,
   turn_id INTEGER REFERENCES turns(id) ON DELETE SET NULL,
@@ -116,7 +116,7 @@ CREATE TABLE vectors (
 CREATE TABLE entities (
   id INTEGER PRIMARY KEY,
   project_id TEXT,
-  kind TEXT NOT NULL CHECK (kind IN ('file', 'command', 'error', 'package', 'symbol')),
+  kind TEXT NOT NULL CHECK (kind IN ('file', 'command', 'error', 'package')),
   key TEXT NOT NULL,
   UNIQUE (project_id, kind, key)
 );
@@ -127,7 +127,7 @@ CREATE TABLE links (
   entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
   PRIMARY KEY (owner_type, owner_id, entity_id)
 );
-CREATE INDEX links_entity ON links(entity_id);
+CREATE INDEX links_entity_owner ON links(entity_id, owner_id);
 
 CREATE TABLE edges (
   a INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,

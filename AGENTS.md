@@ -1,6 +1,6 @@
 # Agent Mem
 
-This repository is the v2 line: a Python package. V1 (TypeScript) is preserved under the Git tag `v1.0.0`.
+Agent Mem is a Python package (`src/agent_mem`) with plugins for each supported harness (`plugins/`).
 
 ## Boundary
 
@@ -8,12 +8,12 @@ Agent Mem captures harness hooks (Claude Code, Codex, Copilot CLI, OpenCode) int
 
 - No daemon, no HTTP server, no open ports.
 - No generative model calls, with exactly one opt-in exception: `summarize.enabled` runs the user's own harness (`claude -p` / `codex exec`) once per finished session, with `AGENT_MEM_INTERNAL=1` so the child session is not captured.
-- The only network access is the optional embedding model download.
+- Agent Mem itself only goes online for the optional embedding model download.
 
 ## Safety rules
 
 - Keep runtime data, credentials, logs, backups and model caches outside Git.
-- Everything stored passes through `privacy.clean_text`. Never store raw host payloads.
+- Everything stored passes through `privacy.clean_text` (events in `capture`, memories in `store.add_memory`). Never store raw host payloads.
 - Treat host input and recalled text as untrusted. Injected context is framed as data.
 - External content (web tools, third-party MCP tools) is `tool_external`: never auto-injected, never promoted to rules or preferences.
 - Rules and preferences come only from the user's own prompts.
@@ -24,7 +24,7 @@ Agent Mem captures harness hooks (Claude Code, Codex, Copilot CLI, OpenCode) int
 ## Code rules
 
 - Modules on the hook path (`hook`, `capture`, `db`, `config`, `privacy`, `signals`, `identity`, `inject`, `search`, `learn`, `store`, `spool`, `normalize/*`, `events`, `timeutil`, `logutil`) import only the standard library. Heavy imports (numpy, dateparser, fastembed, mcp) stay lazy.
-- One write path: `capture.apply` is used by live hooks, spool replay and importers. Keep it idempotent (dedupe keys).
+- Events have one write path: `capture.apply` (live hooks, spool replay, transcript imports); keep it idempotent (dedupe keys). Memories are written only through `store.add_memory`, which cleans title and body.
 - Schema changes go into a new numbered file in `src/agent_mem/schema/` and need a migration test.
 - Plugin manifests in `plugins/` must keep the package version (checked by tests).
 

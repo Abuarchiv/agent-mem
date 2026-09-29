@@ -6,9 +6,12 @@
   "plugins": [
     {
       "name": "agent-mem",
-      "source": "./plugins/claude",
       "description": "Local, self-learning memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No LLM calls.",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      }
     }
   ]
 }

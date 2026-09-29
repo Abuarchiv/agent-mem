@@ -117,3 +117,68 @@ def test_own_tools_are_recognized():
 def test_event_roundtrip():
     event = normalize("claude", {"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "hi"})
     assert Event.from_dict(event.to_dict()) == event
+
+
+def test_codex_payloads_from_current_schema():
+    """Field names follow codex-rs/hooks/src/schema.rs (Stop carries last_assistant_message, SessionEnd a reason)."""
+    base = {"session_id": "cx", "turn_id": "t1", "cwd": "/r", "model": "gpt", "permission_mode": "default"}
+    stop = normalize(
+        "codex",
+        {**base, "hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "All tests pass."},
+    )
+    assert stop.kind == "stop" and stop.answer == "All tests pass."
+    end = normalize("codex", {"session_id": "cx", "cwd": "/r", "hook_event_name": "SessionEnd", "reason": "exit"})
+    assert end.kind == "session_end" and end.source == "exit"
+    pre = normalize(
+        "codex",
+        {
+            **base,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "shell",
+            "tool_input": {"command": ["bash", "-lc", "npm i"]},
+            "tool_use_id": "u1",
+        },
+    )
+    assert pre.kind == "pre_tool" and pre.tool_use_id == "u1"
+    sub = normalize("codex", {**base, "hook_event_name": "SubagentStop", "last_assistant_message": "done"})
+    assert sub.kind == "subagent_stop"
+
+
+def test_claude_post_tool_use_failure_reads_tool_error():
+    event = normalize(
+        "claude",
+        {
+            "hook_event_name": "PostToolUseFailure",
+            "session_id": "s",
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest"},
+            "tool_use_id": "u9",
+            "tool_error": "ModuleNotFoundError: No module named 'x'",
+        },
+    )
+    assert event.tool_failed and event.error == "ModuleNotFoundError: No module named 'x'"
+
+
+def test_subagent_start_is_a_briefing_per_agent():
+    event = normalize(
+        "claude",
+        {"hook_event_name": "SubagentStart", "session_id": "s", "agent_id": "a1", "agent_type": "Explore"},
+    )
+    assert event.kind == "session_start" and event.source == "subagent" and event.native_event_id == "a1"
+
+
+def test_copilot_snake_case_payloads():
+    event = normalize(
+        "copilot",
+        {
+            "hook_event_name": "postToolUseFailure",
+            "session_id": "p",
+            "tool_name": "bash",
+            "tool_input": {"command": "npm test"},
+            "error": "2 failed",
+        },
+        "postToolUseFailure",
+    )
+    assert event.tool_input == {"command": "npm test"} and event.tool_failed and event.error == "2 failed"
+    sub = normalize("copilot", {"sessionId": "p", "agentName": "explore"}, "subagentStart")
+    assert sub.kind == "session_start" and sub.source == "subagent"

@@ -34,10 +34,10 @@
     { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search components…" },
   ];
   const MEMORY_KINDS = ["decision", "fact", "preference", "correction", "dead_end", "lesson", "summary", "native_note"];
-  const ENTITY_KINDS = ["file", "command", "error", "package", "symbol"];
+  const ENTITY_KINDS = ["file", "command", "error", "package"];
   // Error signatures are stored as "sig:<hash>"; show them as short error ids.
   const entityLabel = (node) => (node.kind === "error" && node.key.startsWith("sig:") ? `error ${node.key.slice(4, 12)}` : node.key);
-  const ENTITY_COLOR = { file: "--blue", command: "--green", error: "--coral", package: "--yellow", symbol: "--lilac" };
+  const ENTITY_COLOR = { file: "--blue", command: "--green", error: "--coral", package: "--yellow" };
 
   const root = document.getElementById("root");
   let data = null;

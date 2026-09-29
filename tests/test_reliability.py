@@ -168,3 +168,39 @@ def test_purge_removes_data_everywhere(config: Config, project: Path, conn, monk
     assert spool.count(config.spool_dir) == 0
     for backup in config.backup_dir.glob("*.db"):
         assert b"zebra-unique-marker" not in backup.read_bytes()
+
+
+def test_upgrade_migration_keeps_data_and_backs_up(config: Config, monkeypatch: pytest.MonkeyPatch):
+    conn = db.connect(config)
+    db.set_meta(conn, "probe", "kept")
+    conn.close()
+    upgrade = (db.SCHEMA_VERSION + 1, "CREATE INDEX upgrade_probe ON meta(value);")
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, upgrade])
+    monkeypatch.setattr(db, "SCHEMA_VERSION", upgrade[0])
+    conn = db.connect(config)
+    assert db.user_version(conn) == upgrade[0]
+    assert db.get_meta(conn, "probe") == "kept"
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'upgrade_probe'").fetchone()
+    assert list(config.backup_dir.glob(f"*pre-migration-v{upgrade[0] - 1}*.db"))
+    conn.close()
+
+
+def test_subagent_start_gets_context(config: Config, project: Path, conn):
+    hook.run("claude", None, _prompt_payload(project, "s", "Design the retry policy for webhooks"), config)
+    hook.run(
+        "claude",
+        None,
+        json.dumps(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "s",
+                "cwd": str(project),
+                "last_assistant_message": "Exponential backoff, max 5 retries.",
+            }
+        ),
+        config,
+    )
+    payload = {"hook_event_name": "SubagentStart", "session_id": "s2", "cwd": str(project), "agent_id": "a1"}
+    data = json.loads(hook.run("codex", None, json.dumps(payload), config))
+    assert data["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
+    assert "retry policy" in data["hookSpecificOutput"]["additionalContext"]

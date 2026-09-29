@@ -13,7 +13,7 @@ Agent Mem records what your agents do through their hooks, learns from it, and g
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optionally a hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
 | Turn ends | The turn (request, actions, result) is stored and indexed. |
-| Context compaction | The session goal, decisions and open problems are re-injected. |
+| Context compaction | The session goal, decisions and open problems are kept: re-injected after compaction (Claude Code, Codex) or added to the compaction prompt (OpenCode). |
 
 All harnesses write into the same memory, so what Claude Code learned is available to Codex and vice versa. Notes that Claude Code and Codex write themselves (auto memory / memories) are read in as well.
 
@@ -31,7 +31,7 @@ Search combines SQLite FTS5, optional multilingual E5 embeddings, and the graph,
 
 ## Install
 
-Requirements: macOS, Linux or Windows. [uv](https://docs.astral.sh/uv/) installs a suitable Python automatically.
+Requirements: macOS, Linux or Windows and Python 3.11–3.14. [uv](https://docs.astral.sh/uv/) installs a suitable Python automatically. On Intel Macs semantic search is not available (ONNX Runtime ships no wheels there); full-text and graph search work.
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh
@@ -51,11 +51,18 @@ agent-mem setup claude     # Claude Code plugin (hooks + MCP)
 agent-mem setup codex      # Codex plugin or hooks.json + config.toml
 agent-mem setup copilot    # Copilot CLI plugin
 agent-mem setup opencode   # OpenCode plugin + MCP entry
-agent-mem models install   # optional: E5 model (~135 MB) for semantic search
+agent-mem models install   # optional: E5 model (~120 MB) for semantic search
 agent-mem doctor
 ```
 
 `agent-mem` must be on your `PATH` because the hooks call it.
+
+Harness notes:
+
+- **Codex** asks you to trust plugin hooks once (`/hooks`).
+- **Copilot CLI** currently ignores extra context returned after a successful tool call ([github/copilot-cli#2980](https://github.com/github/copilot-cli/issues/2980)); session start, subagent start, pre-tool and failure hints work.
+- **OpenCode**: run sessions serially per repository (upstream snapshot lock).
+- Subagents (Claude Code, Codex, Copilot CLI) receive the same short briefing as a new session.
 
 Bring in history from before the install:
 
@@ -64,7 +71,6 @@ agent-mem import claude            # ~/.claude/projects/*/*.jsonl
 agent-mem import codex             # ~/.codex/sessions/**/*.jsonl
 agent-mem import claude-mem ~/.claude-mem/claude-mem.db
 agent-mem import agentmemory export.json
-agent-mem import v1 "<old vault>.sqlite"
 ```
 
 If you used claude-mem or agentmemory, disable them afterwards; otherwise hooks run twice and context is injected twice.
@@ -78,9 +84,11 @@ agent-mem search "query" [--all-projects]      agent-mem show T12 M3
 agent-mem rules [list|enable|disable|delete] [ID]
 agent-mem lessons                               # suggested lines for AGENTS.md / CLAUDE.md
 agent-mem pause [--for 2h] | resume
-agent-mem export --json | purge --id|--project|--before|--all
+agent-mem export [--project DIR] [--output FILE]
+agent-mem purge --id ID | --project DIR | --before DATE | --all
 agent-mem backup | restore [--latest]
 agent-mem consolidate | index | eval <longmemeval.json>
+agent-mem setup <harness> | models [install] | paths
 ```
 
 MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`.
@@ -104,17 +112,17 @@ To browse the data, run `agent-mem view`. It writes one self-contained HTML page
 }
 ```
 
-Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
+`exclude_globs` replaces the default list (`.env*`, keys, certificates, `secrets/**`, …), so keep the defaults you still want. Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
 
 `summarize.enabled` is the only setting that causes generative model calls: once per finished session, in the background, through the harness you already use (`claude -p` or `codex exec`). It is off by default.
 
 ## Privacy and security
 
-- Everything stays local. There is no telemetry. The only network access is the optional model download.
+- Everything stays local. There is no telemetry. Agent Mem itself only goes online to download the optional embedding model; the optional session summaries run through your harness and its provider.
 - Secrets are redacted before storage (API keys, tokens, private keys, passwords in assignments and URLs). `<private>…</private>` is never stored. Excluded files are recorded by path only.
 - Recalled text is framed as data, not instructions. Content from web tools and third-party MCP servers is never injected automatically and never becomes a rule or preference.
 - The database is **not encrypted at rest**. The data directory is created with owner-only permissions on macOS and Linux.
-- `purge` removes data from the database, the backups and the spool, and deletes the page written by `agent-mem view`.
+- `purge` deletes the matching data from the database and the spool, replaces all backups with a fresh one and deletes the page written by `agent-mem view`.
 - `agent-mem view` writes a copy of recent data to `view/agent-mem.html` in the data directory (owner-only permissions). With `--output` you choose another location and are responsible for it.
 
 See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -1,6 +1,6 @@
 [project]
 name = "agent-mem"
-version = "2.0.0"
+version = "1.0.0"
 description = "Local, self-learning memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No LLM calls."
 readme = "README.md"
 license = "MIT"
@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Abuarchiv" }]
 keywords = ["memory", "agents", "mcp", "claude-code", "codex", "copilot", "opencode"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
@@ -17,20 +17,22 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development",
 ]
 # The hook path imports only the standard library. These dependencies are
 # loaded lazily by the MCP server, the indexer and the CLI.
 dependencies = [
-  "mcp>=1.9,<2",
-  "numpy>=1.26",
-  "dateparser>=1.2",
-  "filelock>=3.13",
+  "mcp>=2.2,<3",
+  "numpy>=2.0",
+  "dateparser>=1.2.1",
+  "filelock>=3.16",
 ]
 
 [project.optional-dependencies]
-# Semantic search with the multilingual E5 model (ONNX, no PyTorch).
-semantic = ["fastembed>=0.4"]
+# Semantic search with the multilingual E5 model (ONNX, no PyTorch). ONNX Runtime publishes no
+# wheels for Intel Macs; there the extra installs nothing and search stays lexical + graph.
+semantic = ["fastembed>=0.8; sys_platform != 'darwin' or platform_machine != 'x86_64'"]
 
 [project.scripts]
 agent-mem = "agent_mem.cli:main"
@@ -40,7 +42,7 @@ Homepage = "https://github.com/Abuarchiv/agent-mem"
 Issues = "https://github.com/Abuarchiv/agent-mem/issues"
 
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.32"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -50,13 +52,13 @@ packages = ["src/agent_mem"]
 "plugins" = "agent_mem/plugins"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_mem", "tests", "plugins", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+include = ["src/agent_mem", "tests", "plugins", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
 
 [dependency-groups]
 dev = [
-  "pytest>=8",
-  "ruff>=0.6",
-  "pyright>=1.1.380",
+  "pytest>=9.1",
+  "ruff>=0.16",
+  "pyright>=1.1.414",
 ]
 
 [tool.pytest.ini_options]

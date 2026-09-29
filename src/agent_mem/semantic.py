@@ -15,7 +15,6 @@ import numpy as np
 
 from . import search, timeutil
 from .config import Config
-from .signals import first_line
 
 Owner = tuple[str, int]
 
@@ -28,6 +27,13 @@ class Embedder(Protocol):
     def query(self, text: str) -> np.ndarray: ...
 
 
+# Models fastembed does not ship: (Hugging Face repository, ONNX file, dimension).
+# The int8-quantized export keeps the download small (~120 MB) and runs fast on CPU.
+CUSTOM_MODELS = {
+    "intfloat/multilingual-e5-small": ("Xenova/multilingual-e5-small", "onnx/model_quantized.onnx", 384),
+}
+
+
 class FastEmbedEmbedder:
     """multilingual-e5-small via fastembed (ONNX Runtime, no PyTorch)."""
 
@@ -35,31 +41,31 @@ class FastEmbedEmbedder:
         from fastembed import TextEmbedding  # lazy: optional dependency
 
         self.model = config.semantic.model
+        self._register_if_needed(TextEmbedding)
         kwargs: dict[str, Any] = {"model_name": self.model, "cache_dir": str(config.model_dir)}
         if not allow_download:
             kwargs["local_files_only"] = True
-        try:
-            self._impl = TextEmbedding(**kwargs)
-        except TypeError:
-            kwargs.pop("local_files_only", None)
-            self._impl = TextEmbedding(**kwargs)
-        except ValueError:
-            self._register_custom()
-            self._impl = TextEmbedding(**kwargs)
+        self._impl = TextEmbedding(**kwargs)
         self.batch_size = config.semantic.batch_size
 
-    def _register_custom(self) -> None:
-        from fastembed import TextEmbedding
+    def _register_if_needed(self, text_embedding: Any) -> None:
+        if self.model not in CUSTOM_MODELS:
+            return
+        if any(m["model"] == self.model for m in text_embedding.list_supported_models()):
+            return
         from fastembed.common.model_description import ModelSource, PoolingType
 
-        TextEmbedding.add_custom_model(
-            model=self.model,
-            pooling=PoolingType.MEAN,
-            normalization=True,
-            sources=ModelSource(hf=self.model),
-            dim=384,
-            model_file="onnx/model.onnx",
-        )
+        repository, model_file, dim = CUSTOM_MODELS[self.model]
+        with contextlib.suppress(ValueError):  # already registered in this process
+            text_embedding.add_custom_model(
+                model=self.model,
+                pooling=PoolingType.MEAN,
+                normalization=True,
+                sources=ModelSource(hf=repository),
+                dim=dim,
+                model_file=model_file,
+                size_in_gb=0.12,
+            )
 
     def passages(self, texts: list[str]) -> np.ndarray:
         vectors = list(self._impl.embed([f"passage: {t}" for t in texts], batch_size=self.batch_size))
@@ -81,19 +87,28 @@ def model_cached(config: Config) -> bool:
     return config.model_dir.is_dir() and any(name in path.name for path in config.model_dir.iterdir())
 
 
-def load_embedder(config: Config, *, allow_download: bool = False) -> Embedder | None:
+def load_embedder_verbose(config: Config, *, allow_download: bool = False) -> tuple[Embedder | None, str | None]:
+    """Return the embedder or a human-readable reason why semantic search is unavailable."""
     if not config.semantic.enabled:
-        return None
+        return None, "semantic search is disabled in config.json"
+    try:
+        import fastembed  # noqa: F401
+    except ImportError:
+        return None, "the optional dependency is missing: install `agent-mem[semantic]`"
     if not allow_download and not model_cached(config):
-        return None
+        return None, "the model is not downloaded yet: run `agent-mem models install`"
     with contextlib.suppress(Exception):
         from loguru import logger
 
         logger.disable("fastembed")
     try:
-        return FastEmbedEmbedder(config, allow_download=allow_download)
-    except Exception:  # missing extra, unsupported platform, model not downloaded
-        return None
+        return FastEmbedEmbedder(config, allow_download=allow_download), None
+    except Exception as error:  # network, unsupported platform, corrupt cache
+        return None, f"loading {config.semantic.model} failed: {type(error).__name__}: {str(error)[:200]}"
+
+
+def load_embedder(config: Config, *, allow_download: bool = False) -> Embedder | None:
+    return load_embedder_verbose(config, allow_download=allow_download)[0]
 
 
 def to_blob(vector: np.ndarray) -> bytes:
@@ -355,7 +370,3 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
 
 def strip_time_words(text: str) -> str:
     return _TIME_HINT.sub(" ", text).strip() or text
-
-
-def describe(hit: search.Hit) -> str:
-    return first_line(hit.title or hit.text, 160)

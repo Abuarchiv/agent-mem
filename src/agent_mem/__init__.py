@@ -6,4 +6,4 @@ import only the standard library so that hooks start fast. Heavy dependencies
 (numpy, dateparser, fastembed, mcp) are imported lazily elsewhere.
 """
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"

@@ -35,6 +35,7 @@ SQLite (WAL) ── one file in the data directory
 | `indexer.py` | Background work and recovery |
 | `db.py`, `spool.py` | Migrations, backups, integrity; write-behind spool |
 | `mcp_server.py`, `cli.py`, `commands.py`, `health.py`, `views.py` | Interfaces |
+| `viewer/` | `agent-mem view`: one self-contained, read-only HTML page (no server, network blocked by CSP) |
 | `importers.py`, `evaluate.py`, `summarize.py` | Imports, LongMemEval runner, optional summaries |
 
 ## Data model

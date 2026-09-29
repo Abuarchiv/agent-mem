@@ -7,7 +7,7 @@ import json
 import sqlite3
 from pathlib import PurePosixPath
 
-from . import learn, timeutil
+from . import learn, privacy, timeutil
 
 MAX_KEY_CHARS = 12_000
 
@@ -129,7 +129,12 @@ def add_memory(
     dedupe: str | None = None,
     entity_ids: list[int] | None = None,
 ) -> int | None:
-    """Insert a memory (append-only). Returns the id, or None when the dedupe key already exists."""
+    """Insert a memory (append-only). Returns the id, or None when the dedupe key already exists.
+
+    Title and body are always cleaned here (redaction, private sections, size), whatever the source.
+    """
+    title = privacy.clean_text(title, 300)
+    body = privacy.clean_text(body, 8000)
     now = timeutil.iso()
     key = dedupe or hashlib.sha256(f"{project_id}|{kind}|{title}|{body}".encode()).hexdigest()
     cursor = conn.execute(

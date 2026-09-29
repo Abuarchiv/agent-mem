@@ -116,7 +116,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
             "agent-mem on PATH",
             on_path is not None,
             on_path or "not found",
-            "Install with `uv tool install agent-mem` so hooks can call it.",
+            'Install with the install script or `uv tool install "agent-mem[semantic] @ git+https://github.com/Abuarchiv/agent-mem"` so hooks can call it.',
         )
     )
     db.ensure_private_dir(config.data_dir)
@@ -164,19 +164,15 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
             checks.append(
                 Check("full-text search (FTS5 trigram)", False, str(error), "Use a Python with SQLite ≥ 3.34.")
             )
-        semantic_state = db.get_meta(conn, "semantic")
-        try:
-            import fastembed  # noqa: F401
+        from . import semantic
 
-            installed = True
-        except ImportError:
-            installed = False
+        embedder, reason = semantic.load_embedder_verbose(config)
         checks.append(
             Check(
                 "semantic search",
-                installed and semantic_state not in (None, "unavailable"),
-                f"fastembed {'installed' if installed else 'missing'}, model: {semantic_state or 'not loaded yet'}",
-                "Install `agent-mem[semantic]`; the model downloads on the next indexer run. Lexical search works without it.",
+                embedder is not None,
+                f"model {embedder.model} ready" if embedder else str(reason),
+                "Run `agent-mem models install`. Lexical search works without it.",
                 warn_only=True,
             )
         )

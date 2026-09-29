@@ -155,7 +155,6 @@ def cmd_import(ns: argparse.Namespace, config: Config) -> int:
                 print(f"import {ns.source} needs a path", file=sys.stderr)
                 return 2
             function = {
-                "v1": importers.import_v1,
                 "claude-mem": importers.import_claude_mem,
                 "agentmemory": importers.import_agentmemory,
             }[ns.source]
@@ -256,9 +255,11 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM entities WHERE project_id = ?", (project.id,))
                 conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
-            root = str(project.root)
             removed = spool.purge_matching(
-                config.spool_dir, lambda r: str((r.get("event") or {}).get("cwd") or "").startswith(root)
+                config.spool_dir,
+                lambda r: (
+                    bool((r.get("event") or {}).get("cwd")) and identity.is_within(str(r["event"]["cwd"]), project.root)
+                ),
             )
             print(f"Deleted project {project.name} ({len(owners)} items, {removed} spooled events).")
         else:
@@ -275,7 +276,10 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
                 conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
-            print(f"Deleted {len(owners)} items before {ns.before}.")
+            removed = spool.purge_matching(
+                config.spool_dir, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp
+            )
+            print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
         conn.execute("VACUUM")
         db.rebuild_backups(conn, config)
         with db.transaction(conn):
@@ -368,12 +372,9 @@ def cmd_lessons(ns: argparse.Namespace, config: Config) -> int:
 def cmd_models(ns: argparse.Namespace, config: Config) -> int:
     from . import semantic
 
-    embedder = semantic.load_embedder(config, allow_download=ns.action == "install")
+    embedder, reason = semantic.load_embedder_verbose(config, allow_download=ns.action == "install")
     if embedder is None:
-        print(
-            "Semantic search unavailable: install `agent-mem[semantic]` and run `agent-mem models install`. "
-            "Lexical search keeps working."
-        )
+        print(f"Semantic search unavailable: {reason}. Lexical search keeps working.")
         return 1 if ns.action == "install" else 0
     print(f"Model ready: {embedder.model} (cache {config.model_dir}).")
     return 0
@@ -383,7 +384,8 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
     from . import viewer
 
     with _conn(config) as conn:
-        project = _project(conn, ns.project) if ns.project else None
+        # Look the project up only; viewing must not register a directory as a new project.
+        project = identity.find(conn, os.path.abspath(ns.project)) if ns.project else None
         if ns.project and project is None:
             print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
             return 2
@@ -415,18 +417,19 @@ SETUP = {
   ~/.claude/settings.json and run `claude mcp add agent-mem -- agent-mem mcp`.""",
     "codex": """Codex CLI
   1. codex plugin marketplace add Abuarchiv/agent-mem
-  2. codex plugin add agent-mem
+  2. codex plugin add agent-mem@agent-mem
   3. Start codex and trust the hooks once with /hooks (Codex requires this review).
   Manual alternative: merge {plugins}/codex/hooks.json into ~/.codex/hooks.json and add to ~/.codex/config.toml:
     [mcp_servers.agent-mem]
     command = "agent-mem"
     args = ["mcp"]""",
     "copilot": """GitHub Copilot CLI
-  1. Inside copilot: /plugin install {plugins}/copilot   (local path of the bundled plugin)
-  Manual alternative: copy {plugins}/copilot/hooks.json to ~/.copilot/hooks/agent-mem.json and add the
+  1. Inside copilot: /plugin marketplace add Abuarchiv/agent-mem, then /plugin install agent-mem@agent-mem
+     (or install the bundled copy by path: /plugin install {plugins}/copilot)
+  Manual alternative: copy {plugins}/copilot/hooks/hooks.json to ~/.copilot/hooks/agent-mem.json and add the
   MCP server with /mcp add (command: agent-mem, args: mcp).""",
     "opencode": """OpenCode
-  1. agent-mem setup opencode --write      (copies the plugin to ~/.config/opencode/plugin/agent-mem.ts)
+  1. agent-mem setup opencode --write      (copies the plugin to ~/.config/opencode/plugins/agent-mem.ts)
   2. Add to ~/.config/opencode/opencode.json:
      "mcp": {{ "agent-mem": {{ "type": "local", "command": ["agent-mem", "mcp"], "enabled": true }} }}
   Run OpenCode sessions serially per repository (upstream snapshot lock).""",
@@ -439,7 +442,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
     if ns.harness == "opencode" and ns.write:
         import shutil
 
-        target_dir = Path.home() / ".config" / "opencode" / "plugin"
+        target_dir = Path.home() / ".config" / "opencode" / "plugins"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "agent-mem.ts"
         shutil.copyfile(folder / "opencode" / "agent-mem.ts", target)

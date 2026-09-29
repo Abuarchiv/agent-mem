@@ -39,12 +39,13 @@ def recover_if_corrupt(config: Config) -> bool:
     """Returns True if a corrupt database was replaced by the latest backup."""
     if not config.db_path.exists():
         return False
+    probe = sqlite3.connect(config.db_path)
     try:
-        probe = sqlite3.connect(config.db_path)
         ok = probe.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-        probe.close()
     except sqlite3.DatabaseError:
         ok = False
+    finally:
+        probe.close()  # an open handle would block the rename on Windows
     if ok:
         return False
     stamp = timeutil.iso().replace(":", "")
@@ -131,10 +132,11 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         embedder = semantic.load_embedder(config, allow_download=allow_download)
         with db.transaction(conn):
             db.set_meta(conn, "semantic", embedder.model if embedder else "unavailable")
-            if embedder is None:
-                db.record_health(conn, "semantic", "embedding model unavailable (lexical search only)")
-            else:
+            if embedder is not None:
                 db.record_health(conn, "semantic")
+            elif semantic.model_cached(config):
+                # The model is present but failed to load: a real problem worth reporting.
+                db.record_health(conn, "semantic", "embedding model failed to load (lexical search only)")
         if embedder is not None:
             stats["embedded"] = semantic.embed_pending(conn, embedder)
 

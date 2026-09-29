@@ -46,7 +46,7 @@ def _main(args: list[str]) -> int:
     p.add_argument("--for", dest="duration", help="e.g. 30m, 2h, 1d (default: until resume)")
     sub.add_parser("resume", help="resume capturing")
     p = sub.add_parser("import", help="import history")
-    p.add_argument("source", choices=["claude", "codex", "v1", "claude-mem", "agentmemory"])
+    p.add_argument("source", choices=["claude", "codex", "claude-mem", "agentmemory"])
     p.add_argument("path", nargs="?", type=Path)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("export", help="export memory as JSON")
@@ -80,7 +80,7 @@ def _main(args: list[str]) -> int:
     p = sub.add_parser("setup", help="show how to connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p.add_argument(
-        "--write", action="store_true", help="OpenCode only: copy the plugin into ~/.config/opencode/plugin/"
+        "--write", action="store_true", help="OpenCode only: copy the plugin into ~/.config/opencode/plugins/"
     )
     p = sub.add_parser("view", help="write a read-only HTML page of your memory and open it (no server)")
     p.add_argument("--project", help="only this project directory (default: all projects)")

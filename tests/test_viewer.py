@@ -8,7 +8,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from agent_mem import cli, viewer
+from agent_mem import cli, db, identity, viewer
 from agent_mem.config import Config
 from tests.conftest import Driver
 
@@ -97,6 +97,14 @@ def test_view_command_writes_a_private_page_and_purge_removes_it(
         assert stat.S_IMODE(page.parent.stat().st_mode) == 0o700
     assert cli.main([*base, "view", "--no-open", "--project", str(project)]) == 0
     assert cli.main([*base, "view", "--no-open", "--project", str(tmp_path / "nowhere")]) == 2
+    uncaptured = tmp_path / "uncaptured"
+    uncaptured.mkdir()
+    assert cli.main([*base, "view", "--no-open", "--project", str(uncaptured)]) == 2
+    conn = db.connect(config)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
+    finally:
+        conn.close()
     assert cli.main([*base, "purge", "--id", "T1", "--yes"]) == 0
     assert not viewer.view_dir(config).exists()
 
@@ -107,3 +115,11 @@ def test_view_assets_ship_with_the_package():
         assert folder.joinpath(name).is_file(), name
     for license_file in ("bricolage-grotesque-OFL.txt", "figtree-OFL.txt", "jetbrains-mono-OFL.txt"):
         assert "Open Font License" in folder.joinpath(f"fonts/{license_file}").read_text(encoding="utf-8")
+
+
+def test_is_within_compares_whole_path_segments(tmp_path: Path):
+    root = tmp_path / "proj"
+    (root / "src").mkdir(parents=True)
+    assert identity.is_within(root, root)
+    assert identity.is_within(str(root / "src"), root)
+    assert not identity.is_within(str(tmp_path / "proj2"), root)

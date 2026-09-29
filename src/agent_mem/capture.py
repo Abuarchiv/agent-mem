@@ -1,7 +1,9 @@
 """Apply a normalized event to the database: sessions, turns, signals, recipes, rules, context.
 
-This is the single write path for live hooks, spool replay and imports. It is
-idempotent per event (dedupe key) and standard library only.
+This is the write path for every event: live hooks, spool replay and transcript
+imports. It is idempotent per event (dedupe key) and standard library only.
+Memories from other sources (MCP, federation, summaries, memory imports) go
+through ``store.add_memory``, which cleans them the same way.
 """
 
 from __future__ import annotations
@@ -10,9 +12,9 @@ import hashlib
 import json
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from . import db, identity, inject, learn, privacy, signals, store, timeutil
 from .config import Config, env_flag, load_project_settings
@@ -28,7 +30,6 @@ class Response:
     deny: str | None = None
     wants_indexer: bool = False
     stored: bool = False
-    injected: list[tuple[str, int]] = field(default_factory=list)
 
 
 def dedupe_key(event: Event) -> str:
@@ -58,9 +59,8 @@ def capture_allowed(conn: sqlite3.Connection, config: Config, project: identity.
     if paused and (paused == "forever" or (timeutil.parse(paused) or timeutil.now()) > timeutil.now()):
         return False
     if project is not None:
-        root = str(project.root)
         for excluded in config.excluded_projects:
-            if root == excluded or root.startswith(excluded.rstrip("/\\") + "/"):
+            if identity.is_within(project.root, excluded):
                 return False
         if not load_project_settings(project.root).capture:
             return False
@@ -255,7 +255,6 @@ def _on_session_start(conn, config, event, project, project_id, session_id, even
         block = inject.session_start(conn, config, project_id, session_id, event.harness)
     if block:
         response.context = block.text
-        response.injected = block.owners
         learn.record_access(conn, block.owners, "injected", session_id)
 
 
@@ -320,7 +319,6 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
         block = inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness)
         if block:
             response.context = block.text
-            response.injected = block.owners
             learn.record_access(conn, block.owners, "injected", session_id)
 
 
@@ -411,7 +409,6 @@ def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id,
     block = inject.warnings_block(lines, config)
     if block:
         response.context = block.text
-        response.injected = block.owners
 
 
 def _on_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
@@ -456,7 +453,6 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
                 block = inject.recipe_hint(recipe, config)
                 if block:
                     response.context = block.text
-                    response.injected = block.owners
     elif not event.tool_failed and tool_signal.command_key:
         _resolve_failures(conn, project_id, session_id, turn_id, tool_signal.command_key, event.ts)
         if (
@@ -624,6 +620,11 @@ def _on_compact(conn, config, event, project, project_id, session_id, event_id, 
     turn = _open_turn(conn, session_id)
     if turn is not None:
         conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], event_id))
+    if with_context:
+        # Harnesses that accept context before compaction (OpenCode) keep the essentials in the summary.
+        block = inject.compact(conn, config, session_id)
+        if block:
+            response.context = block.text
 
 
 def _on_session_end(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
@@ -646,8 +647,3 @@ def close_stale_turns(conn: sqlite3.Connection, config: Config) -> int:
                 _close_turn(conn, int(turn["id"]), "unknown", turn["last_event_at"])
             closed += 1
     return closed
-
-
-def project_root_of(conn: sqlite3.Connection, project_id: str) -> Path | None:
-    row = conn.execute("SELECT root FROM projects WHERE id = ?", (project_id,)).fetchone()
-    return Path(row[0]) if row else None

@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from pathlib import Path
@@ -192,10 +191,3 @@ def link_neighbours(conn: sqlite3.Connection, model: str, since: str | None, thr
                 store.add_search_key(conn, other["owner_type"], int(other["owner_id"]), f"related: {row['title']}")
                 linked += 1
     return linked
-
-
-def dump_profile(conn: sqlite3.Connection, project_id: str) -> dict[str, list[str]]:
-    result: dict[str, list[str]] = {}
-    for row in conn.execute("SELECT key, value FROM profile WHERE project_id = ? ORDER BY count DESC", (project_id,)):
-        result.setdefault(row["key"], []).append(row["value"])
-    return json.loads(json.dumps(result))

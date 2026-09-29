@@ -12,6 +12,18 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -60,7 +72,31 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
     "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
       {
         "hooks": [
           {

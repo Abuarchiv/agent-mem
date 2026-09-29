@@ -12,6 +12,7 @@ from ..events import Event, PayloadError, exit_code_of, get, output_text, requir
 
 _KINDS = {
     "SessionStart": "session_start",
+    "SubagentStart": "session_start",
     "UserPromptSubmit": "prompt",
     "PreToolUse": "pre_tool",
     "PostToolUse": "tool",
@@ -36,7 +37,11 @@ def normalize(payload: dict[str, Any], event_name: str | None = None, harness: s
         cwd=text_of(get(payload, "cwd")),
         raw_kind=name,
     )
-    if kind == "session_start":
+    if name == "SubagentStart":
+        # Subagents get the same briefing as a new session; one event per subagent.
+        event.source = "subagent"
+        event.native_event_id = text_of(get(payload, "agent_id")) or None
+    elif kind == "session_start":
         event.source = text_of(get(payload, "source")) or "startup"
     elif kind == "prompt":
         prompt = get(payload, "prompt")
@@ -54,7 +59,7 @@ def normalize(payload: dict[str, Any], event_name: str | None = None, harness: s
             response = get(payload, "tool_response", "tool_output")
             event.tool_output = output_text(response)
             event.exit_code = exit_code_of(response, event.tool_output)
-            error = text_of(get(payload, "error"))
+            error = text_of(get(payload, "tool_error", "error"))
             if name == "PostToolUseFailure" or error:
                 event.tool_failed = True
                 event.error = error or event.tool_output
