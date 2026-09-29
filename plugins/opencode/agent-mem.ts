@@ -1,5 +1,5 @@
 // Agent Mem plugin for OpenCode (typed against @opencode-ai/plugin 1.18).
-// Install: `agent-mem setup opencode --write` (copies this file to ~/.config/opencode/plugin/)
+// Install: `agent-mem setup opencode --write` (copies this file to ~/.config/opencode/plugins/)
 // and add the MCP server shown by `agent-mem setup opencode` to opencode.json.
 //
 // Events are forwarded to `agent-mem hook opencode <event>` as JSON on stdin. Memory failures

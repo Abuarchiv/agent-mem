@@ -291,3 +291,12 @@ def test_eval_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     report = evaluate.longmemeval(dataset, semantic_search=False)
     assert report["overall"]["R@5"] == 1.0
+
+
+def test_imported_and_summarized_memories_are_redacted(conn, config: Config, tmp_path: Path):
+    secret = "gh" + "p_" + "A" * 36
+    export = tmp_path / "am.json"
+    export.write_text(json.dumps([{"id": "s1", "content": f"deploy token {secret} <private>hidden plan</private>"}]))
+    importers.import_agentmemory(conn, config, export)
+    body = conn.execute("SELECT body FROM memories").fetchone()[0]
+    assert secret not in body and "hidden plan" not in body

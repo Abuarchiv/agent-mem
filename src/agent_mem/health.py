@@ -116,7 +116,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
             "agent-mem on PATH",
             on_path is not None,
             on_path or "not found",
-            "Install with `uv tool install agent-mem` so hooks can call it.",
+            'Install with the install script or `uv tool install "agent-mem[semantic] @ git+https://github.com/Abuarchiv/agent-mem"` so hooks can call it.',
         )
     )
     db.ensure_private_dir(config.data_dir)

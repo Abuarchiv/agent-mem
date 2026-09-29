@@ -83,7 +83,7 @@ CREATE TABLE memories (
   )),
   title TEXT NOT NULL,
   body TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('hook', 'agent', 'native', 'harness_summary', 'import', 'user')),
+  source TEXT NOT NULL CHECK (source IN ('hook', 'agent', 'native', 'harness_summary', 'import')),
   trust TEXT NOT NULL,
   importance REAL NOT NULL DEFAULT 0.5,
   turn_id INTEGER REFERENCES turns(id) ON DELETE SET NULL,
@@ -116,7 +116,7 @@ CREATE TABLE vectors (
 CREATE TABLE entities (
   id INTEGER PRIMARY KEY,
   project_id TEXT,
-  kind TEXT NOT NULL CHECK (kind IN ('file', 'command', 'error', 'package', 'symbol')),
+  kind TEXT NOT NULL CHECK (kind IN ('file', 'command', 'error', 'package')),
   key TEXT NOT NULL,
   UNIQUE (project_id, kind, key)
 );

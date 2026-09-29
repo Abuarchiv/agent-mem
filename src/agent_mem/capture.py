@@ -1,7 +1,9 @@
 """Apply a normalized event to the database: sessions, turns, signals, recipes, rules, context.
 
-This is the single write path for live hooks, spool replay and imports. It is
-idempotent per event (dedupe key) and standard library only.
+This is the write path for every event: live hooks, spool replay and transcript
+imports. It is idempotent per event (dedupe key) and standard library only.
+Memories from other sources (MCP, federation, summaries, memory imports) go
+through ``store.add_memory``, which cleans them the same way.
 """
 
 from __future__ import annotations

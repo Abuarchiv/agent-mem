@@ -80,7 +80,7 @@ def _main(args: list[str]) -> int:
     p = sub.add_parser("setup", help="show how to connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p.add_argument(
-        "--write", action="store_true", help="OpenCode only: copy the plugin into ~/.config/opencode/plugin/"
+        "--write", action="store_true", help="OpenCode only: copy the plugin into ~/.config/opencode/plugins/"
     )
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")

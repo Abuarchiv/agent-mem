@@ -27,6 +27,13 @@ class Embedder(Protocol):
     def query(self, text: str) -> np.ndarray: ...
 
 
+# Models fastembed does not ship: (Hugging Face repository, ONNX file, dimension).
+# The int8-quantized export keeps the download small (~120 MB) and runs fast on CPU.
+CUSTOM_MODELS = {
+    "intfloat/multilingual-e5-small": ("Xenova/multilingual-e5-small", "onnx/model_quantized.onnx", 384),
+}
+
+
 class FastEmbedEmbedder:
     """multilingual-e5-small via fastembed (ONNX Runtime, no PyTorch)."""
 
@@ -34,31 +41,31 @@ class FastEmbedEmbedder:
         from fastembed import TextEmbedding  # lazy: optional dependency
 
         self.model = config.semantic.model
+        self._register_if_needed(TextEmbedding)
         kwargs: dict[str, Any] = {"model_name": self.model, "cache_dir": str(config.model_dir)}
         if not allow_download:
             kwargs["local_files_only"] = True
-        try:
-            self._impl = TextEmbedding(**kwargs)
-        except TypeError:
-            kwargs.pop("local_files_only", None)
-            self._impl = TextEmbedding(**kwargs)
-        except ValueError:
-            self._register_custom()
-            self._impl = TextEmbedding(**kwargs)
+        self._impl = TextEmbedding(**kwargs)
         self.batch_size = config.semantic.batch_size
 
-    def _register_custom(self) -> None:
-        from fastembed import TextEmbedding
+    def _register_if_needed(self, text_embedding: Any) -> None:
+        if self.model not in CUSTOM_MODELS:
+            return
+        if any(m["model"] == self.model for m in text_embedding.list_supported_models()):
+            return
         from fastembed.common.model_description import ModelSource, PoolingType
 
-        TextEmbedding.add_custom_model(
-            model=self.model,
-            pooling=PoolingType.MEAN,
-            normalization=True,
-            sources=ModelSource(hf=self.model),
-            dim=384,
-            model_file="onnx/model.onnx",
-        )
+        repository, model_file, dim = CUSTOM_MODELS[self.model]
+        with contextlib.suppress(ValueError):  # already registered in this process
+            text_embedding.add_custom_model(
+                model=self.model,
+                pooling=PoolingType.MEAN,
+                normalization=True,
+                sources=ModelSource(hf=repository),
+                dim=dim,
+                model_file=model_file,
+                size_in_gb=0.12,
+            )
 
     def passages(self, texts: list[str]) -> np.ndarray:
         vectors = list(self._impl.embed([f"passage: {t}" for t in texts], batch_size=self.batch_size))

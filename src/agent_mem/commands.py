@@ -271,7 +271,10 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
                 conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
-            print(f"Deleted {len(owners)} items before {ns.before}.")
+            removed = spool.purge_matching(
+                config.spool_dir, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp
+            )
+            print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
         conn.execute("VACUUM")
         db.rebuild_backups(conn, config)
         with db.transaction(conn):
@@ -401,7 +404,7 @@ SETUP = {
   Manual alternative: copy {plugins}/copilot/hooks/hooks.json to ~/.copilot/hooks/agent-mem.json and add the
   MCP server with /mcp add (command: agent-mem, args: mcp).""",
     "opencode": """OpenCode
-  1. agent-mem setup opencode --write      (copies the plugin to ~/.config/opencode/plugin/agent-mem.ts)
+  1. agent-mem setup opencode --write      (copies the plugin to ~/.config/opencode/plugins/agent-mem.ts)
   2. Add to ~/.config/opencode/opencode.json:
      "mcp": {{ "agent-mem": {{ "type": "local", "command": ["agent-mem", "mcp"], "enabled": true }} }}
   Run OpenCode sessions serially per repository (upstream snapshot lock).""",
@@ -414,7 +417,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
     if ns.harness == "opencode" and ns.write:
         import shutil
 
-        target_dir = Path.home() / ".config" / "opencode" / "plugin"
+        target_dir = Path.home() / ".config" / "opencode" / "plugins"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "agent-mem.ts"
         shutil.copyfile(folder / "opencode" / "agent-mem.ts", target)

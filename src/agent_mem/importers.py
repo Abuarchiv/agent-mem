@@ -1,7 +1,7 @@
 """Importers for history that existed before Agent Mem was installed.
 
-All importers are idempotent (dedupe keys), apply the same redaction as live capture,
-skip sessions that already exist, and support ``dry_run``.
+All importers are idempotent (dedupe keys), apply the same redaction as live capture
+and support ``dry_run``. Transcript importers skip sessions that already exist.
 """
 
 from __future__ import annotations
