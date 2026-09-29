@@ -25,6 +25,12 @@ def test_corrections_become_rules_and_deny(driver: Driver, conn, config):
     assert conn.execute("SELECT evidence FROM rules").fetchone()[0] == 2
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'preference'").fetchone()[0] == 1
 
+    driver.prompt("s1", "nein, pnpm statt npm")
+    driver.prompt("s1", "nein! pnpm statt npm")
+    valid = conn.execute("SELECT title FROM memories WHERE kind = 'preference' AND invalid_at IS NULL").fetchall()
+    assert [row["title"] for row in valid] == ["Use `pnpm` instead of `npm` (corrected 4x)"]
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE superseded_by IS NOT NULL").fetchone()[0] == 2
+
     conn.execute("UPDATE rules SET enabled = 1")
     denied = driver.pre_bash("s1", "npm install lodash")
     assert denied.deny and "pnpm" in denied.deny

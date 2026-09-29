@@ -341,7 +341,8 @@ def _learn_rule(
     if row["evidence"] >= config.rules.min_corrections:
         if config.rules.auto_enable:
             conn.execute("UPDATE rules SET enabled = 1 WHERE id = ?", (row["id"],))
-        store.add_memory(
+        prefix = f"pref|{project_id}|{avoid}|"
+        new_id = store.add_memory(
             conn,
             project_id=project_id,
             kind="preference",
@@ -351,8 +352,17 @@ def _learn_rule(
             trust="user",
             importance=0.85,
             turn_id=turn_id,
-            dedupe=f"pref|{project_id}|{avoid}|{row['evidence']}",
+            dedupe=f"{prefix}{row['evidence']}",
         )
+        if new_id is not None:
+            # One valid preference per correction: the new count supersedes the earlier ones.
+            for old in conn.execute(
+                "SELECT id, dedupe_key FROM memories WHERE kind = 'preference' AND project_id IS ? "
+                "AND invalid_at IS NULL AND id != ?",
+                (project_id, new_id),
+            ).fetchall():
+                if str(old["dedupe_key"] or "").startswith(prefix):
+                    store.supersede(conn, int(old["id"]), new_id)
 
 
 def _matching_rules(conn: sqlite3.Connection, project_id: str | None, command: str) -> list[sqlite3.Row]:
