@@ -131,10 +131,11 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         embedder = semantic.load_embedder(config, allow_download=allow_download)
         with db.transaction(conn):
             db.set_meta(conn, "semantic", embedder.model if embedder else "unavailable")
-            if embedder is None:
-                db.record_health(conn, "semantic", "embedding model unavailable (lexical search only)")
-            else:
+            if embedder is not None:
                 db.record_health(conn, "semantic")
+            elif semantic.model_cached(config):
+                # The model is present but failed to load: a real problem worth reporting.
+                db.record_health(conn, "semantic", "embedding model failed to load (lexical search only)")
         if embedder is not None:
             stats["embedded"] = semantic.embed_pending(conn, embedder)
 

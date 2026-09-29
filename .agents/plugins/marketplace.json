@@ -1,0 +1,17 @@
+{
+  "name": "agent-mem",
+  "owner": {
+    "name": "Abuarchiv"
+  },
+  "plugins": [
+    {
+      "name": "agent-mem",
+      "description": "Local, self-learning memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No LLM calls.",
+      "version": "2.0.0",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      }
+    }
+  ]
+}

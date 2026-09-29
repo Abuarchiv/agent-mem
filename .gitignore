@@ -31,6 +31,3 @@ node_modules/
 .models/
 .agent-mem-data/
 
-# Local planning and release notes are intentionally not published.
-/docs/
-/release/

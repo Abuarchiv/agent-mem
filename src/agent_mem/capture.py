@@ -10,9 +10,9 @@ import hashlib
 import json
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from . import db, identity, inject, learn, privacy, signals, store, timeutil
 from .config import Config, env_flag, load_project_settings
@@ -28,7 +28,6 @@ class Response:
     deny: str | None = None
     wants_indexer: bool = False
     stored: bool = False
-    injected: list[tuple[str, int]] = field(default_factory=list)
 
 
 def dedupe_key(event: Event) -> str:
@@ -255,7 +254,6 @@ def _on_session_start(conn, config, event, project, project_id, session_id, even
         block = inject.session_start(conn, config, project_id, session_id, event.harness)
     if block:
         response.context = block.text
-        response.injected = block.owners
         learn.record_access(conn, block.owners, "injected", session_id)
 
 
@@ -320,7 +318,6 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
         block = inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness)
         if block:
             response.context = block.text
-            response.injected = block.owners
             learn.record_access(conn, block.owners, "injected", session_id)
 
 
@@ -411,7 +408,6 @@ def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id,
     block = inject.warnings_block(lines, config)
     if block:
         response.context = block.text
-        response.injected = block.owners
 
 
 def _on_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
@@ -456,7 +452,6 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
                 block = inject.recipe_hint(recipe, config)
                 if block:
                     response.context = block.text
-                    response.injected = block.owners
     elif not event.tool_failed and tool_signal.command_key:
         _resolve_failures(conn, project_id, session_id, turn_id, tool_signal.command_key, event.ts)
         if (
@@ -646,8 +641,3 @@ def close_stale_turns(conn: sqlite3.Connection, config: Config) -> int:
                 _close_turn(conn, int(turn["id"]), "unknown", turn["last_event_at"])
             closed += 1
     return closed
-
-
-def project_root_of(conn: sqlite3.Connection, project_id: str) -> Path | None:
-    row = conn.execute("SELECT root FROM projects WHERE id = ?", (project_id,)).fetchone()
-    return Path(row[0]) if row else None

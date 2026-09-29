@@ -391,15 +391,16 @@ SETUP = {
   ~/.claude/settings.json and run `claude mcp add agent-mem -- agent-mem mcp`.""",
     "codex": """Codex CLI
   1. codex plugin marketplace add Abuarchiv/agent-mem
-  2. codex plugin add agent-mem
+  2. codex plugin add agent-mem@agent-mem
   3. Start codex and trust the hooks once with /hooks (Codex requires this review).
   Manual alternative: merge {plugins}/codex/hooks.json into ~/.codex/hooks.json and add to ~/.codex/config.toml:
     [mcp_servers.agent-mem]
     command = "agent-mem"
     args = ["mcp"]""",
     "copilot": """GitHub Copilot CLI
-  1. Inside copilot: /plugin install {plugins}/copilot   (local path of the bundled plugin)
-  Manual alternative: copy {plugins}/copilot/hooks.json to ~/.copilot/hooks/agent-mem.json and add the
+  1. Inside copilot: /plugin marketplace add Abuarchiv/agent-mem, then /plugin install agent-mem@agent-mem
+     (or install the bundled copy by path: /plugin install {plugins}/copilot)
+  Manual alternative: copy {plugins}/copilot/hooks/hooks.json to ~/.copilot/hooks/agent-mem.json and add the
   MCP server with /mcp add (command: agent-mem, args: mcp).""",
     "opencode": """OpenCode
   1. agent-mem setup opencode --write      (copies the plugin to ~/.config/opencode/plugin/agent-mem.ts)

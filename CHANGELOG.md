@@ -16,7 +16,8 @@ Complete rewrite in Python. V1 (TypeScript) remains available under the tag `v1.
 - Reliability: hook deadline, write-behind spool, idempotent replay, migrations with automatic backup, downgrade protection, daily backups, corruption recovery.
 - Privacy: redaction, private sections, exclude globs, per-project opt-out, pause, purge including backups and spool.
 - CLI: `status`, `doctor`, `search`, `show`, `rules`, `lessons`, `pause`, `resume`, `import` (Claude, Codex, V1, claude-mem, agentmemory), `export`, `purge`, `backup`, `restore`, `consolidate`, `models`, `setup`, `eval`.
-- Plugins for Claude Code (marketplace), Codex, Copilot CLI and OpenCode.
+- Plugins and marketplaces for Claude Code (`.claude-plugin`), Codex (`.agents/plugins`), Copilot CLI (`.github/plugin`) and an OpenCode plugin.
+- Supports Python 3.11–3.14; built on the MCP Python SDK 2.x.
 - Optional, off by default: session summaries through the user's own harness.
 
 ### Removed

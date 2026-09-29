@@ -117,3 +117,28 @@ def test_own_tools_are_recognized():
 def test_event_roundtrip():
     event = normalize("claude", {"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "hi"})
     assert Event.from_dict(event.to_dict()) == event
+
+
+def test_codex_payloads_from_current_schema():
+    """Field names follow codex-rs/hooks/src/schema.rs (Stop carries last_assistant_message, SessionEnd a reason)."""
+    base = {"session_id": "cx", "turn_id": "t1", "cwd": "/r", "model": "gpt", "permission_mode": "default"}
+    stop = normalize(
+        "codex",
+        {**base, "hook_event_name": "Stop", "stop_hook_active": False, "last_assistant_message": "All tests pass."},
+    )
+    assert stop.kind == "stop" and stop.answer == "All tests pass."
+    end = normalize("codex", {"session_id": "cx", "cwd": "/r", "hook_event_name": "SessionEnd", "reason": "exit"})
+    assert end.kind == "session_end" and end.source == "exit"
+    pre = normalize(
+        "codex",
+        {
+            **base,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "shell",
+            "tool_input": {"command": ["bash", "-lc", "npm i"]},
+            "tool_use_id": "u1",
+        },
+    )
+    assert pre.kind == "pre_tool" and pre.tool_use_id == "u1"
+    sub = normalize("codex", {**base, "hook_event_name": "SubagentStop", "last_assistant_message": "done"})
+    assert sub.kind == "subagent_stop"

@@ -7,6 +7,5 @@
   },
   "repository": "https://github.com/Abuarchiv/agent-mem",
   "license": "MIT",
-  "hooks": "hooks.json",
-  "mcpServers": ".mcp.json"
+  "hooks": "hooks/hooks.json"
 }

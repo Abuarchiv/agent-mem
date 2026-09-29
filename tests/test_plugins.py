@@ -23,8 +23,16 @@ def test_versions_match_package():
     ]
     for manifest in manifests:
         assert _json(manifest)["version"] == __version__, manifest
-    marketplace = _json(ROOT / ".claude-plugin" / "marketplace.json")
-    assert marketplace["plugins"][0]["version"] == __version__
+    marketplaces = {
+        ".claude-plugin/marketplace.json": "./plugins/claude",
+        ".agents/plugins/marketplace.json": "./plugins/codex",
+        ".github/plugin/marketplace.json": "./plugins/copilot",
+    }
+    for path, source in marketplaces.items():
+        entry = _json(ROOT / path)["plugins"][0]
+        assert entry["version"] == __version__, path
+        location = entry["source"]["path"] if isinstance(entry["source"], dict) else entry["source"]
+        assert location == source and (ROOT / location).is_dir(), path
     pyproject = (ROOT / "pyproject.toml").read_text()
     assert f'version = "{__version__}"' in pyproject
 
@@ -39,14 +47,18 @@ def test_claude_hooks_cover_supported_events():
 
 
 def test_codex_hooks_use_codex_normalizer():
+    manifest = _json(PLUGINS / "codex" / ".codex-plugin" / "plugin.json")
+    assert manifest["hooks"] == "./hooks.json" and manifest["mcpServers"] == "./.mcp.json"
     hooks = _json(PLUGINS / "codex" / "hooks.json")["hooks"]
-    assert {"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"} <= set(hooks)
+    assert set(hooks) <= set(claude._KINDS) | {"PostCompact"}
+    assert {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"} <= set(hooks)
     commands = {h["command"] for groups in hooks.values() for g in groups for h in g["hooks"]}
     assert commands == {"agent-mem hook codex"}
 
 
 def test_copilot_hooks_pass_event_name():
-    hooks = _json(PLUGINS / "copilot" / "hooks.json")["hooks"]
+    manifest = _json(PLUGINS / "copilot" / "plugin.json")
+    hooks = _json(PLUGINS / "copilot" / manifest["hooks"])["hooks"]
     assert set(hooks) == set(copilot._KINDS)
     for event, entries in hooks.items():
         assert entries[0]["bash"] == f"agent-mem hook copilot {event}"

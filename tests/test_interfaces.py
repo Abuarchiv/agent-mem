@@ -172,8 +172,7 @@ def test_mcp_tools(conn, config: Config, project: Path, driver: Driver, monkeypa
 
     def call(name: str, args: dict) -> str:
         result = asyncio.run(server.call_tool(name, args))
-        content = result[0] if isinstance(result, tuple) else result
-        return content[0].text
+        return result.content[0].text
 
     tools = asyncio.run(server.list_tools())
     assert [t.name for t in tools] == ["mem_search", "mem_timeline", "mem_get", "mem_remember", "mem_forget"]
