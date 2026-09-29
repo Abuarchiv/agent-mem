@@ -31,7 +31,7 @@ Search combines SQLite FTS5, optional multilingual E5 embeddings, and the graph,
 
 ## Install
 
-Requirements: macOS, Linux or Windows and Python 3.11–3.14. [uv](https://docs.astral.sh/uv/) installs a suitable Python automatically.
+Requirements: macOS, Linux or Windows and Python 3.11–3.14. [uv](https://docs.astral.sh/uv/) installs a suitable Python automatically. On Intel Macs semantic search is not available (ONNX Runtime ships no wheels there); full-text and graph search work.
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh

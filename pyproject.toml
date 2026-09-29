@@ -30,8 +30,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Semantic search with the multilingual E5 model (ONNX, no PyTorch).
-semantic = ["fastembed>=0.8"]
+# Semantic search with the multilingual E5 model (ONNX, no PyTorch). ONNX Runtime publishes no
+# wheels for Intel Macs; there the extra installs nothing and search stays lexical + graph.
+semantic = ["fastembed>=0.8; sys_platform != 'darwin' or platform_machine != 'x86_64'"]
 
 [project.scripts]
 agent-mem = "agent_mem.cli:main"

@@ -22,7 +22,7 @@ dependencies = [
 
 [package.optional-dependencies]
 semantic = [
-    { name = "fastembed" },
+    { name = "fastembed", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
 ]
 
 [package.dev-dependencies]
@@ -35,7 +35,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dateparser", specifier = ">=1.2.1" },
-    { name = "fastembed", marker = "extra == 'semantic'", specifier = ">=0.8" },
+    { name = "fastembed", marker = "(platform_machine != 'x86_64' and extra == 'semantic') or (sys_platform != 'darwin' and extra == 'semantic')", specifier = ">=0.8" },
     { name = "filelock", specifier = ">=3.16" },
     { name = "mcp", specifier = ">=2.2,<3" },
     { name = "numpy", specifier = ">=2.0" },
