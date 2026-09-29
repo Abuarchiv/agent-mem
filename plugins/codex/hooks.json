@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-mem hook codex",
+            "timeout": 10,
+            "statusMessage": "Agent Mem"
+          }
+        ]
+      }
+    ]
+  }
+}

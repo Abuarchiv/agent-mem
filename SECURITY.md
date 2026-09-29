@@ -1,28 +1,31 @@
-# Security and privacy
+# Security
 
-Agent Mem stores data locally. Local storage is not automatically private.
+## Reporting
 
-## Data flow
+Please report vulnerabilities privately through GitHub security advisories on this repository, not in public issues.
 
-- V1 does not call a generative model, provider API, subscription service, or telemetry endpoint.
-- It stores host events, source spans, sessions, indexes, embeddings, and explicit source-linked reports.
-- The default reader policy returns only prompt and assistant-output sources. Tool input, tool output, and diagnostics stay local.
-- A host can send recalled text to its own provider.
+## Threat model
 
-## Protections
+| Threat | Mitigation |
+|---|---|
+| Secrets in prompts or tool output | Redaction before storage (API keys and tokens of common providers, JWTs, private keys, bearer tokens, credentials in URLs, secret-like assignments). Tested against a secrets corpus that checks the raw database file. |
+| Secret files | Default exclude globs (`.env*`, `*.pem`, `*.key`, SSH keys, `.npmrc`, `.netrc`, `secrets/**`, …): only the path is stored. |
+| Private text | `<private>…</private>` is never stored. |
+| Projects that must not be recorded | `excluded_projects` in `config.json`, `.agent-mem.json` with `{"capture": false}`, `agent-mem pause`. |
+| Prompt injection through recalled text | Injected context is framed as data, bounded in size, control characters removed. |
+| Memory poisoning (e.g. MINJA, OWASP ASI06) | Trust levels per source. Web and third-party MCP content is never injected automatically, never searchable through turn keys and never turned into rules or preferences. Provenance is shown by `mem_get`. |
+| Cross-project leakage | Project memories stay in their project. Only preferences from the user's own prompts that repeat across projects become global. |
+| Other local users | Data directory `0700` on macOS/Linux; on Windows the per-user `%LOCALAPPDATA%`. |
+| Command injection via hooks | Hook commands are fixed strings; payloads are passed on stdin and never interpolated into shell commands. |
+| Supply chain | Few dependencies, lockfile, `pip-audit` in CI, releases built in CI with PyPI trusted publishing. |
+| Resource exhaustion | Size limits for stdin, prompts, outputs and payloads; hook deadline; bounded result counts. |
+| Data exfiltration | No telemetry. Network use is limited to the optional model download. The optional summaries use the harness the user already runs. |
 
-- Vaults, config files, credentials, search state, and IPC paths must be owned by the current user and private.
-- Symlinks and unsafe vault permissions are rejected.
-- Host-to-broker traffic uses an authenticated local TLS-PSK channel.
-- Capture validates bounded JSON and redacts private blocks and known credential formats.
-- MCP output is scope-bound, grant-bound, size-bound, and rechecked before delivery.
-- Model files are local and hash-verified. Remote model loading is disabled.
+## Not covered
 
-## Limits
+- **Encryption at rest.** Anyone who can read the data directory or its backups can read the stored history.
+- A harness sending recalled text to its own model provider is outside Agent Mem's control.
 
-- SQLite is not encrypted at rest.
-- Redaction does not prevent every data leak. Do not send secrets to a host session.
-- `memory_forget` cannot erase OS backups, snapshots, or copies made by another process.
-- Native Codex Desktop, Copilot, Windows, and Linux paths need separate verification.
+## Deleting data
 
-Never commit vaults, WAL/SHM files, connection files, model caches, logs, API keys, tokens, or private keys.
+`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, vacuums the database, deletes spooled events and replaces all backups with a fresh one.
