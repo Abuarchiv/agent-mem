@@ -18,7 +18,7 @@ Please report vulnerabilities privately through GitHub security advisories on th
 | Other local users | Data directory `0700` on macOS/Linux; on Windows the per-user `%LOCALAPPDATA%`. |
 | Command injection via hooks | Hook commands are fixed strings; payloads are passed on stdin and never interpolated into shell commands. |
 | Supply chain | Few dependencies, lockfile, `pip-audit` in CI; the release workflow builds in CI and publishes with PyPI trusted publishing. |
-| Viewer page | `agent-mem view` writes a snapshot to `view/agent-mem.html` in the private data directory; its Content Security Policy blocks all network requests; `purge` deletes it. With `--output` the user chooses another location. |
+| Viewer page | `agent-mem view` escapes all stored text, embeds data as JSON that cannot close its script block and sets a Content Security Policy that allows only the page's own script (by hash) and no network requests. The page is written owner-only to `view/agent-mem.html` in the data directory; `purge` deletes it. With `--output` the user chooses another location. |
 | Resource exhaustion | Size limits for stdin, prompts, outputs and payloads; hook deadline; bounded result counts. |
 | Data exfiltration | No telemetry. Agent Mem itself only goes online for the optional model download. The optional summaries (off by default) run through the harness the user already uses. |
 
@@ -29,4 +29,4 @@ Please report vulnerabilities privately through GitHub security advisories on th
 
 ## Deleting data
 
-`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, vacuums the database, deletes matching spooled events (for `--project`, `--before` and `--all`) and replaces all backups with a fresh one. `mem_forget` deletes one item; the next indexer run then replaces the backups.
+`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, vacuums the database, deletes matching spooled events (for `--project`, `--before` and `--all`), deletes the page written by `agent-mem view` and replaces all backups with a fresh one. `mem_forget` deletes one item; the next indexer run then replaces the backups.

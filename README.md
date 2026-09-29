@@ -78,7 +78,7 @@ If you used claude-mem or agentmemory, disable them afterwards; otherwise hooks 
 ## Commands
 
 ```
-agent-mem status | doctor [--fix]
+agent-mem status | doctor [--fix] | paths
 agent-mem view [--project DIR] [--no-open]      # read-only HTML page of your memory
 agent-mem search "query" [--all-projects]      agent-mem show T12 M3
 agent-mem rules [list|enable|disable|delete] [ID]
@@ -88,7 +88,7 @@ agent-mem export [--project DIR] [--output FILE]
 agent-mem purge --id ID | --project DIR | --before DATE | --all
 agent-mem backup | restore [--latest]
 agent-mem consolidate | index | eval <longmemeval.json>
-agent-mem setup <harness> | models [install] | paths
+agent-mem setup <harness> | models [status|install] | import <source> | paths
 ```
 
 MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`.

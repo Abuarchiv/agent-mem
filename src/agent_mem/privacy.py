@@ -115,11 +115,6 @@ def denoise_output(text: str, limit: int) -> str:
     return truncate("\n".join(kept), limit)
 
 
-def error_lines(text: str, limit: int = 5) -> list[str]:
-    found = [line.strip() for line in strip_control(text).splitlines() if _ERROR_LINE.search(line)]
-    return [line[:300] for line in found[:limit]]
-
-
 def path_excluded(path: str, globs: Iterable[str]) -> bool:
     normalized = path.replace("\\", "/")
     name = PurePosixPath(normalized).name
