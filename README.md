@@ -73,6 +73,7 @@ If you used claude-mem or agentmemory, disable them afterwards; otherwise hooks 
 
 ```
 agent-mem status | doctor [--fix]
+agent-mem view [--project DIR] [--no-open]      # read-only HTML page of your memory
 agent-mem search "query" [--all-projects]      agent-mem show T12 M3
 agent-mem rules [list|enable|disable|delete] [ID]
 agent-mem lessons                               # suggested lines for AGENTS.md / CLAUDE.md
@@ -84,7 +85,7 @@ agent-mem consolidate | index | eval <longmemeval.json>
 
 MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`.
 
-To browse the data, open the database (`agent-mem paths`) with `datasette` or DB Browser for SQLite.
+To browse the data, run `agent-mem view`. It writes one self-contained HTML page to the private data directory and opens it in your browser: timeline of turns with every action, memories with their activation, learned rules, error fixes and preferences, the association graph, and capture health. There is no server and no open port; the page blocks all network requests and shows a snapshot, so run the command again to refresh it. For raw SQL, open the database (`agent-mem paths`) with `datasette` or DB Browser for SQLite.
 
 ## Configuration
 
@@ -113,7 +114,8 @@ Per project, `.agent-mem.json` in the repository root can set `{"capture": false
 - Secrets are redacted before storage (API keys, tokens, private keys, passwords in assignments and URLs). `<private>…</private>` is never stored. Excluded files are recorded by path only.
 - Recalled text is framed as data, not instructions. Content from web tools and third-party MCP servers is never injected automatically and never becomes a rule or preference.
 - The database is **not encrypted at rest**. The data directory is created with owner-only permissions on macOS and Linux.
-- `purge` removes data from the database, the backups and the spool.
+- `purge` removes data from the database, the backups and the spool, and deletes the page written by `agent-mem view`.
+- `agent-mem view` writes a copy of recent data to `view/agent-mem.html` in the data directory (owner-only permissions). With `--output` you choose another location and are responsible for it.
 
 See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
