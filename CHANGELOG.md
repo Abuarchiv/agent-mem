@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Repeated corrections no longer pile up near-identical preference memories ("… (corrected 2x)", "… (corrected 3x)", …). The newest one supersedes the earlier ones, so briefings and search show it once.
+- Removed the unused `privacy.error_lines`.
+
 ## 1.0.0 — 2026-09-29
 
 First release.
