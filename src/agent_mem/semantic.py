@@ -80,19 +80,28 @@ def model_cached(config: Config) -> bool:
     return config.model_dir.is_dir() and any(name in path.name for path in config.model_dir.iterdir())
 
 
-def load_embedder(config: Config, *, allow_download: bool = False) -> Embedder | None:
+def load_embedder_verbose(config: Config, *, allow_download: bool = False) -> tuple[Embedder | None, str | None]:
+    """Return the embedder or a human-readable reason why semantic search is unavailable."""
     if not config.semantic.enabled:
-        return None
+        return None, "semantic search is disabled in config.json"
+    try:
+        import fastembed  # noqa: F401
+    except ImportError:
+        return None, "the optional dependency is missing: install `agent-mem[semantic]`"
     if not allow_download and not model_cached(config):
-        return None
+        return None, "the model is not downloaded yet: run `agent-mem models install`"
     with contextlib.suppress(Exception):
         from loguru import logger
 
         logger.disable("fastembed")
     try:
-        return FastEmbedEmbedder(config, allow_download=allow_download)
-    except Exception:  # missing extra, unsupported platform, model not downloaded
-        return None
+        return FastEmbedEmbedder(config, allow_download=allow_download), None
+    except Exception as error:  # network, unsupported platform, corrupt cache
+        return None, f"loading {config.semantic.model} failed: {type(error).__name__}: {str(error)[:200]}"
+
+
+def load_embedder(config: Config, *, allow_download: bool = False) -> Embedder | None:
+    return load_embedder_verbose(config, allow_download=allow_download)[0]
 
 
 def to_blob(vector: np.ndarray) -> bytes:

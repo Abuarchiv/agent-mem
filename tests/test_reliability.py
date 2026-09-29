@@ -186,3 +186,24 @@ def test_upgrade_from_schema_v1_keeps_data_and_backs_up(config: Config):
     assert "links_entity_owner" in indexes and "links_entity" not in indexes
     assert list(config.backup_dir.glob("*pre-migration-v1*.db"))
     conn.close()
+
+
+def test_subagent_start_gets_context(config: Config, project: Path, conn):
+    hook.run("claude", None, _prompt_payload(project, "s", "Design the retry policy for webhooks"), config)
+    hook.run(
+        "claude",
+        None,
+        json.dumps(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "s",
+                "cwd": str(project),
+                "last_assistant_message": "Exponential backoff, max 5 retries.",
+            }
+        ),
+        config,
+    )
+    payload = {"hook_event_name": "SubagentStart", "session_id": "s2", "cwd": str(project), "agent_id": "a1"}
+    data = json.loads(hook.run("codex", None, json.dumps(payload), config))
+    assert data["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
+    assert "retry policy" in data["hookSpecificOutput"]["additionalContext"]

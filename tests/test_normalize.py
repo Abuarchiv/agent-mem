@@ -142,3 +142,43 @@ def test_codex_payloads_from_current_schema():
     assert pre.kind == "pre_tool" and pre.tool_use_id == "u1"
     sub = normalize("codex", {**base, "hook_event_name": "SubagentStop", "last_assistant_message": "done"})
     assert sub.kind == "subagent_stop"
+
+
+def test_claude_post_tool_use_failure_reads_tool_error():
+    event = normalize(
+        "claude",
+        {
+            "hook_event_name": "PostToolUseFailure",
+            "session_id": "s",
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest"},
+            "tool_use_id": "u9",
+            "tool_error": "ModuleNotFoundError: No module named 'x'",
+        },
+    )
+    assert event.tool_failed and event.error == "ModuleNotFoundError: No module named 'x'"
+
+
+def test_subagent_start_is_a_briefing_per_agent():
+    event = normalize(
+        "claude",
+        {"hook_event_name": "SubagentStart", "session_id": "s", "agent_id": "a1", "agent_type": "Explore"},
+    )
+    assert event.kind == "session_start" and event.source == "subagent" and event.native_event_id == "a1"
+
+
+def test_copilot_snake_case_payloads():
+    event = normalize(
+        "copilot",
+        {
+            "hook_event_name": "postToolUseFailure",
+            "session_id": "p",
+            "tool_name": "bash",
+            "tool_input": {"command": "npm test"},
+            "error": "2 failed",
+        },
+        "postToolUseFailure",
+    )
+    assert event.tool_input == {"command": "npm test"} and event.tool_failed and event.error == "2 failed"
+    sub = normalize("copilot", {"sessionId": "p", "agentName": "explore"}, "subagentStart")
+    assert sub.kind == "session_start" and sub.source == "subagent"

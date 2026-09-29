@@ -57,6 +57,13 @@ agent-mem doctor
 
 `agent-mem` must be on your `PATH` because the hooks call it.
 
+Harness notes:
+
+- **Codex** asks you to trust plugin hooks once (`/hooks`).
+- **Copilot CLI** currently ignores extra context returned after a successful tool call ([github/copilot-cli#2980](https://github.com/github/copilot-cli/issues/2980)); session start, subagent start, pre-tool and failure hints work.
+- **OpenCode**: run sessions serially per repository (upstream snapshot lock).
+- Subagents (Claude Code, Codex, Copilot CLI) receive the same short briefing as a new session.
+
 Bring in history from before the install:
 
 ```sh

@@ -22,6 +22,7 @@ from ..events import (
 
 _KINDS = {
     "sessionStart": "session_start",
+    "subagentStart": "session_start",
     "userPromptSubmitted": "prompt",
     "preToolUse": "pre_tool",
     "postToolUse": "tool",
@@ -47,7 +48,10 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
         cwd=text_of(get(payload, "cwd")),
         raw_kind=name,
     )
-    if kind == "session_start":
+    if name == "subagentStart":
+        event.source = "subagent"
+        event.native_event_id = text_of(get(payload, "agentId", "agentName")) or None
+    elif kind == "session_start":
         source = text_of(get(payload, "source")) or "startup"
         event.source = "startup" if source == "new" else source
     elif kind == "prompt":
@@ -61,9 +65,9 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
             raise PayloadError(f"{name} without toolName")
         event.tool = tool
         event.tool_use_id = text_of(get(payload, "toolCallId", "toolUseId"))
-        event.tool_input = parse_json_maybe(get(payload, "toolArgs"))
+        event.tool_input = parse_json_maybe(get(payload, "toolArgs", "tool_input"))
         if kind == "tool":
-            result = get(payload, "toolResult")
+            result = get(payload, "toolResult", "tool_result")
             event.tool_output = output_text(result)
             event.exit_code = exit_code_of(result, event.tool_output)
             result_type = result.get("resultType") if isinstance(result, dict) else None

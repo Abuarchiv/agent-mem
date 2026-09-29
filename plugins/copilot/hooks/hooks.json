@@ -9,6 +9,14 @@
         "timeoutSec": 10
       }
     ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot subagentStart",
+        "powershell": "agent-mem hook copilot subagentStart",
+        "timeoutSec": 10
+      }
+    ],
     "userPromptSubmitted": [
       {
         "type": "command",

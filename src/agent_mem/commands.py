@@ -365,12 +365,9 @@ def cmd_lessons(ns: argparse.Namespace, config: Config) -> int:
 def cmd_models(ns: argparse.Namespace, config: Config) -> int:
     from . import semantic
 
-    embedder = semantic.load_embedder(config, allow_download=ns.action == "install")
+    embedder, reason = semantic.load_embedder_verbose(config, allow_download=ns.action == "install")
     if embedder is None:
-        print(
-            "Semantic search unavailable: install `agent-mem[semantic]` and run `agent-mem models install`. "
-            "Lexical search keeps working."
-        )
+        print(f"Semantic search unavailable: {reason}. Lexical search keeps working.")
         return 1 if ns.action == "install" else 0
     print(f"Model ready: {embedder.model} (cache {config.model_dir}).")
     return 0
