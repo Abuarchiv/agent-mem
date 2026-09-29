@@ -100,6 +100,7 @@ class _Worker(threading.Thread):
         self.response: capture.Response | None = None
         self.spooled = False
         self.error: str | None = None
+        self._spool_lock = threading.Lock()
 
     def run(self) -> None:
         conn: sqlite3.Connection | None = None
@@ -127,13 +128,15 @@ class _Worker(threading.Thread):
                     conn.close()
 
     def _spool(self) -> None:
-        if self.spooled:
-            return
-        try:
-            spool.write(self.config.spool_dir, {"type": "event", "event": self.event.to_dict()})
-            self.spooled = True
-        except OSError as error:
-            self.error = f"{self.error}; spool failed: {error}"
+        # Called by the worker on error and by the main thread on deadline; both can race.
+        with self._spool_lock:
+            if self.spooled:
+                return
+            try:
+                spool.write(self.config.spool_dir, {"type": "event", "event": self.event.to_dict()})
+                self.spooled = True
+            except OSError as error:
+                self.error = f"{self.error}; spool failed: {error}"
 
 
 def run(harness: str, event_name: str | None, stdin_text: str | None = None, config: Config | None = None) -> str:

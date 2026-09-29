@@ -70,6 +70,25 @@ def test_deadline_spools_event_and_returns_nothing(config: Config, project: Path
     assert spool.count(config.spool_dir) == 1
 
 
+def test_deadline_and_worker_error_spool_once(config: Config, project: Path, monkeypatch: pytest.MonkeyPatch):
+    config.hook_deadline_ms = 50
+    real_write = spool.write
+
+    def slow_write(*args, **kwargs):
+        time.sleep(0.2)
+        return real_write(*args, **kwargs)
+
+    def failing_apply(*args, **kwargs):
+        time.sleep(0.06)  # fails while the main thread is spooling after the deadline
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(spool, "write", slow_write)
+    monkeypatch.setattr(capture, "apply", failing_apply)
+    assert hook.run("claude", None, _prompt_payload(project, "s", "racing prompt"), config) == ""
+    time.sleep(0.5)
+    assert spool.count(config.spool_dir) == 1
+
+
 def test_locked_database_spools_and_indexer_replays_once(config: Config, project: Path, conn):
     locker = sqlite3.connect(config.db_path, isolation_level=None)
     locker.execute("BEGIN EXCLUSIVE")
