@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `agent-mem view`: a read-only HTML page of the local memory with overview, timeline (turns with their actions and results), memories, learned rules, error fixes and preferences, the association graph, and capture health. It is one self-contained file in the private data directory, opened in the browser; no server, no open port, and a Content Security Policy that blocks all network requests. Light and dark mode, narrow screens, bundled fonts (SIL Open Font License). `purge` deletes the page as well.
+
 ## 2.0.0 — 2026-09-29
 
 Complete rewrite in Python. V1 (TypeScript) remains available under the tag `v1.0.0`.

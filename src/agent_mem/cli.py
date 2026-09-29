@@ -82,6 +82,10 @@ def _main(args: list[str]) -> int:
     p.add_argument(
         "--write", action="store_true", help="OpenCode only: copy the plugin into ~/.config/opencode/plugin/"
     )
+    p = sub.add_parser("view", help="write a read-only HTML page of your memory and open it (no server)")
+    p.add_argument("--project", help="only this project directory (default: all projects)")
+    p.add_argument("--output", type=Path, help="write the page here instead of the private data directory")
+    p.add_argument("--no-open", action="store_true", help="only write the page and print its path")
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")
 
