@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from .privacy import error_lines, strip_control
+from .privacy import strip_control
 
 IMPORTANCE = {
     "read": 0.1,
@@ -312,10 +312,6 @@ def error_signature(text: str | None) -> tuple[str, str] | None:
     normalized = _SIG_SPACE.sub(" ", normalized).strip().lower()[:300]
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
     return digest, representative[:300]
-
-
-def summarize_errors(text: str | None) -> list[str]:
-    return error_lines(text or "", limit=3)
 
 
 # --- prompts ---------------------------------------------------------------

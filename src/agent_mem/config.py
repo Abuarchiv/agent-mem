@@ -45,7 +45,6 @@ class Budgets:
     failure: int = 120
     warning: int = 80
     compact: int = 400
-    health: int = 30
 
 
 @dataclass
@@ -75,7 +74,6 @@ class Limits:
     answer_chars: int = 16_000
     tool_output_chars: int = 8_000
     tool_input_chars: int = 4_000
-    payload_bytes: int = 262_144
     stdin_bytes: int = 4_194_304
 
 
@@ -83,7 +81,6 @@ class Limits:
 class Rules:
     auto_enable: bool = False
     min_corrections: int = 2
-    min_recipe_confirmations: int = 3
     expire_days: int = 90
 
 
@@ -255,13 +252,3 @@ def load_project_settings(root: Path | None) -> ProjectSettings:
 
 def env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def save_default(config: Config) -> None:
-    """Write a commented-free default config file if none exists."""
-    if config.config_path.exists():
-        return
-    config.data_dir.mkdir(parents=True, exist_ok=True)
-    config.config_path.write_text(
-        json.dumps({"capture": True, "summarize": {"enabled": False}}, indent=2) + "\n", encoding="utf-8"
-    )

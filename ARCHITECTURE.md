@@ -13,6 +13,9 @@ agent-mem index    detached, one at a time (file lock)
 
 agent-mem mcp      one per agent session (stdio): mem_search, mem_timeline, mem_get, mem_remember, mem_forget
 
+agent-mem view     on demand: bounded snapshot → one self-contained HTML file in the data directory
+                   (no server, no port; CSP allows only its own script and blocks all requests)
+
 SQLite (WAL) ── one file in the data directory
 ```
 

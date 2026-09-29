@@ -18,8 +18,6 @@ KINDS = {
     "session_end",
 }
 
-HARNESSES = {"claude", "codex", "copilot", "opencode", "import"}
-
 OWN_TOOL_MARKERS = ("agent-mem", "agent_mem", "agentmem")
 OWN_TOOL_NAMES = {"mem_search", "mem_timeline", "mem_get", "mem_remember", "mem_forget"}
 

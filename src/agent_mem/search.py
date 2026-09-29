@@ -19,7 +19,6 @@ from .config import Config
 from .store import owner_label
 
 Owner = tuple[str, int]
-CandidateSource = Callable[[sqlite3.Connection, str, list[str], str | None, int], list[Owner]]
 
 _TOKEN = re.compile(r"[\w][\w.\-/@+#]*", re.UNICODE)
 STOPWORDS = {

@@ -15,7 +15,6 @@ import numpy as np
 
 from . import search, timeutil
 from .config import Config
-from .signals import first_line
 
 Owner = tuple[str, int]
 
@@ -355,7 +354,3 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
 
 def strip_time_words(text: str) -> str:
     return _TIME_HINT.sub(" ", text).strip() or text
-
-
-def describe(hit: search.Hit) -> str:
-    return first_line(hit.title or hit.text, 160)

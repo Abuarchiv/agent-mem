@@ -20,6 +20,7 @@ Please report vulnerabilities privately through GitHub security advisories on th
 | Supply chain | Few dependencies, lockfile, `pip-audit` in CI, releases built in CI with PyPI trusted publishing. |
 | Resource exhaustion | Size limits for stdin, prompts, outputs and payloads; hook deadline; bounded result counts. |
 | Data exfiltration | No telemetry. Network use is limited to the optional model download. The optional summaries use the harness the user already runs. |
+| Captured text in the HTML view | `agent-mem view` escapes all stored text, embeds data as JSON that cannot close its script block, and sets a Content Security Policy that allows only the page's own script (by hash) and no network requests. The page is written owner-only into the data directory. |
 
 ## Not covered
 
@@ -28,4 +29,4 @@ Please report vulnerabilities privately through GitHub security advisories on th
 
 ## Deleting data
 
-`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, vacuums the database, deletes spooled events and replaces all backups with a fresh one.
+`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, vacuums the database, deletes spooled events, deletes the page written by `agent-mem view` and replaces all backups with a fresh one.

@@ -11,11 +11,15 @@
 - Corruption recovery on Windows: the integrity probe kept the damaged database open, so it could not be moved aside and the backup was not restored.
 - `purge --project` on Windows left spooled events behind because paths were compared without normalising case and separators. Paths are now compared by whole segments on every platform, so `/proj` no longer matches `/proj2`.
 - `agent-mem view --project` no longer registers an unknown directory as a new project.
-- CI: the dependency audit no longer tries to look up `agent-mem` itself on PyPI; the retired `macos-13` runner is replaced by `macos-15-intel`; `setup-uv` moves to v7 (Node 24).
+- CI: the dependency audit no longer tries to look up `agent-mem` itself on PyPI; the retired `macos-13` runner is replaced by `macos-15-intel`; actions updated to `checkout@v7`, `setup-uv@v10.2.0` (pinned, the project no longer publishes major tags) and `action-gh-release@v3`, all on Node 24.
+- Python 3.14 is tested in CI and listed as supported.
+- README: `export` has no `--json` flag; the command list now shows `export [--project] [--output]`, `paths`, `models`, `setup` and `import`.
 
 ### Removed
 
 - V1 release notes and implementation notes under `docs/`; V1 lives on under the tag `v1.0.0`.
+- Unused code: `capture.project_root_of`, `config.save_default`, `consolidate.dump_profile`, `events.HARNESSES`, `search.CandidateSource`, `semantic.describe`, `signals.summarize_errors`, `privacy.error_lines` and the never-read `Response.injected`.
+- Config keys that had no effect: `limits.payload_bytes`, `rules.min_recipe_confirmations`, `budgets.health`. Setting them now shows an unknown-key warning in `agent-mem doctor`.
 
 ## 2.0.0 — 2026-09-29
 
