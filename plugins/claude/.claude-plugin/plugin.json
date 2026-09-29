@@ -1,0 +1,10 @@
+{
+  "name": "agent-mem",
+  "version": "2.0.0",
+  "description": "Local, self-learning memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No LLM calls.",
+  "author": {
+    "name": "Abuarchiv"
+  },
+  "homepage": "https://github.com/Abuarchiv/agent-mem",
+  "license": "MIT"
+}

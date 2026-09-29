@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot sessionStart",
+        "powershell": "agent-mem hook copilot sessionStart",
+        "timeoutSec": 10
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot userPromptSubmitted",
+        "powershell": "agent-mem hook copilot userPromptSubmitted",
+        "timeoutSec": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot preToolUse",
+        "powershell": "agent-mem hook copilot preToolUse",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot postToolUse",
+        "powershell": "agent-mem hook copilot postToolUse",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot postToolUseFailure",
+        "powershell": "agent-mem hook copilot postToolUseFailure",
+        "timeoutSec": 10
+      }
+    ],
+    "errorOccurred": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot errorOccurred",
+        "powershell": "agent-mem hook copilot errorOccurred",
+        "timeoutSec": 10
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot agentStop",
+        "powershell": "agent-mem hook copilot agentStop",
+        "timeoutSec": 10
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot subagentStop",
+        "powershell": "agent-mem hook copilot subagentStop",
+        "timeoutSec": 10
+      }
+    ],
+    "preCompact": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot preCompact",
+        "powershell": "agent-mem hook copilot preCompact",
+        "timeoutSec": 10
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "agent-mem hook copilot sessionEnd",
+        "powershell": "agent-mem hook copilot sessionEnd",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

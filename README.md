@@ -1,85 +1,130 @@
 # Agent Mem
 
-Local memory for coding agents.
+Local, self-learning memory shared by **Claude Code, Codex, GitHub Copilot CLI and OpenCode**.
 
-Agent Mem captures source events from configured Codex CLI, OpenCode CLI, and GitHub Copilot CLI worktrees. Original text, spans, timestamps, sessions, and provenance are stored in SQLite. Retrieval is available through stdio MCP and a local IPC broker.
+Agent Mem records what your agents do through their hooks, learns from it, and gives every agent the relevant part of that history at the right moment. It makes **no LLM calls of its own** and has no daemon, no server and no open ports: one SQLite file on your machine.
 
-![Agent Mem architecture overview](assets/agent-mem-readme-hero.png)
+## What it does
 
-## Quick start
+| Moment | What happens automatically |
+|---|---|
+| Session start | A short briefing: commands that work in this project, decisions, dead ends, preferences, unresolved errors, the last session. |
+| You send a prompt | Up to three matching memories, only when the match is strong. |
+| Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optionally a hard block (opt-in rules). |
+| A command fails | If this error was fixed before, the agent sees how. |
+| Turn ends | The turn (request, actions, result) is stored and indexed. |
+| Context compaction | The session goal, decisions and open problems are re-injected. |
 
-Requirements: Node.js 24.20.x, npm 11, and a local project or worktree. Published bundles target macOS arm64/x64, Linux x64, and Windows x64. Intel macOS uses lexical retrieval because the pinned ONNX runtime has no macOS Intel binding.
+All harnesses write into the same memory, so what Claude Code learned is available to Codex and vice versa. Notes that Claude Code and Codex write themselves (auto memory / memories) are read in as well.
 
-macOS / Linux:
+### How it learns (without an LLM)
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh -s -- --project "$PWD"
-agent-mem install --project "$PWD" --agents codex --yes
-agent-mem view
-```
+- **Activation (ACT-R):** memories that are used often and recently rank higher; unused ones fade but are never deleted.
+- **Implicit feedback:** a recalled memory counts as useful when the agent opens it, edits its files, or cites its id.
+- **Error → fix recipes:** a failing command, followed by edits and the same command passing, becomes a recipe.
+- **Corrections → rules:** "pnpm statt npm" / "use pnpm instead of npm" becomes a proposed rule; after enabling, `npm` is blocked with the reason shown to the agent.
+- **Dead ends:** reverted changes (`git checkout --`, `git restore`, `git reset --hard`) become warnings for the same files.
+- **Association graph:** files, commands, errors and packages that occur together are linked (Hebbian learning) and searched with Personalized PageRank.
+- **Consolidation:** once a day in the background, edges decay, repeated preferences become global, outdated facts are superseded and memories anchored to deleted files are invalidated.
 
-The installer verifies the package checksum, configures the selected host, starts the local broker, and verifies MCP initialization. The viewer command prints a local URL.
+Search combines SQLite FTS5, optional multilingual E5 embeddings, and the graph, fused with reciprocal rank fusion. Time words such as "gestern" or "last week" filter by date.
 
-For Codex, open `/hooks`, trust the project hooks, and reopen the project. Capture starts after the hook is trusted.
+## Install
 
-### OpenCode concurrency
-
-OpenCode's snapshot garbage collector uses a repository-global lock. Run OpenCode sessions serially per repository with this V1 release. This is an upstream host limitation; Agent Mem keeps capture and retrieval state separate from the snapshot store.
-
-## Viewer
-
-The viewer is read-only and defaults to **All projects**.
-
-It shows:
-
-- sessions, source events, spans, jobs, memory records, privacy state, and query traces;
-- measured evidence reduction and token savings without imposing a webpage token budget;
-- a real interactive knowledge graph with scope, session, source, and source-backed semantic nodes.
-
-The page receives an embedded local snapshot. It has no REST API and does not write to the vault.
-
-## Retrieval
-
-The local core works without a generative model or provider API:
-
-- SQLite FTS5 for lexical search on every published target;
-- bundled multilingual E5 for semantic retrieval where the native ONNX binding is available;
-- optional local reranking with the same native-runtime fallback;
-- four stdio MCP tools: `memory_recall`, `memory_get`, `memory_forget`, and `memory_write`.
-
-## Data and privacy
-
-The vault is local, but it is not encrypted at rest. Anyone who can read the data directory or its backups can read the stored evidence. A host may also send recalled text to its own model provider.
-
-The default data directory is:
-
-```text
-~/Library/Application Support/Agent Mem   # macOS
-~/.local/share/Agent Mem                   # Linux
-%LOCALAPPDATA%\Agent Mem                   # Windows
-```
-
-Use `--data-dir /absolute/path` for another location.
-
-## Useful commands
+Requirements: macOS, Linux or Windows. [uv](https://docs.astral.sh/uv/) installs a suitable Python automatically.
 
 ```sh
-agent-mem status --json
-agent-mem pause
-agent-mem resume
-agent-mem extras list
-agent-mem extras install reranker
-agent-mem repair --project "$PWD"
+curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh
+# Windows: irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1 | iex
 ```
+
+or directly:
+
+```sh
+uv tool install "agent-mem[semantic] @ git+https://github.com/Abuarchiv/agent-mem"
+```
+
+Then connect your harnesses:
+
+```sh
+agent-mem setup claude     # Claude Code plugin (hooks + MCP)
+agent-mem setup codex      # Codex plugin or hooks.json + config.toml
+agent-mem setup copilot    # Copilot CLI plugin
+agent-mem setup opencode   # OpenCode plugin + MCP entry
+agent-mem models install   # optional: E5 model (~135 MB) for semantic search
+agent-mem doctor
+```
+
+`agent-mem` must be on your `PATH` because the hooks call it.
+
+Bring in history from before the install:
+
+```sh
+agent-mem import claude            # ~/.claude/projects/*/*.jsonl
+agent-mem import codex             # ~/.codex/sessions/**/*.jsonl
+agent-mem import claude-mem ~/.claude-mem/claude-mem.db
+agent-mem import agentmemory export.json
+agent-mem import v1 "<old vault>.sqlite"
+```
+
+If you used claude-mem or agentmemory, disable them afterwards; otherwise hooks run twice and context is injected twice.
+
+## Commands
+
+```
+agent-mem status | doctor [--fix]
+agent-mem search "query" [--all-projects]      agent-mem show T12 M3
+agent-mem rules [list|enable|disable|delete] [ID]
+agent-mem lessons                               # suggested lines for AGENTS.md / CLAUDE.md
+agent-mem pause [--for 2h] | resume
+agent-mem export --json | purge --id|--project|--before|--all
+agent-mem backup | restore [--latest]
+agent-mem consolidate | index | eval <longmemeval.json>
+```
+
+MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`.
+
+To browse the data, open the database (`agent-mem paths`) with `datasette` or DB Browser for SQLite.
+
+## Configuration
+
+`config.json` in the data directory (see `agent-mem paths`). Invalid values fall back to defaults and show up in `agent-mem doctor`. Main keys:
+
+```json
+{
+  "capture": true,
+  "excluded_projects": ["/path/to/private/repo"],
+  "exclude_globs": [".env", ".env.*", "*.pem", "secrets/**"],
+  "budgets": {"session_start": 600, "prompt": 200, "failure": 120, "warning": 80, "compact": 400},
+  "rules": {"auto_enable": false, "min_corrections": 2},
+  "retention": {"payload_days": 30, "backup_keep": 7, "max_db_mb": 1024},
+  "semantic": {"enabled": true},
+  "summarize": {"enabled": false, "harness": "claude", "daily_limit": 5}
+}
+```
+
+Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
+
+`summarize.enabled` is the only setting that causes generative model calls: once per finished session, in the background, through the harness you already use (`claude -p` or `codex exec`). It is off by default.
+
+## Privacy and security
+
+- Everything stays local. There is no telemetry. The only network access is the optional model download.
+- Secrets are redacted before storage (API keys, tokens, private keys, passwords in assignments and URLs). `<private>…</private>` is never stored. Excluded files are recorded by path only.
+- Recalled text is framed as data, not instructions. Content from web tools and third-party MCP servers is never injected automatically and never becomes a rule or preference.
+- The database is **not encrypted at rest**. The data directory is created with owner-only permissions on macOS and Linux.
+- `purge` removes data from the database, the backups and the spool.
+
+See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Development
 
 ```sh
-npm ci --ignore-scripts
-npm run models:download
-npm run models:verify
-npm run build
-npm test
+uv sync --all-extras
+uv run pytest
+uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright
 ```
 
-Agent Mem V1.0.0 supports the local capture and retrieval path. Codex Desktop, the Copilot app, and concurrent OpenCode sessions are outside the V1 release boundary.
+## License
+
+MIT

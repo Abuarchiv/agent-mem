@@ -1,0 +1,89 @@
+[project]
+name = "agent-mem"
+version = "2.0.0"
+description = "Local, self-learning memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No LLM calls."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Abuarchiv" }]
+keywords = ["memory", "agents", "mcp", "claude-code", "codex", "copilot", "opencode"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+# The hook path imports only the standard library. These dependencies are
+# loaded lazily by the MCP server, the indexer and the CLI.
+dependencies = [
+  "mcp>=1.9,<2",
+  "numpy>=1.26",
+  "dateparser>=1.2",
+  "filelock>=3.13",
+]
+
+[project.optional-dependencies]
+# Semantic search with the multilingual E5 model (ONNX, no PyTorch).
+semantic = ["fastembed>=0.4"]
+
+[project.scripts]
+agent-mem = "agent_mem.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Abuarchiv/agent-mem"
+Issues = "https://github.com/Abuarchiv/agent-mem/issues"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_mem"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"plugins" = "agent_mem/plugins"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/agent_mem", "tests", "plugins", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "pyright>=1.1.380",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PL"]
+ignore = [
+  "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917", "PLR2004",
+  "PLC0415",  # lazy imports keep the hook path free of heavy dependencies
+  "E501",     # the formatter wraps code; long SQL literals stay readable on one line
+  "PLW2901",
+  "S603", "S607", "S608", "S101", "S310",
+  "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "PLR", "PLC0415"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingImports = "warning"

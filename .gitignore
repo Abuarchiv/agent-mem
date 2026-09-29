@@ -1,10 +1,22 @@
-node_modules/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
 dist/
-dist-v1/
-artifacts/v1/
-coverage/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.coverage
+htmlcov/
+
+# Node (OpenCode plugin development only)
+node_modules/
+
+# Secrets and runtime data never belong in Git
 .env
-.env.local
 .env.*
 *.pem
 *.key
@@ -16,17 +28,9 @@ coverage/
 *.tmp
 *.bak
 .DS_Store
-.runtime
-.models
-artifacts/
+.models/
+.agent-mem-data/
+
 # Local planning and release notes are intentionally not published.
 /docs/
 /release/
-
-# Local host configuration and generated presentation artifacts.
-.codex/
-/presentation/
-/agent-mem-demo-workflow.*
-/agent-mem-session-context-sequence.*
-/agent-mem-session-injection-sequence.*
-/agent-mem-storage-dataflow.*
