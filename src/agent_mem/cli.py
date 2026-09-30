@@ -5,6 +5,15 @@ from __future__ import annotations
 import sys
 
 
+def _rule_id(text: str) -> int:
+    import argparse  # lazy: the hook fast path must not pay for it
+
+    digits = text.strip().upper().removeprefix("R")
+    if not (digits.isascii() and digits.isdigit()) or int(digits) >= 2**63:
+        raise argparse.ArgumentTypeError(f"invalid rule id: {text}")
+    return int(digits)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args[:1] == ["hook"]:
@@ -69,7 +78,7 @@ def _main(args: list[str]) -> int:
     sub.add_parser("consolidate", help="run consolidation now")
     p = sub.add_parser("rules", help="learned rules (avoid a command after repeated corrections)")
     p.add_argument("action", choices=["list", "enable", "disable", "delete"], nargs="?", default="list")
-    p.add_argument("rule_id", nargs="?", type=int)
+    p.add_argument("rule_id", nargs="?", type=_rule_id)
     sub.add_parser("lessons", help="suggest lines for AGENTS.md / CLAUDE.md from repeated lessons")
     p = sub.add_parser("models", help="embedding model status or download")
     p.add_argument("action", choices=["status", "install"], nargs="?", default="status")

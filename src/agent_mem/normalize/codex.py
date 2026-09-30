@@ -15,7 +15,8 @@ from . import claude
 
 
 def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event | None:
-    name = payload.get("hook_event_name") or event_name
+    name = payload.get("hook_event_name")
+    name = name if isinstance(name, str) and name else event_name
     if name in {"PostCompact", "Compact"}:
         payload = {**payload, "hook_event_name": "PreCompact"}
     return claude.normalize(payload, event_name, harness="codex")

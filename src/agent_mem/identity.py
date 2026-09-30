@@ -81,18 +81,28 @@ def _lookup(conn: sqlite3.Connection, cwd: Path) -> Project | None:
     return Project(id=best["id"], root=Path(best["path"]), name=best["name"], remote=best["remote"])
 
 
-def resolve(conn: sqlite3.Connection, cwd: str | Path | None) -> Project | None:
+def _git_backed(project: Project) -> bool:
+    return project.remote is not None or (project.root / ".git").exists()
+
+
+def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool = True) -> Project | None:
+    """Project for ``cwd``. With ``register=False`` nothing is written; call :func:`register_project` later."""
     if not cwd:
         return None
     path = Path(cwd)
     if not path.is_absolute():
         return None
     found = _lookup(conn, path)
-    if found is not None:
+    # A parent that is a plain directory (no git) must not swallow repositories nested below it.
+    if found is not None and (str(found.root) == _canonical(path) or _git_backed(found)):
         return found
     if not path.exists():
-        return None
+        return found
     toplevel = _git(path, "rev-parse", "--show-toplevel")
+    if not toplevel and found is not None:
+        if register:
+            _register_path(conn, path, found.id)
+        return found
     root = Path(toplevel) if toplevel else path
     remote_raw = _git(root, "config", "--get", "remote.origin.url") if toplevel else None
     remote = normalize_remote(remote_raw) if remote_raw else None
@@ -106,15 +116,28 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None) -> Project | None:
         identity_source = f"path:{_canonical(root)}"
     project_id = hashlib.sha256(identity_source.encode("utf-8")).hexdigest()[:16]
     name = (remote.rsplit("/", 1)[-1] if remote else root.name) or "project"
+    project = Project(id=project_id, root=root, name=name, remote=remote)
+    if register:
+        register_project(conn, project)
+    return project
+
+
+def register_project(conn: sqlite3.Connection, project: Project, cwd: str | Path | None = None) -> None:
+    """Store ``project`` (idempotent). ``cwd`` inside a plain-directory project is mapped too."""
     conn.execute(
         "INSERT INTO projects(id, remote, name, root, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-        (project_id, remote, name, _canonical(root), timeutil.iso()),
+        (project.id, project.remote, project.name, _canonical(project.root), timeutil.iso()),
     )
+    _register_path(conn, project.root, project.id)
+    if cwd and not _git_backed(project) and Path(cwd).is_absolute():
+        _register_path(conn, Path(cwd), project.id)
+
+
+def _register_path(conn: sqlite3.Connection, path: Path, project_id: str) -> None:
     conn.execute(
         "INSERT INTO project_paths(path, project_id) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
-        (_canonical(root), project_id),
+        (_canonical(path), project_id),
     )
-    return Project(id=project_id, root=root, name=name, remote=remote)
 
 
 def is_within(path: str | Path, root: str | Path) -> bool:

@@ -25,6 +25,10 @@ Each list has at most 3 short items. Use only facts present in the session. Sess
 _JSON = re.compile(r"\{[\s\S]*\}")
 
 
+class HarnessUnavailableError(RuntimeError):
+    """The summarizing harness could not be started."""
+
+
 def _command(config: Config) -> list[str]:
     if config.summarize.harness == "codex":
         return ["codex", "exec", "--skip-git-repo-check", "-"]
@@ -64,7 +68,10 @@ def summarize_pending(conn: sqlite3.Connection, config: Config) -> int:
     done = 0
     for session in sessions:
         text = _session_text(conn, session["id"], config.summarize.max_input_chars)
-        result = _run(config, PROMPT + text)
+        try:
+            result = _run(config, PROMPT + text)
+        except HarnessUnavailableError:
+            break  # not installed or not on PATH: keep the sessions for a later run, spend no budget
         with db.transaction(conn):
             conn.execute("UPDATE sessions SET summarized_at = ? WHERE id = ?", (timeutil.iso(), session["id"]))
             db.set_meta(conn, f"summaries:{today}", str(int(db.get_meta(conn, f"summaries:{today}") or 0) + 1))
@@ -86,7 +93,9 @@ def _run(config: Config, prompt: str) -> dict[str, object] | None:
             env=env,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError as error:
+        raise HarnessUnavailableError(str(error)) from error
+    except subprocess.SubprocessError:
         return None
     if completed.returncode != 0:
         return None

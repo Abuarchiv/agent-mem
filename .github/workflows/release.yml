@@ -20,6 +20,9 @@ jobs:
           version=$(uv run --no-sync python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           test "v$version" = "$GITHUB_REF_NAME"
       - run: uv sync --all-extras --locked
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pyright
       - run: uv run pytest
       - run: uv build
       - name: Publish to PyPI

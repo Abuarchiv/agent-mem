@@ -50,7 +50,8 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
     )
     if name == "subagentStart":
         event.source = "subagent"
-        event.native_event_id = text_of(get(payload, "agentId", "agentName")) or None
+        # Only a unique id may dedupe; agent names repeat for every subagent of the same type.
+        event.native_event_id = text_of(get(payload, "agentId")) or None
     elif kind == "session_start":
         source = text_of(get(payload, "source")) or "startup"
         event.source = "startup" if source == "new" else source

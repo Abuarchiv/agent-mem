@@ -52,7 +52,7 @@ packages = ["src/agent_mem"]
 "plugins" = "agent_mem/plugins"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_mem", "tests", "plugins", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+include = ["src/agent_mem", "tests", "plugins", ".claude-plugin", ".agents", ".github/plugin", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
 
 [dependency-groups]
 dev = [

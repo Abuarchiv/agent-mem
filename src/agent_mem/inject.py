@@ -6,6 +6,7 @@ Injected text is framed as data, never as instructions. Standard library only.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -24,24 +25,51 @@ class Block:
     owners: list[tuple[str, int]]
 
 
+_FRAME_TAG = re.compile(r"<\s*/?\s*agent-mem\s*>", re.IGNORECASE)
+
+
+def _unframed(line: str) -> str:
+    """Remove frame tags until none are left, so stored text can never close the data block."""
+    while True:
+        stripped = _FRAME_TAG.sub("", line)
+        if stripped == line:
+            return stripped
+        line = stripped
+
+
+def _cost(text: str) -> int:
+    """Cost in quarter tokens: ~4 ASCII characters per token, ~1 token per other character (CJK etc.)."""
+    return sum(1 if ord(char) < 128 else 4 for char in text)
+
+
+def _cut(text: str, max_cost: int) -> str:
+    used = 0
+    for index, char in enumerate(text):
+        used += 1 if ord(char) < 128 else 4
+        if used > max_cost:
+            return text[:index]
+    return text
+
+
 def render(lines: list[tuple[str, tuple[str, int] | None]], budget_tokens: int) -> Block | None:
-    budget_chars = max(budget_tokens, 0) * 4
-    used = len(HEADER) + len(FOOTER) + 2
+    budget = max(budget_tokens, 0) * 4
+    used = _cost(HEADER) + _cost(FOOTER) + 2
     kept: list[str] = []
     owners: list[tuple[str, int]] = []
     for line, owner in lines:
-        line = line.replace(FOOTER, "").replace("<agent-mem>", "").strip()
+        line = _unframed(line).strip()
         if not line:
             continue
-        if used + len(line) + 1 > budget_chars:
-            remaining = budget_chars - used - 1
+        cost = _cost(line)
+        if used + cost + 1 > budget:
+            remaining = budget - used - 1
             if remaining > 60 and not kept:
-                kept.append(line[: remaining - 1] + "…")
+                kept.append(_cut(line, remaining - 4) + "…")
                 if owner:
                     owners.append(owner)
             break
         kept.append(line)
-        used += len(line) + 1
+        used += cost + 1
         if owner:
             owners.append(owner)
     if not kept:
@@ -54,10 +82,8 @@ def hit_line(hit: search.Hit) -> str:
     origin = hit.harness or hit.kind
     title = first_line(hit.title or hit.text, 140)
     line = f"- [{hit.label} · {day} · {origin}] {title}"
-    if hit.kind == "turn":
-        answer_part = hit.text.split("\n", 2)
-        if len(answer_part) > 1 and answer_part[1].strip():
-            line += f" → {first_line(answer_part[1], 120)}"
+    if hit.kind == "turn" and hit.answer.strip():
+        line += f" → {first_line(hit.answer, 120)}"
     if hit.files:
         line += f" (files: {', '.join(hit.files[:3])})"
     return line
@@ -121,7 +147,7 @@ def _open_errors(
     rows = conn.execute(
         "SELECT e.turn_id, e.command_key, e.payload, e.ts FROM events e JOIN sessions s ON s.id = e.session_id "
         "WHERE s.project_id = ? AND e.session_id != ? AND e.error_sig IS NOT NULL AND e.resolved = 0 "
-        "ORDER BY e.ts DESC LIMIT 20",
+        "AND e.trust != 'tool_external' ORDER BY e.ts DESC LIMIT 20",
         (project_id, session_id),
     ).fetchall()
     lines: list[tuple[str, tuple[str, int] | None]] = []
@@ -229,7 +255,7 @@ def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block 
         lines.append((f"- [M{row['id']} · {row['kind']}] {first_line(row['title'], 160)}", ("m", int(row["id"]))))
     for row in conn.execute(
         "SELECT command_key, payload FROM events WHERE session_id = ? AND error_sig IS NOT NULL AND resolved = 0 "
-        "ORDER BY id DESC LIMIT 2",
+        "AND command_key IS NOT NULL AND trust != 'tool_external' ORDER BY id DESC LIMIT 2",
         (session_id,),
     ):
         try:

@@ -144,6 +144,9 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     except db.SchemaTooNewError as error:
         checks.append(Check("database", False, str(error), "Upgrade agent-mem (`uv tool upgrade agent-mem`)."))
         return checks
+    except db.MigrationInProgressError as error:
+        checks.append(Check("database", False, f"migration in progress: {error}", "Run `agent-mem doctor` again."))
+        return checks
     except sqlite3.Error as error:
         checks.append(Check("database", False, str(error), "Run `agent-mem restore --latest`."))
         return checks

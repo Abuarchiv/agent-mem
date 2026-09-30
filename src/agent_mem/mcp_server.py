@@ -60,12 +60,14 @@ def build(config: Config | None = None) -> MCPServer:
     @server.tool()
     def mem_remember(
         text: str,
-        kind: Literal["fact", "decision", "dead_end", "preference", "lesson"] = "fact",
+        kind: Literal["fact", "decision", "dead_end", "lesson"] = "fact",
         title: str | None = None,
         supersedes: str | None = None,
         global_scope: bool = False,
     ) -> str:
-        """Store an explicit memory. Use supersedes='M12' to replace an outdated one."""
+        """Store an explicit memory. Use supersedes='M12' to replace an outdated one of this project.
+
+        Preferences are learned only from the user's own prompts and cannot be stored here."""
         from .privacy import clean_text
 
         body = clean_text(text, 4000)
@@ -86,8 +88,23 @@ def build(config: Config | None = None) -> MCPServer:
                 return "Already stored."
             if supersedes:
                 owner = store.parse_owner(supersedes)
-                if owner and owner[0] == "m":
-                    store.supersede(state.conn, owner[1], memory_id)
+                old_id = owner[1] if owner and owner[0] == "m" else None
+                old = (
+                    None
+                    if old_id is None
+                    else state.conn.execute("SELECT project_id, trust FROM memories WHERE id = ?", (old_id,)).fetchone()
+                )
+                # Agents may replace their own and imported notes in this project, never the user's.
+                if (
+                    old_id is None
+                    or old is None
+                    or old["trust"] == "user"
+                    or old["project_id"] not in (None, state.project_id)
+                ):
+                    return (
+                        f"Stored M{memory_id}; {supersedes} was not superseded (not an agent memory of this project)."
+                    )
+                store.supersede(state.conn, old_id, memory_id)
         return f"Stored M{memory_id}."
 
     @server.tool()

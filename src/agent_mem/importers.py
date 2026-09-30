@@ -78,6 +78,9 @@ def claude_events(path: Path) -> list[Event]:
         kind = record.get("type")
         if kind not in {"user", "assistant"}:
             continue
+        if record.get("isSidechain"):
+            # Subagent transcripts share the parent's sessionId; their prompts were written by an agent.
+            continue
         session_id = str(record.get("sessionId") or session_id or path.stem)
         cwd = record.get("cwd") or cwd
         ts = timeutil.from_any(record.get("timestamp"))
@@ -344,7 +347,8 @@ def import_claude_mem(conn: sqlite3.Connection, config: Config, path: Path, *, d
                         trust="agent",
                         importance=0.5,
                         origin="claude-mem",
-                        dedupe=f"claude-mem|{table}|{row['id'] if 'id' in present else hashlib.sha256(body.encode()).hexdigest()}",
+                        # By content: row ids repeat across different claude-mem databases.
+                        dedupe=f"claude-mem|{table}|{hashlib.sha256(body.encode()).hexdigest()}",
                     )
                     conn.execute("COMMIT")
                 except BaseException:
@@ -356,6 +360,13 @@ def import_claude_mem(conn: sqlite3.Connection, config: Config, path: Path, *, d
     return stats
 
 
+def _item_key(item: dict[str, Any], text: str) -> str:
+    item_id = item.get("id")
+    if isinstance(item_id, str | int) and not isinstance(item_id, bool) and str(item_id).strip():
+        return f"id:{item_id}"
+    return "sha:" + hashlib.sha256(text.encode()).hexdigest()
+
+
 def import_agentmemory(
     conn: sqlite3.Connection, config: Config, path: Path, *, dry_run: bool = False
 ) -> dict[str, int]:
@@ -365,7 +376,7 @@ def import_agentmemory(
     stats = {"memories": 0}
     if not isinstance(items, list):
         raise ValueError("unrecognized agentmemory export")
-    for index, item in enumerate(items):
+    for item in items:
         if not isinstance(item, dict):
             continue
         text = item.get("content") or item.get("text") or item.get("body") or item.get("narrative")
@@ -396,7 +407,7 @@ def import_agentmemory(
                 trust="agent",
                 importance=0.5,
                 origin="agentmemory",
-                dedupe=f"agentmemory|{item.get('id', index)}",
+                dedupe=f"agentmemory|{_item_key(item, text)}",
             )
             conn.execute("COMMIT")
         except BaseException:
