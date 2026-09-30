@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from typing import Any
 
 from . import capture, db, logutil, spool, timeutil
@@ -92,6 +93,17 @@ def _maybe_spawn(conn: sqlite3.Connection, config: Config, wanted: bool) -> None
         spawn_indexer(config)
 
 
+def _spawn_for_migration(config: Config) -> None:
+    # The database cannot be written yet, so the throttle lives in a marker file instead of ``meta``.
+    marker = config.data_dir / ".migration-requested"
+    with contextlib.suppress(OSError):
+        if marker.exists() and time.time() - marker.stat().st_mtime < INDEXER_THROTTLE_SECONDS:
+            return
+        marker.touch()
+        if not env_flag("AGENT_MEM_NO_SPAWN"):
+            spawn_indexer(config)
+
+
 class _Worker(threading.Thread):
     def __init__(self, config: Config, event: Event) -> None:
         super().__init__(daemon=True)
@@ -105,9 +117,14 @@ class _Worker(threading.Thread):
     def run(self) -> None:
         conn: sqlite3.Connection | None = None
         try:
-            conn = db.connect(self.config)
+            conn = db.connect(self.config, fresh_only=True)
             self.response = capture.apply(conn, self.config, self.event)
             _maybe_spawn(conn, self.config, self.response.wants_indexer)
+        except db.MigrationPendingError as error:
+            # The indexer migrates (with backup) outside the deadline and then replays the spool.
+            self.error = f"{type(error).__name__}: {error}"
+            self._spool()
+            _spawn_for_migration(self.config)
         except (
             sqlite3.OperationalError,
             db.SchemaTooNewError,

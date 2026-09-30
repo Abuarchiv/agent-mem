@@ -27,6 +27,10 @@ class MigrationInProgressError(RuntimeError):
     """Another process is migrating the database."""
 
 
+class MigrationPendingError(RuntimeError):
+    """The database needs a migration that is too slow for the hook path."""
+
+
 def _migrations() -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     for entry in resources.files("agent_mem.schema").iterdir():
@@ -53,7 +57,11 @@ def _private_file(path: Path) -> None:
             os.chmod(path, 0o600)
 
 
-def connect(config: Config, *, busy_timeout_ms: int = BUSY_TIMEOUT_MS, migrate: bool = True) -> sqlite3.Connection:
+def connect(
+    config: Config, *, busy_timeout_ms: int = BUSY_TIMEOUT_MS, migrate: bool = True, fresh_only: bool = False
+) -> sqlite3.Connection:
+    """Open the database. ``fresh_only`` (hook path) creates a new schema but refuses to migrate an
+    existing database, because the pre-migration backup of a large file would outlast the deadline."""
     ensure_private_dir(config.data_dir)
     conn = sqlite3.connect(
         config.db_path, timeout=busy_timeout_ms / 1000, isolation_level=None, check_same_thread=False
@@ -67,6 +75,10 @@ def connect(config: Config, *, busy_timeout_ms: int = BUSY_TIMEOUT_MS, migrate: 
     conn.execute("PRAGMA synchronous = NORMAL")
     _private_file(config.db_path)
     if migrate:
+        current = user_version(conn)
+        if fresh_only and 0 < current < SCHEMA_VERSION:
+            conn.close()
+            raise MigrationPendingError(f"database schema {current} needs migration to {SCHEMA_VERSION}")
         migrate_database(conn, config)
     return conn
 
@@ -134,8 +146,18 @@ def backup(conn: sqlite3.Connection, config: Config, *, label: str = "daily") ->
     ensure_private_dir(config.backup_dir)
     stamp = timeutil.iso().replace(":", "").replace("-", "").replace(".", "")
     target = config.backup_dir / f"memory-{stamp}-{label}.db"
-    conn.execute("VACUUM INTO ?", (str(target),))
-    _private_file(target)
+    # Write under a name the backup globs ignore, so an interrupted backup never counts as one.
+    partial = target.with_name(target.name + ".partial")
+    with contextlib.suppress(OSError):
+        partial.unlink()
+    try:
+        conn.execute("VACUUM INTO ?", (str(partial),))
+        _private_file(partial)
+        os.replace(partial, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            partial.unlink()
+        raise
     return target
 
 

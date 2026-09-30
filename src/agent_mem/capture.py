@@ -75,13 +75,29 @@ def exclude_globs(config: Config, project: identity.Project | None) -> list[str]
 def apply(conn: sqlite3.Connection, config: Config, event: Event, *, with_context: bool = True) -> Response:
     if event.kind in {"pre_tool", "tool"} and event.is_own_tool:
         return Response()
-    project = identity.resolve(conn, event.cwd)
+    _bound_host_strings(event)
+    # Resolve without writing: excluded, paused or opted-out projects leave no trace.
+    project = identity.resolve(conn, event.cwd, register=False)
     if not capture_allowed(conn, config, project):
         return Response()
     with db.transaction(conn):
+        if project is not None:
+            identity.register_project(conn, project, event.cwd)
         response = _apply(conn, config, event, project, with_context)
         db.record_health(conn, f"hook:{event.harness}")
     return response
+
+
+def _bound_host_strings(event: Event) -> None:
+    """Short identifiers from the host are stored in columns too; clean and bound them like all text."""
+
+    def bounded(value: str | None, limit: int) -> str | None:
+        return privacy.clean_text(value, limit) or None if value else None
+
+    event.tool = bounded(event.tool, 200)
+    event.tool_use_id = bounded(event.tool_use_id, 128)
+    event.source = bounded(event.source, 64)
+    event.raw_kind = bounded(event.raw_kind, 64) or ""
 
 
 def _apply(
@@ -326,12 +342,19 @@ def _learn_rule(
     conn: sqlite3.Connection, config: Config, project_id: str | None, avoid: str, prefer: str | None, turn_id: int
 ) -> None:
     message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
-    conn.execute(
-        "INSERT INTO rules(project_id, kind, pattern, message, evidence, enabled, created_at) "
-        "VALUES (?, 'avoid_command', ?, ?, 1, 0, ?) ON CONFLICT(project_id, kind, pattern) DO UPDATE SET "
-        "evidence = evidence + 1, message = excluded.message",
-        (project_id, avoid, message, timeutil.iso()),
+    # UPDATE first with ``IS``: a UNIQUE constraint never matches NULL project ids, so an upsert would
+    # insert a new row for every correction made outside a project.
+    updated = conn.execute(
+        "UPDATE rules SET evidence = evidence + 1, message = ? "
+        "WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
+        (message, project_id, avoid),
     )
+    if updated.rowcount == 0:
+        conn.execute(
+            "INSERT INTO rules(project_id, kind, pattern, message, evidence, enabled, created_at) "
+            "VALUES (?, 'avoid_command', ?, ?, 1, 0, ?)",
+            (project_id, avoid, message, timeutil.iso()),
+        )
     row = conn.execute(
         "SELECT id, evidence FROM rules WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
         (project_id, avoid),
@@ -434,7 +457,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
         _append_json(conn, turn_id, "files_json", files)
     if tool_signal.command:
         _append_json(conn, turn_id, "commands_json", [privacy.clean_text(tool_signal.command, 200)])
-    if payload.get("error_line"):
+    if payload.get("error_line") and payload.get("trust") != "tool_external":
         _append_json(conn, turn_id, "errors_json", [str(payload["error_line"])[:200]], cap=10)
 
     importance = signals.IMPORTANCE["read"]
@@ -506,13 +529,17 @@ def _resolve_failures(
                     changed.append(path)
     for failure in failures:
         error_line = str(json.loads(failure["payload"]).get("error_line") or "")[:300]
-        conn.execute(
-            "INSERT INTO recipes(project_id, error_sig, error_text, command_key, files_json, successes, last_turn_id, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(project_id, error_sig, command_key) DO UPDATE SET "
-            "successes = successes + 1, files_json = excluded.files_json, last_turn_id = excluded.last_turn_id, "
-            "updated_at = excluded.updated_at",
-            (project_id, failure["error_sig"], error_line, command_key, json.dumps(changed[:10]), turn_id, ts),
+        updated = conn.execute(
+            "UPDATE recipes SET successes = successes + 1, files_json = ?, last_turn_id = ?, updated_at = ? "
+            "WHERE project_id IS ? AND error_sig = ? AND command_key = ?",
+            (json.dumps(changed[:10]), turn_id, ts, project_id, failure["error_sig"], command_key),
         )
+        if updated.rowcount == 0:
+            conn.execute(
+                "INSERT INTO recipes(project_id, error_sig, error_text, command_key, files_json, successes, "
+                "last_turn_id, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                (project_id, failure["error_sig"], error_line, command_key, json.dumps(changed[:10]), turn_id, ts),
+            )
     conn.executemany("UPDATE events SET resolved = 1 WHERE id = ?", [(f["id"],) for f in failures])
     _raise_importance(conn, turn_id, signals.IMPORTANCE["fixed"])
 

@@ -16,6 +16,7 @@ from datetime import datetime
 
 from . import learn, timeutil
 from .config import Config
+from .signals import first_line
 from .store import owner_label
 
 Owner = tuple[str, int]
@@ -173,6 +174,7 @@ class Hit:
     coverage: float = 0.0
     matched_terms: int = 0
     origin: str | None = None
+    answer: str = ""
 
     @property
     def label(self) -> str:
@@ -314,10 +316,9 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
             hits[("t", row["id"])] = Hit(
                 owner=("t", row["id"]),
                 kind="turn",
-                title=(row["prompt"] or row["answer"] or "").strip().splitlines()[0][:160]
-                if (row["prompt"] or row["answer"])
-                else "",
+                title=first_line(row["prompt"] or "", 160) or first_line(row["answer"] or "", 160),
                 text=text,
+                answer=row["answer"] or "",
                 ts=row["started_at"],
                 session_id=row["session_id"],
                 project_id=row["project_id"],

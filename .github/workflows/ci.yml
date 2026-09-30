@@ -46,6 +46,25 @@ jobs:
           agent-mem status --json
           agent-mem doctor || true
 
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.13"
+      - name: Build the source distribution
+        run: uv build --sdist
+      - name: Run the tests from the unpacked sdist
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/sdist"
+          tar xzf dist/*.tar.gz -C "$RUNNER_TEMP/sdist"
+          cd "$RUNNER_TEMP"/sdist/agent_mem-*
+          uv venv
+          uv pip install ".[semantic]" pytest
+          .venv/bin/python -m pytest -p no:cacheprovider
+
   opencode-plugin:
     runs-on: ubuntu-latest
     steps:

@@ -67,7 +67,7 @@ Harness notes:
 Bring in history from before the install:
 
 ```sh
-agent-mem import claude            # ~/.claude/projects/*/*.jsonl
+agent-mem import claude            # ~/.claude/projects/**/*.jsonl (subagent transcripts are skipped)
 agent-mem import codex             # ~/.codex/sessions/**/*.jsonl
 agent-mem import claude-mem ~/.claude-mem/claude-mem.db
 agent-mem import agentmemory export.json
@@ -78,17 +78,18 @@ If you used claude-mem or agentmemory, disable them afterwards; otherwise hooks 
 ## Commands
 
 ```
-agent-mem status | doctor [--fix] | paths
-agent-mem view [--project DIR] [--no-open]      # read-only HTML page of your memory
-agent-mem search "query" [--all-projects]      agent-mem show T12 M3
+agent-mem status [--json] | doctor [--fix] [--json] | paths
+agent-mem view [--project DIR] [--output FILE] [--no-open]   # read-only HTML page of your memory
+agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
+agent-mem show T12 M3
 agent-mem rules [list|enable|disable|delete] [ID]
 agent-mem lessons                               # suggested lines for AGENTS.md / CLAUDE.md
 agent-mem pause [--for 2h] | resume
 agent-mem export [--project DIR] [--output FILE]
-agent-mem purge --id ID | --project DIR | --before DATE | --all
-agent-mem backup | restore [--latest]
-agent-mem consolidate | index | eval <longmemeval.json>
-agent-mem setup <harness> | models [status|install] | import <source> | paths
+agent-mem purge --id ID | --project DIR | --before DATE | --all  [--yes]
+agent-mem backup | restore [FILE | --latest]
+agent-mem consolidate | index [--no-download] | eval <longmemeval.json>
+agent-mem setup <harness> [--write] | models [status|install] | import <source> [PATH] [--dry-run]
 ```
 
 MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`.

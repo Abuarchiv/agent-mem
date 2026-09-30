@@ -320,7 +320,8 @@ _CORRECTION = re.compile(
     r"(?i)^\s*(nein|no\b|nope|falsch|wrong|stop\b|halt\b|nicht so|not like that|that's not|das ist nicht|"
     r"das stimmt nicht|incorrect|undo|rückgängig|mach das rückgängig)"
     r"|\b(ich hab(e)? (doch )?gesagt|i (already )?(told|said)|hör auf|don't do that|do not do that|"
-    r"nicht schon wieder|again\?|immer noch falsch|still wrong)\b"
+    r"nicht schon wieder|immer noch falsch|still wrong)\b"
+    r"|\bagain\?"
 )
 _ALWAYS_NEVER = re.compile(r"(?i)\b(immer|nie(mals)?|always|never|stets|grundsätzlich)\b")
 _INSTEAD = [

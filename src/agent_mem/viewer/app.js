@@ -515,7 +515,7 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
 <div class="row"><b>Data directory</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
 <div class="row"><span class="grow wrap"><b>Not encrypted at rest</b><span>Anyone who can read the data directory or its backups can read your memory.</span></span></div>
-<div class="row"><span class="grow wrap"><b>This page is a local file</b><span>It holds a copy of recent data and makes no network requests. <code>agent-mem purge</code> deletes it too.</span></span></div>
+<div class="row"><span class="grow wrap"><b>This page is a local file</b><span>It holds a copy of recent data and makes no network requests. <code>agent-mem purge</code> deletes it too, unless you wrote it elsewhere with <code>--output</code>.</span></span></div>
 <div class="row"><span class="grow wrap"><b>Redaction</b><span>Secrets are redacted and private sections dropped before anything is stored.</span></span></div></section>
 </div></div>`;
   }

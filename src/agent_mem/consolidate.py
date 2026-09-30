@@ -17,7 +17,7 @@ from pathlib import Path
 from . import db, identity, learn, store, timeutil
 from .config import Config
 
-_NORMALIZE = re.compile(r"[^a-z0-9äöüß]+")
+_NORMALIZE = re.compile(r"[\W_]+")  # Unicode-aware: Cyrillic, CJK etc. keep their letters
 
 
 def _norm(text: str) -> str:
@@ -50,7 +50,8 @@ def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[
 def _promote_preferences(conn: sqlite3.Connection) -> int:
     rows = conn.execute(
         "SELECT title, body, COUNT(DISTINCT project_id) AS projects FROM memories "
-        "WHERE kind = 'preference' AND project_id IS NOT NULL AND invalid_at IS NULL GROUP BY body HAVING projects >= 2"
+        "WHERE kind = 'preference' AND source = 'hook' AND trust = 'user' AND project_id IS NOT NULL "
+        "AND invalid_at IS NULL GROUP BY body HAVING projects >= 2"
     ).fetchall()
     created = 0
     for row in rows:
@@ -77,7 +78,10 @@ def _supersede_duplicates(conn: sqlite3.Connection) -> int:
     latest: dict[tuple[str | None, str, str], int] = {}
     count = 0
     for row in rows:
-        key = (row["project_id"], row["kind"], _norm(row["title"])[:120])
+        normalized = _norm(row["title"])[:120]
+        if not normalized:
+            continue
+        key = (row["project_id"], row["kind"], normalized)
         if key in latest:
             store.supersede(conn, latest[key], int(row["id"]))
             count += 1

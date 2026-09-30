@@ -200,7 +200,8 @@ class Retriever:
             "SELECT v.owner_type, v.owner_id, v.vec FROM vectors v "
             "LEFT JOIN turns t ON v.owner_type = 't' AND t.id = v.owner_id "
             "LEFT JOIN memories m ON v.owner_type = 'm' AND m.id = v.owner_id "
-            "WHERE v.model = ? AND (t.project_id IS ? OR m.project_id IS ? OR (v.owner_type = 'm' AND m.project_id IS NULL))",
+            "WHERE v.model = ? AND ((v.owner_type = 't' AND t.project_id IS ?) "
+            "OR (v.owner_type = 'm' AND (m.project_id IS ? OR m.project_id IS NULL)))",
             (self.embedder.model, project_id, project_id),
         ).fetchall()
         if not rows:
@@ -322,7 +323,7 @@ _TIME_HINT = re.compile(
     r"am\s+(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)|"
     r"today|yesterday|last\s+(week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
     r"this\s+(week|month)|\d+\s+(days?|weeks?|months?|hours?)\s+ago|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
-    r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.(\d{2,4})?)"
+    r"\d{4}-\d{2}-\d{2}|(?<![\d.])\d{1,2}\.\d{1,2}\.(?:\d{2,4})?(?![\d.]))"  # 3.4. / 3.4.2026, not 1.2.3
 )
 
 
@@ -363,7 +364,8 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
         return begin, begin + timedelta(days=7)
     if re.search(r"(?i)monat|month", lowered):
         begin = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        return begin, begin + timedelta(days=32)
+        end = begin.replace(year=begin.year + 1, month=1) if begin.month == 12 else begin.replace(month=begin.month + 1)
+        return begin, end
     begin = start.replace(hour=0, minute=0, second=0, microsecond=0)
     return begin, begin + timedelta(days=1)
 

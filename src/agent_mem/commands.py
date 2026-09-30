@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import sqlite3
 import sys
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -42,7 +44,13 @@ def _conn(config: Config) -> sqlite3.Connection:
 
 
 def _project(conn: sqlite3.Connection, directory: str | None) -> identity.Project | None:
-    return identity.resolve(conn, os.path.abspath(directory or os.getcwd()))
+    """Known project for ``directory`` (default: cwd). Read-only: commands never register projects."""
+    return identity.find(conn, os.path.abspath(directory or os.getcwd()))
+
+
+def _unknown_project(directory: str) -> int:
+    print(f"No captured project at {os.path.abspath(directory)}.", file=sys.stderr)
+    return 2
 
 
 def cmd_status(ns: argparse.Namespace, config: Config) -> int:
@@ -82,6 +90,8 @@ def cmd_search(ns: argparse.Namespace, config: Config) -> int:
 
     with _conn(config) as conn:
         project = _project(conn, ns.project)
+        if ns.project and project is None:
+            return _unknown_project(ns.project)
         retriever = semantic.Retriever(conn, config, semantic.load_embedder(config))
         hits = retriever.search(
             ns.query,
@@ -120,11 +130,14 @@ def cmd_show(ns: argparse.Namespace, config: Config) -> int:
 
 
 def _duration(text: str) -> timedelta:
-    match = re.fullmatch(r"(\d+)\s*([mhd])", text.strip().lower())
+    match = re.fullmatch(r"(\d{1,6})\s*([mhd])", text.strip().lower())
     if not match:
         raise SystemExit("duration must look like 30m, 2h or 1d")
     value, unit = int(match.group(1)), match.group(2)
-    return {"m": timedelta(minutes=value), "h": timedelta(hours=value), "d": timedelta(days=value)}[unit]
+    duration = {"m": timedelta(minutes=value), "h": timedelta(hours=value), "d": timedelta(days=value)}[unit]
+    if duration > timedelta(days=3650):
+        raise SystemExit("duration must be at most 10 years; use `agent-mem pause` without --for to pause indefinitely")
+    return duration
 
 
 def cmd_pause(ns: argparse.Namespace, config: Config) -> int:
@@ -170,6 +183,8 @@ def _rows(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> l
 def cmd_export(ns: argparse.Namespace, config: Config) -> int:
     with _conn(config) as conn:
         project = _project(conn, ns.project) if ns.project else None
+        if ns.project and project is None:
+            return _unknown_project(ns.project)
         where, params = ("WHERE project_id = ?", (project.id,)) if project else ("", ())
         data = {
             "version": 2,
@@ -217,17 +232,28 @@ def _delete_owners(conn: sqlite3.Connection, owners: list[tuple[str, int]]) -> N
         store.delete_owner(conn, *owner)
 
 
+def _purge_spooled(config: Config, matches: Callable[[dict[str, Any]], bool]) -> int:
+    """Spooled and quarantined events both hold full event copies."""
+    return spool.purge_matching(config.spool_dir, matches) + spool.purge_matching(config.quarantine_dir, matches)
+
+
 def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
     from . import viewer
 
-    # A written page holds a copy of the data; it must not outlive a purge.
-    viewer.discard(config)
+    # A written page holds a copy of the data; it must not outlive a purge. It is discarded only
+    # once the purge is confirmed.
     if ns.all:
         if not _confirm(ns, "delete ALL agent-mem data"):
             return 1
         import shutil
 
-        for path in (config.db_path, Path(f"{config.db_path}-wal"), Path(f"{config.db_path}-shm")):
+        viewer.discard(config)
+        for path in (
+            config.db_path,
+            Path(f"{config.db_path}-wal"),
+            Path(f"{config.db_path}-shm"),
+            Path(f"{config.db_path}.replaced"),
+        ):
             if path.exists():
                 path.unlink()
         for folder in (config.backup_dir, config.spool_dir, config.quarantine_dir, config.log_dir):
@@ -240,13 +266,17 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
             if owner is None:
                 print("invalid id", file=sys.stderr)
                 return 2
+            viewer.discard(config)
             with db.transaction(conn):
                 deleted = store.delete_owner(conn, *owner)
             print(f"Deleted {ns.id}." if deleted else f"{ns.id} not found.")
         elif ns.project:
             project = _project(conn, ns.project)
-            if project is None or not _confirm(ns, f"delete all data of project {project.name}"):
+            if project is None:
+                return _unknown_project(ns.project)
+            if not _confirm(ns, f"delete all data of project {project.name}"):
                 return 1
+            viewer.discard(config)
             with db.transaction(conn):
                 owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE project_id = ?", (project.id,))]
                 owners += [
@@ -255,8 +285,8 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM entities WHERE project_id = ?", (project.id,))
                 conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
-            removed = spool.purge_matching(
-                config.spool_dir,
+            removed = _purge_spooled(
+                config,
                 lambda r: (
                     bool((r.get("event") or {}).get("cwd")) and identity.is_within(str(r["event"]["cwd"]), project.root)
                 ),
@@ -269,6 +299,7 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 return 2
             if not _confirm(ns, f"delete everything before {ns.before}"):
                 return 1
+            viewer.discard(config)
             stamp = timeutil.iso(cutoff)
             with db.transaction(conn):
                 owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE started_at < ?", (stamp,))]
@@ -276,11 +307,12 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 _delete_owners(conn, owners)
                 conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
                 conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
-            removed = spool.purge_matching(
-                config.spool_dir, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp
-            )
+            removed = _purge_spooled(config, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp)
             print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
         conn.execute("VACUUM")
+        # The copy kept by ``restore`` holds the old data as well.
+        with contextlib.suppress(OSError):
+            Path(f"{config.db_path}.replaced").unlink()
         db.rebuild_backups(conn, config)
         with db.transaction(conn):
             db.set_meta(conn, "last_backup_at", timeutil.iso())
@@ -357,7 +389,7 @@ def cmd_lessons(ns: argparse.Namespace, config: Config) -> int:
             )
         for row in conn.execute(
             "SELECT title FROM memories WHERE (project_id IS ? OR project_id IS NULL) AND kind IN ('decision', 'preference') "
-            "AND invalid_at IS NULL ORDER BY importance DESC, created_at DESC LIMIT 5",
+            "AND (kind = 'decision' OR trust = 'user') AND invalid_at IS NULL ORDER BY importance DESC, created_at DESC LIMIT 5",
             (project_id,),
         ):
             lines.append(f"- {row['title']}")

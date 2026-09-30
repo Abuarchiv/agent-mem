@@ -5,6 +5,18 @@
 - Repeated corrections no longer pile up near-identical preference memories ("… (corrected 2x)", "… (corrected 3x)", …). The newest one supersedes the earlier ones, so briefings and search show it once.
 - Removed the unused `privacy.error_lines`.
 
+Fixes from a production-readiness review:
+
+- **Projects:** a plain (non-git) directory registered as a project no longer swallows git repositories nested below it. Excluded, paused and opted-out projects leave no path in the database, and read-only commands (`search`, `export`, `lessons`) no longer register the current directory as a project.
+- **Safety:** stored text can no longer close the `<agent-mem>` data frame (nested or case-varied tags). Error text from web and third-party MCP tools is no longer shown in compaction context or prompt hints. Agents can no longer store preferences through `mem_remember`, and they can supersede only agent memories of their own project. Only preferences learned from the user's prompts are promoted to global ones. `agent-mem import claude` skips subagent transcripts, so an agent's prompts no longer become the user's rules.
+- **Hooks:** an older database is migrated by the background indexer instead of inside the hook deadline, and backups are written atomically, so an interrupted backup never counts as one. Out-of-range timestamps and malformed Codex event names no longer drop events. Repeated Copilot CLI subagents of the same type each get a briefing. Tool names and ids from hosts are cleaned and bounded like all other stored text. The OpenCode plugin decodes multi-byte output correctly.
+- **Learning:** rules and error→fix recipes outside a project now gather evidence instead of adding a new row per correction. Consolidation no longer supersedes unrelated memories with non-Latin titles. "again?" is recognized as a correction.
+- **Search:** version numbers such as `1.2.3` are no longer read as dates. "last month" ends on the first of the current month. A whitespace-only prompt no longer breaks search. Token budgets count CJK and other wide characters correctly.
+- **CLI:** `export`/`search --project` with an unknown directory fail instead of exporting or searching everything. `purge` also deletes quarantined events and the copy kept by `restore`, and it keeps the view page when you decline the confirmation. Odd ids (`T²`, huge numbers) and durations are rejected cleanly, and `doctor` reports a migration in progress instead of crashing.
+- **Summaries:** when the summarizing harness is not installed, sessions stay pending and no daily budget is used.
+- **Imports:** agentmemory items without an id and claude-mem rows from different databases are no longer dropped as duplicates.
+- **Packaging:** the sdist includes the marketplace manifests, so its test suite passes. CI builds the sdist and runs the tests from it, and the release workflow runs lint and type checks.
+
 ## 1.0.0 — 2026-09-29
 
 First release.

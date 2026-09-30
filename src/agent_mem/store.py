@@ -183,9 +183,11 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
 def parse_owner(text: str) -> tuple[str, int] | None:
     """Parse visible ids such as ``T12`` or ``M7``."""
     value = text.strip().upper().lstrip("#")
-    if len(value) < 2 or value[0] not in {"T", "M"} or not value[1:].isdigit():
+    digits = value[1:]
+    if len(value) < 2 or value[0] not in {"T", "M"} or not (digits.isascii() and digits.isdigit()):
         return None
-    return value[0].lower(), int(value[1:])
+    number = int(digits)
+    return (value[0].lower(), number) if number < 2**63 else None  # SQLite INTEGER range
 
 
 def owner_label(owner_type: str, owner_id: int) -> str:

@@ -27,7 +27,8 @@ function callHook(event: string, payload: Record<string, unknown>): Promise<Hook
         child.kill()
         finish({})
       }, TIMEOUT_MS)
-      child.stdout.on("data", (chunk) => (out += chunk.toString()))
+      child.stdout.setEncoding("utf8")
+      child.stdout.on("data", (chunk: string) => (out += chunk))
       child.on("error", () => finish({}))
       child.on("close", () => {
         clearTimeout(timer)
