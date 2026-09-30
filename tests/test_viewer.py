@@ -123,3 +123,17 @@ def test_is_within_compares_whole_path_segments(tmp_path: Path):
     assert identity.is_within(root, root)
     assert identity.is_within(str(root / "src"), root)
     assert not identity.is_within(str(tmp_path / "proj2"), root)
+
+
+def test_stylesheet_uses_design_tokens_only():
+    """Colors, radii and fonts are defined once as tokens in the :root blocks; rules must reference them."""
+    css = resources.files("agent_mem.viewer").joinpath("app.css").read_text(encoding="utf-8")
+    rules = re.sub(r":root\s*\{[^}]*\}", "", css)
+    rules = re.sub(r"@media \(prefers-color-scheme: dark\)\s*\{\s*\}", "", rules)
+    literals = re.findall(r"#[0-9A-Fa-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)", rules)
+    assert literals == [], f"use a token from :root instead of {literals}"
+    radii = [value.strip() for value in re.findall(r"border-radius:\s*([^;}]+)", rules)]
+    assert [value for value in radii if not value.startswith("var(--radius-") and value != "50%"] == []
+    families = re.findall(r"font-family:\s*([^;}]+)|font:\s*([^;}]+)", rules)
+    stacks = [family or shorthand for family, shorthand in families]
+    assert [stack for stack in stacks if "var(--" not in stack and stack.strip() != "inherit"] == []

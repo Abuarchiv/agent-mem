@@ -4,6 +4,8 @@
 
 - Repeated corrections no longer pile up near-identical preference memories ("… (corrected 2x)", "… (corrected 3x)", …). The newest one supersedes the earlier ones, so briefings and search show it once.
 - Removed the unused `privacy.error_lines`.
+- `agent-mem view`: every color, radius and font now comes from a design token (checked by a test). Control borders and the warning color meet WCAG AA contrast in both themes.
+- `agent-mem view`: backtick spans in memory bodies render as code; action headers in the turn detail no longer spread across the panel; the association graph appears already settled when the system asks for reduced motion.
 
 ## 1.0.0 — 2026-09-29
 

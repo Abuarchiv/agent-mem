@@ -27,7 +27,7 @@ Agent Mem captures harness hooks (Claude Code, Codex, Copilot CLI, OpenCode) int
 - Events have one write path: `capture.apply` (live hooks, spool replay, transcript imports); keep it idempotent (dedupe keys). Memories are written only through `store.add_memory`, which cleans title and body.
 - Schema changes go into a new numbered file in `src/agent_mem/schema/` and need a migration test.
 - Plugin manifests in `plugins/` must keep the package version (checked by tests).
-- `viewer/` is loaded by the CLI only. Its page escapes every stored string; `purge` must delete written pages.
+- `viewer/` (the `agent-mem view` page) is loaded by the CLI only and follows the Agent Mem design book: colors, fonts and radii only through the tokens in the `:root` blocks of `app.css` (discs use 50%; checked by tests), every stored string escaped, no network access. `purge` must delete written pages.
 
 ## Development
 

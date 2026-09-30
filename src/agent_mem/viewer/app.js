@@ -21,7 +21,6 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-    refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
   };
   const icon = (name, size = 20, width = 1.8) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 
@@ -316,7 +315,7 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
     const pills = `<div class="pill-group" role="group" aria-label="Filter by kind"><button type="button" class="pill" data-action="kind" data-value="all" aria-pressed="${state.kind === "all"}">All ${num(pool.length)}</button>${MEMORY_KINDS.filter((kind) => counts.get(kind)).map((kind) => `<button type="button" class="pill" data-action="kind" data-value="${kind}" aria-pressed="${state.kind === kind}">${h(readable(kind))} ${num(counts.get(kind))}</button>`).join("")}<button type="button" class="pill" data-action="invalid" aria-pressed="${state.invalid}">Include superseded</button></div>`;
     const cards = shown.map((memory) => {
       const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} shown` : memory.used ? `used ${num(memory.used)}×` : "not recalled yet";
-      return `<article class="memory-card${memory.invalid_at ? " invalid" : ""}"><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b><span class="muted">${h(when(memory.created_at))}</span></header><h3>${inline(memory.title)}</h3>${memory.body && memory.body.trim() !== memory.title.trim() ? `<p>${h(memory.body)}</p>` : ""}
+      return `<article class="memory-card${memory.invalid_at ? " invalid" : ""}"><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b><span class="muted">${h(when(memory.created_at))}</span></header><h3>${inline(memory.title)}</h3>${memory.body && memory.body.trim() !== memory.title.trim() ? `<p>${inline(memory.body)}</p>` : ""}
 <div class="meter"><span>activation</span><span class="track"><i style="width:${Math.round(memory.activation * 100)}%"></i></span></div>
 <footer>${projectTag(memory.project_id)}${tag(`${memory.source}${memory.origin ? ` · ${memory.origin}` : ""}`)}${tag(`trust ${memory.trust}`)}${tag(usage)}${memory.turn_id ? `<a class="tag" href="${hashFor("timeline", { turn: String(memory.turn_id) })}">from T${memory.turn_id}</a>` : ""}${memory.invalid_at ? tag(memory.superseded_by ? `superseded by M${memory.superseded_by}` : `invalid since ${dayLabel(dayKey(memory.invalid_at))}`, "warn") : ""}</footer></article>`;
     }).join("");
@@ -428,27 +427,29 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
       }
       context.globalAlpha = 1;
     };
+    // One step of the force layout: repulsion between all nodes, springs along links, a pull to the center.
+    const step = () => {
+      for (let i = 0; i < nodes.length; i += 1) {
+        const a = nodes[i];
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const b = nodes[j]; let dx = b.x - a.x, dy = b.y - a.y; const d2 = Math.max(dx * dx + dy * dy, 64); const d = Math.sqrt(d2); const f = 1800 / d2; dx /= d; dy /= d;
+          if (drag !== a) { a.vx -= dx * f * alpha; a.vy -= dy * f * alpha; }
+          if (drag !== b) { b.vx += dx * f * alpha; b.vy += dy * f * alpha; }
+        }
+        if (drag !== a) { a.vx -= a.x * 0.002 * alpha; a.vy -= a.y * 0.002 * alpha; }
+      }
+      for (const edge of edges) {
+        const a = byId.get(edge.a), b = byId.get(edge.b); const dx = b.x - a.x, dy = b.y - a.y; const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+        const f = (d - (140 - edge.weight * 70)) * 0.01 * (0.4 + edge.weight) * alpha;
+        if (drag !== a) { a.vx += dx / d * f; a.vy += dy / d * f; }
+        if (drag !== b) { b.vx -= dx / d * f; b.vy -= dy / d * f; }
+      }
+      for (const node of nodes) { if (drag === node) continue; node.vx = Math.max(-10, Math.min(10, node.vx)) * 0.85; node.vy = Math.max(-10, Math.min(10, node.vy)) * 0.85; node.x += node.vx; node.y += node.vy; }
+      alpha *= 0.985;
+    };
     const tick = () => {
       raf = 0;
-      if (alpha > 0.02) {
-        for (let i = 0; i < nodes.length; i += 1) {
-          const a = nodes[i];
-          for (let j = i + 1; j < nodes.length; j += 1) {
-            const b = nodes[j]; let dx = b.x - a.x, dy = b.y - a.y; const d2 = Math.max(dx * dx + dy * dy, 64); const d = Math.sqrt(d2); const f = 1800 / d2; dx /= d; dy /= d;
-            if (drag !== a) { a.vx -= dx * f * alpha; a.vy -= dy * f * alpha; }
-            if (drag !== b) { b.vx += dx * f * alpha; b.vy += dy * f * alpha; }
-          }
-          if (drag !== a) { a.vx -= a.x * 0.002 * alpha; a.vy -= a.y * 0.002 * alpha; }
-        }
-        for (const edge of edges) {
-          const a = byId.get(edge.a), b = byId.get(edge.b); const dx = b.x - a.x, dy = b.y - a.y; const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          const f = (d - (140 - edge.weight * 70)) * 0.01 * (0.4 + edge.weight) * alpha;
-          if (drag !== a) { a.vx += dx / d * f; a.vy += dy / d * f; }
-          if (drag !== b) { b.vx -= dx / d * f; b.vy -= dy / d * f; }
-        }
-        for (const node of nodes) { if (drag === node) continue; node.vx = Math.max(-10, Math.min(10, node.vx)) * 0.85; node.vy = Math.max(-10, Math.min(10, node.vy)) * 0.85; node.x += node.vx; node.y += node.vy; }
-        alpha *= 0.985;
-      }
+      if (alpha > 0.02) step();
       draw();
       if (alpha > 0.02) raf = requestAnimationFrame(tick);
     };
@@ -474,9 +475,16 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
     canvas.addEventListener("pointerdown", down); canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up); canvas.addEventListener("pointerleave", leave); canvas.addEventListener("wheel", wheel, { passive: false }); canvas.addEventListener("keydown", key);
     scheme?.addEventListener?.("change", draw);
     observer?.observe(host);
-    resize(); fit(); describe(undefined); wake();
-    // Fit once more after the layout settles so the graph fills the stage.
-    setTimeout(fit, 1200);
+    resize(); describe(undefined);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      // No animated layout: settle it before the first frame.
+      while (alpha > 0.02) step();
+      fit();
+    } else {
+      fit(); wake();
+      // Fit once more after the layout settles so the graph fills the stage.
+      setTimeout(fit, 1200);
+    }
     return {
       zoomBy: (factor) => zoom(factor),
       reset: () => { select(undefined); fit(); },
