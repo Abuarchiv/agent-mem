@@ -63,7 +63,7 @@ mem0 2.2.1 fügt bei Korrekturen nur hinzu (getestet mit `qwen3.5:4b`, `qwen3.6:
 | 1 (4 Tage) | Spool → Memory-Agent → mem0 → Injection für Claude Code; Widerspruchsschicht | echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst alten Fakt ab |
 | 2 (2 Tage) | Messung: LongMemEval-S gegen reines mem0 und gegen diesen Stack, dazu Fixture erneut | Zahlen im Plan-Anhang |
 | 3 (3 Tage) | Codex und Copilot anbinden, OpenCode über Claude/Codex | je Harness eine echte Session |
-| 4 | Löschen: `search`, `semantic`, `store`, `db`-Schema, `summarize`, `consolidate`, `importers`, `evaluate` (Viewer und `views` bleiben) | Tests grün, Zeilenzahl sinkt |
+| 4 | Löschen nur ohne Viewer-Abhängigkeit: `semantic`, `summarize`, `importers`, `evaluate`, Vektor-Indexer. `search`, `store`, `consolidate`, `learn`, `health` und das DB-Schema bleiben, solange der Viewer sie importiert (`views.py`, `viewer/__init__.py`). Ihre Abschaffung folgt der Viewer-Entscheidung aus §10.1 | Tests grün, Viewer rendert |
 
 Insgesamt etwa 11 Arbeitstage statt 36 plus Dogfooding. Danach 2 Wochen Dogfooding, dann Entscheidung über `lesson`/`rule`/Graph anhand der Messung.
 
@@ -108,7 +108,7 @@ Ein `add` pro Turn, nicht pro Tool-Call. Mehr als ein Turn in der Warteschlange 
 ## 10. Viewer und Hintergrund-Beobachtung (Entscheidung 2026-10-12)
 
 ### 10.1 Viewer bleibt
-`viewer/` und `views.py` werden nicht gelöscht und nicht angefasst. Sie lesen weiter aus der SQLite-Datenbank, die das Hook-Capture schreibt (Sessions, Turns, Events, Spool, §9.2). Was der Viewer aus mem0-Fakten zeigen soll (Fakten-Liste, Zeitachse, Entitäten), wird später entschieden. Bis dahin zeigt er den Event-Log. Löschen in Phase 4 betrifft ihn nicht.
+`viewer/` und `views.py` werden nicht gelöscht und nicht angefasst. Sie lesen weiter aus der SQLite-Datenbank, die das Hook-Capture schreibt (Sessions, Turns, Events, Spool, §9.2). Was der Viewer aus mem0-Fakten zeigen soll (Fakten-Liste, Zeitachse, Entitäten), wird später entschieden. Bis dahin zeigt er den Event-Log. Löschen in Phase 4 betrifft ihn nicht: Er importiert `consolidate`, `learn`, `search`, `store` und `health` und liest die Tabelle `memories`. Diese Module und das Schema bleiben deshalb vorerst.
 
 ### 10.2 Beobachtung läuft im Hintergrund, nie im Hook
 Das war schon Absicht und wird hier festgeschrieben:
