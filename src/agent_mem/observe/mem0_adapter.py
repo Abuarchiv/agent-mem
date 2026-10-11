@@ -72,8 +72,18 @@ def _register() -> None:
 
 
 def _ensure_env(mem0_dir: Path) -> None:
+    """Point mem0 at our directory. Its modules copied the value at import time, so patch those too."""
+    import mem0.configs.base as mem0_configs_base
+    import mem0.memory.main as mem0_main
+    import mem0.memory.setup as mem0_setup
+    import mem0.memory.telemetry as mem0_telemetry
+
     os.environ["MEM0_TELEMETRY"] = "False"
     os.environ["MEM0_DIR"] = str(mem0_dir)
+    mem0_telemetry.MEM0_TELEMETRY = False
+    mem0_main.MEM0_TELEMETRY = False
+    for module in (mem0_setup, mem0_main, mem0_configs_base):
+        setattr(module, "mem0_dir", str(mem0_dir))  # noqa: B010  (module globals read at call time)
     mem0_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(mem0_dir, 0o700)
 
