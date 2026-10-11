@@ -25,11 +25,12 @@ Nicht-Ziele: Cloud-Sync, Mehrbenutzer, Verschlüsselung der Datenbank, eigener G
 | D5 | Wahrheit ist SQLite (Events, Turns, `memories`). mem0 plus Qdrant ist Extraktionsmaschine und Index, jederzeit neu aufbaubar. | Begrenzt Abhängigkeit von einem Fremdprojekt. |
 | D6 | Jeder von mem0 erzeugte Fakt wird als Zeile in `memories` gespiegelt (`kind='fact'`, `source='agent'`). | Schema hat `invalid_at`, `superseded_by`, `importance`, `dedupe_key` schon (`schema/001_init.sql:78`). Viewer und FTS5-Suche laufen so weiter. |
 | D7 | Widersprüche löst eine eigene Schicht über `store.supersede`. mem0 allein tut das nicht. | Gemessen mit drei Modellen (A.1). |
-| D8 | Vektor-Store ist Qdrant im Pfad-Modus, jede Operation unter `filelock` (öffnen, arbeiten, schließen). Ersatz ist Chroma. | Qdrant als einziger lokaler Store mit BM25 in mem0, nur ein Prozess gleichzeitig; mit Sperre 30 von 30 Schreibvorgänge, 7 bis 8 ms (A.4). Chroma verträgt Parallelität, hat aber keine Keyword-Suche (A.5). |
+| D8 | Vektor-Store ist Qdrant im Pfad-Modus. Der Worker öffnet ihn **einmal pro Lauf** unter `filelock`, arbeitet die ganze Warteschlange ab und schließt. Nicht pro Operation. Ersatz ist Chroma. | Qdrant als einziger lokaler Store mit BM25 in mem0, nur ein Prozess gleichzeitig (A.4). Öffnen lädt die ganze Collection in den Speicher: 34 ms bei 1.000, 161 ms bei 5.000, 689 ms bei 20.000 Vektoren (A.11). Pro Operation öffnen wäre bei realen Mengen zu teuer. Chroma verträgt Parallelität, hat aber keine Keyword-Suche (A.5). |
 | D9 | Kein Neo4j und kein Graphiti vorab. mem0 bringt Entity-Linking mit (spaCy, zweite Collection). | Im Paket kein Graph-Store mehr (A.6). Ein Graph-Spike nur bei klarer Messlücke (§12). |
 | D10 | Der Viewer bleibt unverändert. Was er künftig zeigt, wird später entschieden. | Entscheidung des Nutzers. Er liest `memories`, dadurch zeigt er die gespiegelten Fakten automatisch. |
 | D11 | Embedder nur aus der fastembed-Liste, ohne eigene Registrierung. Sieger per Messung (§8, Phase 0). | Weniger Eigenpflege. |
-| D12 | Provider-Kette für den Worker: Claude (Haiku) → Codex → Copilot → Ollama → rohe Beobachtung. Je Stufe überspringbar, wenn nicht installiert oder Quota erschöpft. | Alle Stufen außer Copilot gemessen (A.7). |
+| D12 | Provider-Kette für den Worker: Claude (Haiku) → Codex → Copilot → Ollama → rohe Beobachtung. Je Stufe überspringbar, wenn nicht installiert oder Quota erschöpft. **Standard ist anbietertreu:** Ein Turn geht nur an den Anbieter, der ihn schon gesehen hat (Claude-Turn → Claude, Codex-Turn → Codex, Copilot-Turn → Copilot), dann Ollama, dann roh. OpenCode-Turns gehen an Ollama und roh. `observe.cross_vendor = true` schaltet die volle Kette frei. | Alle Stufen außer Copilot gemessen (A.7). Ohne Anbietertreue würde Code aus einer Claude-Session bei Quota-Ende an OpenAI gehen und umgekehrt; das entscheidet der Nutzer, nicht die Kette. |
+| D13 | Alle Fakten liegen in einem Namespace je Projekt (`user_id = "<nutzer>|p:<projekt_id>"`). Kein `run_id`, kein globaler Namespace in dieser Fassung. | mem0 filtert mit `run_id` auch die Ähnlichkeitssuche beim `add` auf die Session und sähe Fakten anderer Sessions nicht (`main.py:386-388`). Ein globaler Namespace bräuchte eine Zuordnung pro Fakt, die mem0 nicht liefert; Präferenzen und Regeln kommen weiter aus `learn` (R5). |
 
 ## 3. Architektur und Datenfluss
 
@@ -65,12 +66,13 @@ Garantien:
 Tabelle `observe_queue(turn_id PRIMARY KEY, state CHECK IN ('pending','running','done','raw','failed'), attempts, next_try, provider, last_error, updated_at)`. Ein Eintrag wird beim Abschluss eines Turns angelegt (in `capture.apply`, selbe Transaktion). `state='running'` hat ein Lease (Zeitstempel); abgelaufene Leases gelten wieder als `pending`. Migrationstest nach Regel R6 (§13).
 
 ### 4.3 Worker `agent-mem observe`
-1. Start durch den Hook: `subprocess.Popen([...,'observe','--drain'], start_new_session=True, stdin/stdout/stderr=DEVNULL)`. Vorher nicht-blockierender Versuch auf `observe.lock`. Hält ein Worker den Lock, tut der Hook nichts.
-2. Schleife: nächsten `pending` Turn mit `next_try <= jetzt` leasen, bearbeiten, Ergebnis schreiben. Leere Warteschlange → Lock freigeben, Prozess beendet sich.
-3. Bündelung: Liegen mehrere Turns derselben Session an, geht ein `add` mit allen (Reihenfolge erhalten). Ein `add` pro Bündel, nie pro Tool-Call.
-4. Limits: höchstens 1 Worker, Tageslimit für Aufrufe in `config` (Standard 300). Bei Erreichen: nächste Stufe der Kette (§4.4), zuletzt roh.
-5. Fehler: Backoff 1 min, 5 min, 30 min, 6 h, danach `failed` (bleibt im Viewer sichtbar, Neuversuch per `agent-mem observe --retry-failed`).
-6. Jeder Aufruf setzt `MEM0_TELEMETRY=False` und `MEM0_DIR=<Datenverzeichnis>/mem0` (Rechte 0o700).
+1. Start durch den Hook: `subprocess.Popen([sys.executable, '-m', 'agent_mem', 'observe', '--drain'], stdin/stdout/stderr=DEVNULL)` mit `start_new_session=True` (POSIX) bzw. `creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` (Windows). Kein `uv run` im Hook-Pfad. Vorher nicht-blockierender Versuch auf `observe.lock`. Hält ein Worker den Lock, tut der Hook nichts.
+2. Schleife: nächsten `pending` Turn mit `next_try <= jetzt` leasen, bearbeiten, Ergebnis schreiben. Leere Warteschlange → bis zu `observe.idle_seconds` (Standard 90) auf neue Einträge warten, dann Lock freigeben und beenden. Grund: Jeder Start lädt mem0, Qdrant, fastembed und spaCy neu (mehrere Sekunden CPU); ein Turn alle 30 s würde sonst dauernd neu starten. Begrenzte Lebenszeit, also kein Daemon (R1).
+3. Der Worker setzt sich selbst auf niedrige Priorität (`os.nice(10)`, Windows `BELOW_NORMAL_PRIORITY_CLASS`). „Nicht verlangsamen" (D3) heißt auch CPU und Akku, nicht nur Hook-Latenz.
+4. Bündelung: Liegen mehrere Turns derselben Session an, geht ein `add` mit allen (Reihenfolge erhalten). Ein `add` pro Bündel, nie pro Tool-Call. Inhalt eines Bündels: Nutzer-Prompts vollständig, Assistenten-Text vollständig, Tool-Aufrufe als Name plus Argumente, Tool-Ausgaben auf `observe.tool_output_chars` (Standard 800) gekürzt, Ereignisse mit `trust='tool_external'` nur als Name ohne Inhalt. Gesamtgrenze `observe.bundle_tokens` (Standard 6.000, Phase 0 misst, ob 4.000 reicht). Überschreitet ein Bündel die Grenze, wird es am Turn-Ende geteilt.
+5. Limits: höchstens 1 Worker, Tageslimit für Aufrufe in `config` (Standard 300). Bei Erreichen: nächste Stufe der Kette (§4.4), zuletzt roh. Jeder Aufruf schreibt Stufe, Dauer und (wo das Binary sie nennt) Tokenzahl in eine Tabelle `observe_calls`, damit Phase 5 den Verbrauch des Abos beziffern kann. Stufe 1 teilt sich das 5-Stunden-Fenster des Abos mit der laufenden Session.
+6. Fehler: Backoff 1 min, 5 min, 30 min, 6 h, danach `failed`. Erkennt der Provider eine Quota- oder Login-Meldung (Muster auf stderr, in Phase 1 je Binary erhoben), wird die Stufe für 60 min gesperrt statt den Turn zu bestrafen. `agent-mem observe --status` zeigt Warteschlange, Fehler und Verbrauch; `--retry-failed` versucht `failed` erneut. Der Viewer kennt die Warteschlange nicht.
+7. Jeder Aufruf setzt `MEM0_TELEMETRY=False` und `MEM0_DIR=<Datenverzeichnis>/mem0` (Rechte 0o700).
 
 ### 4.4 LLM-Provider (Memory-Agent, Zugang pro Harness)
 
@@ -84,7 +86,9 @@ Gemeinsame Regeln: Der Prozess liest, kopiert oder speichert nie Tokens. Er star
 | 4 Ollama | mem0-Provider `ollama` (Standard `qwen3.5:4b-mlx`, größer: `qwen3.6:35b-mlx`) | gemessen, läuft (A.1). Langsamer, Qualität schwankt. |
 | 5 roh | `store.add_memory(kind='summary', …)` aus Prompt und Antwort, ohne Modell | vorhanden. |
 
-OpenCode hat keinen eigenen Beobachter. Seine Turns arbeitet derselbe Worker über die Kette ab, wie die aller Harnesses. Die Kette ist global, nicht pro Harness: Jeder Worker bearbeitet jeden Turn, egal aus welchem Harness er kam.
+OpenCode hat keinen eigenen Beobachter. Seine Turns arbeitet derselbe Worker ab, standardmäßig nur mit Ollama und roh (D13). Ein Worker bearbeitet Turns aller Harnesses; welche Stufen er für einen Turn nutzen darf, bestimmt der Herkunfts-Harness (D12, Anbietertreue).
+
+Tests: Die Stufen 1 bis 4 laufen nicht in CI (kein Login, kein Ollama). Es gibt eine Stufe `fake` (liest Antworten aus einer Fixture-Datei), mit der Worker, Spiegel und Widerspruchsschicht in CI getestet werden. Tests gegen echte Binaries tragen den pytest-Marker `local` und laufen nur von Hand (R9).
 
 ### 4.5 mem0-Konfiguration
 ```
@@ -94,20 +98,25 @@ vector_store: qdrant, path=<Datenverzeichnis>/qdrant, on_disk
 version-pin:  mem0ai==2.2.1 (Upgrade nur mit grünem Adapter-Test)
 extras:       mem0ai[nlp] (spaCy für Entity-Linking)
 ```
-Alles läuft über ein Modul `observe/mem0_adapter.py` mit zwei Funktionen: `extract(bundle, namespace) -> list[Fact]` und `search(query, namespace, k)`. Nur dieses Modul importiert mem0. Es ist die Austauschstelle, falls mem0 die Messung (§8) nicht besteht.
+Alles läuft über ein Modul `observe/mem0_adapter.py` mit vier Funktionen: `extract(bundle, namespace) -> list[Fact]`, `search(query, namespace, k)`, `forget(mem0_id)` und `reindex(facts)`. Nur dieses Modul importiert mem0. Es ist die Austauschstelle, falls mem0 die Messung (§8) nicht besteht.
 
-Namespaces: `user_id = "<nutzer>|p:<projekt_id>"` für Projektfakten und `"<nutzer>|global"` für Präferenzen. Suche liest beide und führt sie zusammen. (Kein Metadaten-Filter nötig, bewusst einfach.)
+Namespace: nur `user_id = "<nutzer>|p:<projekt_id>"` (D13). Kein `run_id`. Jeder `add` bekommt `metadata={"turn_id": …, "session_id": …, "harness": …}`, damit Fakten auf Turns rückführbar sind und die LongMemEval-Messung (§8) Sessions zählen kann.
+
+Extraktions-Prompt: Der Standard-Prompt von mem0 ist auf Assistenten-Chats zugeschnitten (Vorlieben, Personen, Termine). Für Coding-Turns mit Tool-Ausgaben liefert er voraussichtlich Kleinkram. Phase 0 misst Standard gegen einen eigenen `custom_fact_extraction_prompt` (Konventionen, Entscheidungen, Sackgassen, Befehle, Präferenzen; Sprache des Nutzers; ein Satz pro Fakt) auf der Fixture. Der Sieger steht in §12, E8.
 
 Plattform: Auf Intel-Macs gibt es kein ONNX Runtime und damit kein fastembed. Dort ist der Embedder `ollama` mit `nomic-embed-text`. Die Konfiguration wählt automatisch.
 
 ### 4.6 Spiegel und Widerspruchsschicht
-Nach jedem `add` liefert mem0 Ereignisse (`ADD`, `UPDATE`, `DELETE`, `NONE`) mit Id und Text. Der Worker:
-1. `ADD`/`UPDATE`: `store.add_memory(kind='fact', source='agent', trust='observer', importance=0.5, turn_id, origin=harness, dedupe='mem0:<uuid>:<revision>')`. Titel = erste Zeile des Fakts, Body = Fakt.
-2. `DELETE`: `invalid_at` setzen (nie löschen).
-3. Für jeden neuen Fakt: `search(neuer Fakt, k=5)` im selben Namespace, ohne ihn selbst. Treffer mit Score ≥ `contradiction.min_score` (Standard 0,6, in Phase 0 kalibriert) gehen mit dem neuen Fakt in einen einzigen LLM-Aufruf: Antwort als JSON-Liste `[{id, verdict: KEEP|SUPERSEDE}]`. Bei `SUPERSEDE`: `store.supersede(alt, neu)`.
+mem0 2.2.1 arbeitet nur hinzufügend: `add` liefert ausschließlich `ADD`-Einträge mit Id und Text (A.10, `main.py:1030-1075`). Es gibt kein `UPDATE`, `DELETE` oder `NONE`, und Dedup ist nur ein MD5-Vergleich des exakten Texts. Nahe Duplikate („Wir nutzen nox", „Tests laufen mit nox") häufen sich deshalb an. Der Worker:
+1. Pro `ADD`: `store.add_memory(kind='fact', source='agent', trust='observer', importance=0.5, turn_id, origin=harness, dedupe='mem0:<uuid>')`. Titel = erste Zeile des Fakts, Body = Fakt.
+2. Für alle neuen Fakten des Bündels zusammen: je Fakt `search(fakt, k=3)` im Namespace, ohne die Fakten des Bündels selbst. Treffer mit Score ≥ `contradiction.min_score` (Standard 0,6, in Phase 0 kalibriert) werden gesammelt, höchstens 15 Paare pro Bündel. Alle Paare gehen in **einen** LLM-Aufruf: Antwort als JSON-Liste `[{new_id, old_id, verdict: KEEP|SUPERSEDE|DUPLICATE}]`.
+   - `SUPERSEDE`: `store.supersede(alt, neu)`; mem0-Eintrag des alten Fakts per `forget` entfernen, sonst sieht die nächste Extraktion ihn weiter als Vorwissen.
+   - `DUPLICATE`: neuer Fakt bekommt `invalid_at`, alter bleibt; mem0-Eintrag des neuen Fakts entfernen.
+   - `KEEP`: nichts.
+3. `mem_forget` und `purge` rufen `forget(mem0_id)` für jede betroffene Zeile, damit Qdrant, Entity-Store und `history.db` den Fakt verlieren. SQLite behält die Zeile mit `invalid_at` (nie löschen).
 4. Gültigkeit überall mit `invalid_at IS NULL` filtern (steht in den Suchen schon).
 
-Pro Turn also höchstens zwei Modellaufrufe: die mem0-Extraktion (genau ein Aufruf pro `add`, siehe A.10) und das Widerspruchsurteil (nur bei Kandidaten). Ergebnisse der mem0-Suche werden gegen `memories.invalid_at` nachgefiltert (mit Überhol-Faktor 3 beim Abruf), denn das Ablaufdatum von mem0 (`expiration_date`) ist nur tagesgenau und taugt nicht für sofortige Ungültigkeit.
+Pro Bündel also höchstens zwei Modellaufrufe: die mem0-Extraktion (genau ein Aufruf pro `add`, A.10) und ein gemeinsames Urteil über alle Paare. Ohne Kandidaten entfällt der zweite. Ergebnisse der mem0-Suche werden gegen `memories.invalid_at` nachgefiltert (Überhol-Faktor 3), denn das Ablaufdatum von mem0 (`expiration_date`) ist nur tagesgenau.
 
 ### 4.7 Injection (Hook, stdlib)
 `inject.py` bleibt unverändert: Es liest bereits `memories` mit `kind IN (…, 'fact')` und `invalid_at IS NULL` (`inject.py:175-177`), gewichtet nach Aktivierung und `importance`. Gespiegelte Fakten erscheinen dadurch ohne Codeänderung. Inhalt und Form der Injektion (Legende, Index, höchstens 3 Treffer) bleiben wie in der Datei.
@@ -124,15 +133,17 @@ Pro Turn also höchstens zwei Modellaufrufe: die mem0-Extraktion (genau ein Aufr
 Nur der mem0-Entity-Store (spaCy). Phase 0 prüft, dass er gefüllt wird. Kein eigener Graph-Code.
 
 ## 5. Datenmodell
-- Neu: `observe_queue` (§4.2). Keine weitere Migration.
+- Neu: `observe_queue` und `observe_calls` (§4.2, §4.3), beide in Migration `002_observe.sql`. Keine weitere Migration.
 - `memories`: unverändert. Fakten erscheinen als `kind='fact'`. Die mem0-Id steckt im Dedupe-Schlüssel.
-- mem0-Daten (`<Datenverzeichnis>/mem0/history.db`, `<Datenverzeichnis>/qdrant`) sind ableitbar. `agent-mem reindex` baut Qdrant aus `memories` neu auf (nur Embedding, kein Modellaufruf).
+- mem0-Daten sind ableitbar: `<Datenverzeichnis>/qdrant` (zwei Collections: Fakten und `entity_store`) und `<Datenverzeichnis>/mem0/history.db`. Letztere enthält neben der Änderungshistorie auch die an `add` übergebenen Nachrichten (`storage.py:257`, `save_messages`), also eine zweite Kopie des bereinigten Bündels. Sie unterliegt denselben Rechten und demselben `purge` wie SQLite.
+- `agent-mem reindex` leert Qdrant und `history.db` und fügt alle gültigen Fakten per `add(..., infer=False)` wieder ein. Das embeddet und füllt Payload und Entity-Store über mem0s eigenen Pfad, ohne Modellaufruf. Ein eigener Payload-Nachbau entfällt.
 - Backups (`VACUUM INTO`) sichern SQLite. Qdrant und mem0 werden nicht gesichert.
 
 ## 6. Privacy und Sicherheit
 1. `privacy.clean_text` läuft auf dem Bündel vor `memory.add` und auf jedem Fakt vor `store.add_memory` (letzteres erzwingt `add_memory` selbst).
-2. Quellen mit `tool_external` (Web, fremde MCP-Tools) erzeugen nie Regeln oder Präferenzen und werden nie automatisch injiziert (Regel R5, §13).
+2. Quellen mit `tool_external` (Web, fremde MCP-Tools) erzeugen nie Regeln oder Präferenzen und werden nie automatisch injiziert (Regel R5, §13). Ihr Inhalt kommt nicht ins Bündel (§4.3, Punkt 4): Fremdtext könnte den Beobachter anweisen, erfundene Fakten zu liefern, die später in Sessions eingeblendet werden. Der Beobachter-Prompt rahmt das Bündel als Daten.
 3. Der Beobachter-Prozess ist isoliert: leeres Verzeichnis, keine Tools, keine MCP-Server, keine Settings, `AGENT_MEM_INTERNAL=1`, damit er sich nicht selbst erfasst.
+3a. Datenfluss zwischen Anbietern nur mit Zustimmung: Standard ist Anbietertreue (D12). Ein Turn verlässt nie den Anbieter, der ihn in der Session schon gesehen hat, außer zu Ollama (lokal).
 4. mem0-Telemetrie aus, per Test abgesichert (Test startet den Adapter und prüft die Umgebungsvariable).
 5. Einträge werden beim Anzeigen als Daten gerahmt, nie als Anweisung.
 6. Ausgabe von Ollama bleibt lokal. Es gibt keinen Netzwerkzugriff außer dem einmaligen Modell-Download.
@@ -155,7 +166,9 @@ Nur der mem0-Entity-Store (spaCy). Phase 0 prüft, dass er gefüllt wird. Kein e
 
 ## 8. Messung
 
-Datensätze: (a) Fixture mit 25 Fällen (davon 5 Abstention, 10 Widerspruchspaare getrennt in (d)), in Phase 0 neu gebaut aus deutschen und englischen Coding-Szenarien und unter `tests/fixtures/` abgelegt; die frühere Fixture ist im Repo nicht auffindbar, (b) LongMemEval-S über das vorhandene `evaluate.py` (Session-Recall@k je Fragetyp), (c) 30 reale Fakten aus Dogfooding, von mir auf Müll geprüft, (d) 10 Widerspruchspaare (Korrektur wie „pytest → nox").
+Datensätze: (a) Fixture mit 25 Fällen (davon 5 Abstention, 10 Widerspruchspaare getrennt in (d)), in Phase 0 neu gebaut aus deutschen und englischen Coding-Szenarien und unter `tests/fixtures/` abgelegt; die frühere Fixture ist im Repo nicht auffindbar, (b) LongMemEval-S über `evaluate.py` (Session-Recall@k je Fragetyp), (c) 30 reale Fakten aus Dogfooding, von mir auf Müll geprüft, (d) 10 Widerspruchspaare (Korrektur wie „pytest → nox").
+
+LongMemEval-S, Umfang: `evaluate.py` baut je Frage eine frische Datenbank und nimmt alle Haystack-Sessions auf (`evaluate.py:55-75`). Mit mem0 kostet jede Session einen Modellaufruf; der volle Datensatz (rund 500 Fragen mit je etwa 50 Sessions) wären über 25.000 Aufrufe. Das ist in Phase 0 nicht machbar und würde das Abo leeren. Deshalb: feste Teilmenge von 40 Fragen, geschichtet nach Fragetyp, Seed fest, Liste der `question_id` in Anhang B. Extraktion für die Messung mit Ollama (kostenlos, über Nacht im Hintergrund), Embedder wie im Betrieb. Alle Vergleiche (Bestand, reines mem0, neuer Stand) laufen auf derselben Teilmenge. Der Datensatz liegt nicht im Repo und wird in Phase 0 geladen. `evaluate.py` bekommt dafür `--backend {sqlite,mem0}`; der mem0-Pfad zählt Treffer über `metadata.session_id` (§4.5).
 
 Referenzwerte: Frühere Zahlen (hit@1 0,75 / 0,80 / 0,85) stammen aus einer Notiz ohne auffindbaren Beleg und gelten nicht als Schwelle. Maßstab ist der Bestand, den Phase 0 auf dem neuen Fixture und auf LongMemEval-S frisch misst.
 
@@ -176,14 +189,14 @@ Nicht gemessen und nicht behauptet: End-to-End-Antwortgenauigkeit mit Judge-Mode
 
 | Phase | Arbeit | Abnahme | Dauer |
 |---|---|---|---|
-| 0 Messen | Fixture bauen (25 Fälle plus 10 Widerspruchspaare). Reines mem0 (Ollama und Claude) und Bestand auf Fixture und LongMemEval-S messen. Embedder-Kandidaten messen (§12, E2). spaCy-Entity-Store prüfen. Copilot installieren und `copilot -p` prüfen. Hook-Laufzeit des Bestands messen. Score-Schwelle für §4.6 kalibrieren. | Fixture liegt unter `tests/fixtures/`, Zahlen im Anhang B. Alle Stoppregeln aus §12 sind ausgewertet. | 3 Tage |
-| 1 Worker | Migration `002`, Queue, `spawn_worker`, Worker, Provider (Stufe 1, 4, 5), `mem0_adapter`, Spiegel, Widerspruchsschicht, Datenschutztests, neue `AGENTS.md` aus §13 schreiben. Nur Claude Code. | Echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst den alten Fakt ab. Tabelle §8 Phase-1-Zeilen erfüllt. Alle Tests, `ruff`, `pyright` grün. | 5 Tage |
+| 0 Messen | Fixture bauen (25 Fälle plus 10 Widerspruchspaare). LongMemEval-S laden, Teilmenge festlegen, `evaluate.py --backend mem0` schreiben. Reines mem0 (Ollama und Claude) und Bestand auf Fixture und Teilmenge messen. Extraktions-Prompt Standard gegen eigenen vergleichen (E8). Embedder-Kandidaten messen (E2). spaCy-Entity-Store prüfen. Copilot installieren und `copilot -p` prüfen. Hook-Laufzeit des Bestands messen. Score-Schwelle für §4.6 kalibrieren. Bündelgröße an 20 echten Turns messen (§4.3, Punkt 4). Lizenzen fastembed und spaCy nachtragen (A.8). | Fixture liegt unter `tests/fixtures/`, Zahlen im Anhang B. Alle Stoppregeln aus §12 sind ausgewertet. | 5 Tage (davon 2 Nächte Ollama-Läufe im Hintergrund) |
+| 1 Worker | Migration `002` (`observe_queue`, `observe_calls`), Bündelbau, `spawn_worker` (POSIX und Windows), Worker mit Leerlauf und Priorität, Provider (Stufe 1, 4, 5 und `fake`), Quota-Erkennung je Binary, `mem0_adapter` (vier Funktionen), Spiegel, Widerspruchsschicht mit drei Urteilen, `forget` in `mem_forget` und `purge`, `reindex`, `observe --status`, Datenschutztests, neue `AGENTS.md` aus §13 schreiben. Nur Claude Code. | Echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst den alten Fakt ab, Duplikat wird erkannt, `mem_forget` entfernt den Fakt auch aus Qdrant. Tabelle §8 Phase-1-Zeilen erfüllt. Alle Tests, `ruff`, `pyright` grün; CI ohne Marker `local`. | 6 Tage |
 | 2 Retrieval | Hook-Suche gegen MCP-Suche gegen mem0-Suche auf Fixture und LongMemEval-S vergleichen (§12, E3). Sieger festlegen. Injection und MCP auf Sieger. | Schwellen aus §8 erfüllt, Bericht im Anhang B. | 3 Tage |
 | 3 Harnesses | Stufe 2 (Codex) und Stufe 3 (Copilot, falls geprüft) in die Kette, Plugins für Codex und Copilot, OpenCode über die Kette. | Je Harness eine echte Session: Capture, Recall in neuer Session, Compaction, Deinstallation. | 3 Tage |
 | 4 Aufräumen | Code des Retrieval-Verlierers löschen (§12, E3). `README`, `ARCHITECTURE`, `SECURITY` (Bedrohungsmodell aus §6) und `CHANGELOG` an diesen Plan angleichen. Release-Check auf Linux, macOS (arm64, x64), Windows. | CI grün, Zeilenzahl gesunken. | 2 Tage |
 | 5 Dogfooding | 2 Wochen echte Nutzung. Wöchentliche Auswertung der Müllquote, Ausfallrate, Latenz, Anteil der eingeblendeten Fakten, die später genutzt wurden (vorhandene Tabelle `accesses`). | Keine Datenverluste, keine Hook-Verlangsamung, Ausfallrate Worker < 5 %. | 14 Tage |
 
-Insgesamt 16 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deployt oder veröffentlicht; Commits bleiben lokal, bis der Nutzer es ausdrücklich erlaubt.
+Insgesamt 19 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deployt oder veröffentlicht; Commits bleiben lokal, bis der Nutzer es ausdrücklich erlaubt.
 
 ## 10. Code: behalten, ändern, löschen
 
@@ -192,10 +205,10 @@ Insgesamt 16 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deplo
 | `hook`, `capture`, `normalize/*`, `events`, `spool`, `privacy`, `identity`, `signals`, `timeutil`, `logutil`, `config`, `db` | behalten. `capture` legt Queue-Eintrag an, `config` erhält Worker-Optionen. |
 | `store`, `search`, `inject`, `learn`, `consolidate`, `health`, `views`, `viewer/*`, `mcp_server`, `cli`, `commands` | behalten (Viewer-Abhängigkeiten). `inject` und `search` lesen Fakten. |
 | `summarize` | behalten (opt-in, getestet). Ob Fakten ihn ersetzen, entscheidet der Dogfooding-Bericht, nicht dieser Plan. |
-| `evaluate` | behalten und für die Messung nutzen. |
+| `evaluate` | behalten, erhält `--backend {sqlite,mem0}` und Teilmengen-Option (§8). |
 | `semantic`, `indexer` | Schicksal laut E3 (§12). |
 | `federate`, `importers` | unverändert, kein Teil dieses Plans. |
-| neu | `observe/` mit `worker.py`, `queue.py`, `providers.py`, `mem0_adapter.py`, `contradiction.py`. Insgesamt Ziel unter 600 Zeilen. |
+| neu | `observe/` mit `worker.py`, `queue.py`, `bundle.py`, `providers.py`, `mem0_adapter.py`, `contradiction.py`. Insgesamt Ziel unter 800 Zeilen. |
 | neue Abhängigkeiten | `mem0ai[nlp]`, `qdrant-client` (kommt mit mem0), als Extra `observer`; Kern bleibt wie bisher installierbar. |
 
 ## 11. Risiken
@@ -223,8 +236,10 @@ Jede offene Frage hat einen Messpunkt und einen festgelegten Ausgang. Kein Ausga
 | E3 | Wer liefert Retrieval: Hook-FTS5 (+ vorhandene Vektoren) oder mem0/Qdrant-Hybrid? | Phase 2, beide auf denselben Daten | Sieger bedient Hook und MCP. Verliert mem0-Suche: Qdrant dient nur noch dem Dedup. Verliert die SQLite-Suche: `semantic.py` bleibt, Hook ruft bei Bedarf `agent-mem query` (Budget 400 ms). Das Verlierer-Modul wird in Phase 4 gelöscht. |
 | E4 | Ist ein echter Graph nötig? | LongMemEval-Kategorien multi-session und temporal-reasoning im Vergleich zu den übrigen | Rückstand über 0,10 gegenüber den übrigen Kategorien: separater Spike mit Graphiti auf FalkorDB (nicht Neo4j), mit eigener Messung. Sonst nichts. |
 | E5 | Funktioniert Copilot als Stufe? | Phase 3 | Ja: Stufe 3. Nein: Stufe entfällt, Copilot-Sessions werden von Stufe 1, 2 oder 4 bearbeitet. |
-| E6 | Reicht der Qdrant-Lock in der Praxis? | Phase 1 mit 3 parallelen Sessions | Ja: bleibt. Nein (Wartezeit über 2 s im p95): Chroma als Store, Keyword über SQLite-FTS5. |
-| E7 | Mehr als 3 Modellaufrufe pro Turn? | Phase 1 | Ja: Widerspruchsurteil nur bei Score ≥ 0,75 und Bündelung auf 3 Turns. |
+| E6 | Reicht Qdrant im Pfad-Modus in der Praxis? | Phase 1 mit 3 parallelen Sessions **und** einer Collection mit 20.000 Fakten (synthetisch, wie A.11) | Ja (Worker-Start unter 2 s, MCP-Antwort unter 2 s im p95): bleibt. Nein: Chroma als Store, Keyword über SQLite-FTS5. |
+| E7 | Mehr als 3 Modellaufrufe pro Bündel? | Phase 1 | Ja: Widerspruchsurteil nur bei Score ≥ 0,75 und Bündelung auf 3 Turns. |
+| E8 | Standard-Prompt von mem0 oder eigener Coding-Prompt? | Phase 0, Fixture (a) und 20 echte Turns, Müllquote und hit@1 | Eigener Prompt gewinnt bei Müllquote um ≥ 10 Punkte oder hit@1 um ≥ 0,05: eigener Prompt. Sonst Standard. |
+| E9 | Tokenverbrauch der Stufe 1 pro Tag tragbar? | Phase 5, `observe_calls` | Über 20 % des 5-Stunden-Fensters im Mittel: `bundle_tokens` auf 4.000, Bündelung auf 3 Turns, danach Ollama als Standardstufe für Claude-Turns. |
 
 ## 13. Verbindliche Regeln (für die neue `AGENTS.md`)
 
@@ -258,6 +273,8 @@ Skripte liegen unter `docs/evidence/spikes/`.
   - `search`: Anfrage einbetten, semantische Suche (Überhol-Faktor, mindestens 60), BM25 über lemmatisierte Anfrage (falls der Store Keyword-Suche kann), Entitäts-Boost, dann `score_and_rank` mit Schwelle 0,1.
   - Embeddings werden also an vier Stellen gebraucht: Anfrage bei `add` (Vorwissen für das LLM), neue Fakten (Speicher), Entitäten (Verknüpfung), Anfrage bei `search`.
 - **A.9 Schema**: `memories` hat `invalid_at`, `superseded_by`, `valid_from`, `importance`, `dedupe_key`, `kind IN (… 'fact' …)`; `store.supersede` und `store.add_memory(dedupe=…)` existieren.
+- **A.11 Qdrant-Pfadmodus, Öffnungszeit nach Größe** (2026-10-12, `qdrant_scale.py`, 384 Dimensionen, Zufallsvektoren, Öffnen + eine Suche + Schließen, Median aus 5): 1.000 Vektoren 34 ms und 4 MB; 5.000 Vektoren 161 ms und 21 MB; 20.000 Vektoren 689 ms und 84 MB. Der Pfadmodus lädt die Collection beim Öffnen vollständig; die Zeit wächst linear. A.4 (7 bis 8 ms) galt für eine fast leere Collection. Bei rund 500 Fakten pro Tag sind 20.000 nach etwa sechs Wochen erreicht.
+- **A.12 mem0 2.2.1, weitere Quelltextbefunde** (`memory/main.py`, `memory/storage.py`): `add` liefert nur `ADD`-Einträge (Zeilen 1030 bis 1075), es gibt keinen Update- oder Löschpfad in der Extraktion. `run_id` filtert auch die Ähnlichkeitssuche beim `add` (Zeilen 386 bis 388). `save_messages` speichert die übergebenen Nachrichten in `history.db` (`storage.py:257`). `add(..., infer=False)` embeddet ohne Modellaufruf (Zeile 770). Entity-Ids dürfen keine Leerzeichen enthalten; `|` ist erlaubt. Embedder-Liste in `embeddings/configs.py:16-28` enthält `fastembed` und `ollama`.
 
 ## Anhang B: Messberichte
 Wird in Phase 0 und 2 gefüllt. Format je Lauf: Datum, Commit, Modell, Datensatz, Zahlen. Kein Eintrag wird nachträglich geändert; neue Läufe kommen darunter.
