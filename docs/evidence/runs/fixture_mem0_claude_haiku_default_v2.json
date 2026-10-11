@@ -1,0 +1,254 @@
+{
+  "hit@1": 0.95,
+  "abstention": 0.0,
+  "contradictions_resolved": "1/10",
+  "n": {
+    "answerable": 20,
+    "abstain": 5,
+    "pairs": 10
+  },
+  "details": [
+    {
+      "id": "c01",
+      "ok": true,
+      "top": "for the user's project, a pyproject.toml was created, `uv sync` installs the dependencies, and `uv run pytest` runs the tests, as set up by the assistant on 202",
+      "score": 0.8223347499810526
+    },
+    {
+      "id": "c02",
+      "ok": true,
+      "top": "user requested a database_url for their local postgres setup, and the assistant provided `postgresql://app:app@localhost:5433/app`, which uses host port 5433 as",
+      "score": 0.5416871702849411
+    },
+    {
+      "id": "c03",
+      "ok": true,
+      "top": "user wants python code formatted with ruff format using a line length of 110 characters instead of the default 88, and asked for this to be set in the project's",
+      "score": 0.5159682533133068
+    },
+    {
+      "id": "c04",
+      "ok": false,
+      "top": "root cause of the 'event loop is closed' test failures was identified as multiple event loops being created within one test session; wrapping fixtures in asynci",
+      "score": 0.8324423018698897
+    },
+    {
+      "id": "c05",
+      "ok": true,
+      "top": "user's api is deployed on fly.io under the app name kassen-api in the fra (frankfurt) region, as stated when the user asked for a fly.toml to be written on 2026",
+      "score": 0.5363508381306163
+    },
+    {
+      "id": "c06",
+      "ok": true,
+      "top": "user's commit message convention: write commit messages in english, use imperative mood, include no emojis, and include no trailers. user asked the assistant to",
+      "score": 0.4969765783737773
+    },
+    {
+      "id": "c07",
+      "ok": true,
+      "top": "user created and checked out a feature branch named feature/lin-490-rechnung-pdf for linear ticket lin-490, which covers invoice pdf (rechnungs-pdf) work, on oc",
+      "score": 0.5177534919157732
+    },
+    {
+      "id": "c08",
+      "ok": true,
+      "top": "user's stripe secret key must be read from the stripe_secret variable in their .env.local file and must never be committed to git, since .env.local is gitignore",
+      "score": 0.6775539111504204
+    },
+    {
+      "id": "c09",
+      "ok": true,
+      "top": "user had a .node-version file created containing 22 in their project, so running fnm use automatically switches to node 22, as set up in conversation on october",
+      "score": 0.5297263681150278
+    },
+    {
+      "id": "c10",
+      "ok": true,
+      "top": "for the cli tool's sqlite storage, the assistant recommended using python's stdlib sqlite3 module with wal mode and no external database",
+      "score": 0.5656162920296957
+    },
+    {
+      "id": "c11",
+      "ok": true,
+      "top": "lesson recommended for user's alembic workflow: enum changes in postgres must always be written manually into the migration as `alter type ... add value` rather",
+      "score": 0.5207692604052993
+    },
+    {
+      "id": "c12",
+      "ok": true,
+      "top": "user's project starts its dev environment with `make dev`, which runs the api on port 8000 and the web app on port 5173 together via honcho. the user asked to s",
+      "score": 0.5575673012325885
+    },
+    {
+      "id": "c13",
+      "ok": true,
+      "top": "user asked that responses be written in german, while code comments and docstrings should be written in english because the user's development team is internati",
+      "score": 0.5143771047811498
+    },
+    {
+      "id": "c14",
+      "ok": true,
+      "top": "the tailwind v4 build error was resolved by deleting postcss.config.js and switching to the @tailwindcss/vite plugin in vite.config.ts, after which the build pa",
+      "score": 0.6123152887101618
+    },
+    {
+      "id": "c15",
+      "ok": true,
+      "top": "user's keycloak token validation failed with a 'wrong issuer' error, and the assistant advised that the issuer must be `https://auth.example.de/realms/intern` b",
+      "score": 0.5254725182114963
+    },
+    {
+      "id": "c16",
+      "ok": true,
+      "top": "user set up ci for their project with github actions, requiring tests to run on python 3.11 and 3.13. the assistant added .github/workflows/ci.yml with a matrix",
+      "score": 0.6189980504328796
+    },
+    {
+      "id": "c17",
+      "ok": true,
+      "top": "a pnpm-workspace.yaml file was created for the user's monorepo with the workspace globs `apps/*` and `packages/*`, and `pnpm install` was run successfully on oc",
+      "score": 0.5089028972279523
+    },
+    {
+      "id": "c18",
+      "ok": true,
+      "top": "user's rebased feature branch feature/lin-482-export-csv was pushed to origin on october 11, 2026 using `git push --force-with-lease`, in line with their rule t",
+      "score": 0.44769870284356633
+    },
+    {
+      "id": "c19",
+      "ok": true,
+      "top": "user uses structlog for logging in their project, configured to output json in production and a readable console format in development",
+      "score": 0.49783020926403737
+    },
+    {
+      "id": "c20",
+      "ok": true,
+      "top": "the payments module is owned by team ledger, and questions about it should go to the #ledger-dev slack channel rather than to the platform team, as stated by us",
+      "score": 0.6044290781450655
+    },
+    {
+      "id": "c21",
+      "ok": false,
+      "top": "user asked to add pydantic as a dependency to their project, which uses uv as its package manager; the assistant ran `uv add pydantic` on 2026-10-11",
+      "score": 0.7602099401379651
+    },
+    {
+      "id": "c22",
+      "ok": false,
+      "top": "user asked the assistant to add a health endpoint to the api, and the assistant implemented it as get /health, which returns http 200 along with the api version",
+      "score": 0.7772187230272672
+    },
+    {
+      "id": "c23",
+      "ok": false,
+      "top": "user asked on october 11, 2026 to add a logout function to their web application, which uses keycloak login with the realm 'intern' and the client 'web-app' set",
+      "score": 0.7734059408132042
+    },
+    {
+      "id": "c24",
+      "ok": false,
+      "top": "user asked for a 404 page to be added to their project, and the assistant added a notfound.tsx component and a catch-all route for it on 2026-10-11",
+      "score": 0.790601394542554
+    },
+    {
+      "id": "c25",
+      "ok": false,
+      "top": "user asked to build all packages in their pnpm workspaces monorepo, and the assistant ran `pnpm -r build` successfully, building 6 packages on october 11, 2026",
+      "score": 0.7641037394963913
+    },
+    {
+      "id": "x01",
+      "ok": false,
+      "top": "user corrected their earlier statement: the project switched from running tests directly with pytest via `uv run pytest` to running them only through nox with `",
+      "stale": [
+        "user runs their python tests with pytest, invoked directly via `uv run pytest`."
+      ]
+    },
+    {
+      "id": "x02",
+      "ok": false,
+      "top": "user moved the web dev server from port 3000 to port 4000 on 2026-10-11 because port 3000 collides with grafana, and the vite.config.ts was updated so the dev s",
+      "stale": [
+        "the user's web dev server runs on port 3000, and it was started on http://localhost:3000 during the "
+      ]
+    },
+    {
+      "id": "x03",
+      "ok": false,
+      "top": "user upgraded their local postgres from version 15 to version 16 on october 11, 2026, and postgres 15 is no longer used; the docker compose configuration was up",
+      "stale": [
+        "user runs postgres 15 locally via docker compose, as stated on october 11, 2026",
+        "a compose.yaml file was created using the image postgres:15 for the user's local postgres 15 setup, "
+      ]
+    },
+    {
+      "id": "x04",
+      "ok": false,
+      "top": "on 2026-10-11, running npm install in the repository completed and created a package-lock.json file.",
+      "stale": [
+        "on 2026-10-11, running npm install in the repository completed and created a package-lock.json file."
+      ]
+    },
+    {
+      "id": "x05",
+      "ok": true,
+      "top": "user stated in german that the main branch of their repository is named 'master' (\"der hauptbranch heißt master.\"), and the assistant confirmed by checking out ",
+      "stale": []
+    },
+    {
+      "id": "x06",
+      "ok": false,
+      "top": "user's team dropped black as the python formatter; formatting is now done with `ruff format` only, and black was removed from the project's dev dependencies aro",
+      "stale": [
+        "user asked for python code to be formatted with black, and running `black .` on their project reform"
+      ]
+    },
+    {
+      "id": "x07",
+      "ok": false,
+      "top": "user switched the kassen-api deployment from heroku to fly.io on october 11, 2026, and the heroku app has been shut down, replacing the earlier heroku deploymen",
+      "stale": [
+        "user's deployment runs on heroku, and the heroku app is named kassen-api."
+      ]
+    },
+    {
+      "id": "x08",
+      "ok": false,
+      "top": "during the conversation on october 11, 2026, the assistant set the service's .nvmrc file to 18, pinning the project's node version to 18 as discussed with the u",
+      "stale": [
+        "during the conversation on october 11, 2026, the assistant set the service's .nvmrc file to 18, pinn"
+      ]
+    },
+    {
+      "id": "x09",
+      "ok": false,
+      "top": "user raised the http client timeout from 5 seconds to 30 seconds on october 11, 2026, because the 5-second timeout was causing failures in their reports, and se",
+      "stale": [
+        "user set the timeout for their http client to 5 seconds on october 11, 2026, implemented as httpx.cl"
+      ]
+    },
+    {
+      "id": "x10",
+      "ok": false,
+      "top": "user changed their earlier instruction: because two new colleagues don't speak german, code comments should now be written in english instead of german, as of a",
+      "stale": [
+        "user asked that code comments be written in german because their team is local, and the assistant co"
+      ]
+    }
+  ],
+  "meta": {
+    "backend": "mem0",
+    "embedder": "intfloat/multilingual-e5-small",
+    "date": "2026-10-11T23:31:52.824Z",
+    "llm": "claude",
+    "llm_model": "haiku",
+    "custom_instructions": false,
+    "add_seconds": {
+      "median": 5.43,
+      "p95": 9.16,
+      "n": 69
+    }
+  }
+}

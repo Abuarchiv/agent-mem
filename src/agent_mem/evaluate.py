@@ -44,9 +44,11 @@ class Backend(Protocol):
 
 
 class SqliteBackend:
-    def __init__(self, root: Path, embedder: semantic.Embedder | None) -> None:
+    def __init__(self, root: Path, embedder: semantic.Embedder | None, vector_floor: float | None = None) -> None:
         self.config = Config(data_dir=root / "data")
         self.config.semantic.enabled = embedder is not None
+        if vector_floor is not None:
+            self.config.retrieval.min_vector_score = vector_floor
         self.cwd = str(root / "project")
         Path(self.cwd).mkdir(parents=True, exist_ok=True)
         self.conn = db.connect(self.config)
@@ -164,8 +166,10 @@ class Runner:
         custom_instructions: str | None = None,
         min_score: float = 0.0,
         embedder_model: str | None = None,
+        vector_floor: float | None = None,
     ) -> None:
         self.backend = backend
+        self.vector_floor = vector_floor
         self.llm, self.llm_model, self.custom_instructions = llm, llm_model, custom_instructions
         self.min_score = min_score
         base_config = load()
@@ -183,7 +187,7 @@ class Runner:
                 llm_model=self.llm_model,
                 custom_instructions=self.custom_instructions,
             )
-        return SqliteBackend(root, self.embedder)
+        return SqliteBackend(root, self.embedder, self.vector_floor)
 
     def _collect(self, backend: Backend) -> None:
         self.add_seconds.extend(getattr(backend, "add_seconds", []))
