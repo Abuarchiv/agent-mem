@@ -74,3 +74,9 @@ Insgesamt etwa 11 Arbeitstage statt 36 plus Dogfooding. Danach 2 Wochen Dogfoodi
 - Quota des Abos. Gegenmittel: Raw-Fallback und Tageslimit.
 - mem0-Telemetrie: `MEM0_TELEMETRY=False` im Memory-Agent-Prozess, per Test abgesichert.
 - Der Spike ist eine Einzelprobe (zwei Sätze). Die Qualität beweist erst Phase 2.
+
+## 8. Graph-Memory (Entscheidung 2026-10-12): kein Neo4j
+- mem0 2.2.1 hat den Neo4j-Graph-Store nicht mehr. Im installierten Paket gibt es kein `graph_store`, kein Neo4j, Kuzu oder Memgraph. Stattdessen extrahiert es Entitäten mit spaCy (PROPER, QUOTED, TOPIC, IDENTIFIER) und legt sie in einer zweiten Collection im Vektor-Store ab (`entity_store`), um Treffer zu verknüpfen und höher zu gewichten. Das ist der eingebaute Graph-Ersatz und kostet keinen Server.
+- Neo4j wäre ein dauerhaft laufender JVM-Server (Daemon, Port, Backup, Updates) für einen Nutzer mit voraussichtlich unter 100.000 Fakten. Das widerspricht dem Ziel, weniger zu pflegen.
+- Phase 0 ergänzt: `pip install mem0ai[nlp]` (spaCy) aktivieren und prüfen, dass der Entity-Store gefüllt wird.
+- Phase 2 misst Multi-Hop-Fragen (LongMemEval, Kategorien multi-session und temporal-reasoning). Nur wenn diese Kategorie klar zurückbleibt, wird ein echter Graph geprüft: Graphiti mit FalkorDB (Neo4j nur, wenn FalkorDB nicht reicht). Das ist dann ein eigener Spike mit Messung, kein Vorab-Einbau.
