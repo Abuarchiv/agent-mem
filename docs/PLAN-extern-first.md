@@ -59,9 +59,9 @@ mem0 2.2.1 fügt bei Korrekturen nur hinzu (getestet mit `qwen3.5:4b`, `qwen3.6:
 ## 6. Phasen
 | Phase | Inhalt | Fertig, wenn |
 |---|---|---|
-| 0 (2 Tage) | Qdrant-Pfad + Hybridsuche prüfen; Codex- und Copilot-Subprozess prüfen; mem0 pinnen; Latenz pro `add` messen | je Harness ein `add` mit Abo-Login läuft, Zahlen notiert |
+| 0 (3 Tage) | **Go/No-go:** reines mem0 (Ollama und `claude -p`) auf dem 25-Fälle-Fixture messen; Zugriffsmodell aus §9.1 testen; Qdrant-Hybridsuche prüfen; Codex- und Copilot-Subprozess prüfen; mem0 pinnen | Zahlen liegen vor und die Schwellen aus §9.3 sind erfüllt, sonst Stopp |
 | 1 (4 Tage) | Spool → Memory-Agent → mem0 → Injection für Claude Code; Widerspruchsschicht | echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst alten Fakt ab |
-| 2 (2 Tage) | Messung: 25-Fälle-Fixture und LongMemEval-S gegen reines mem0 (Ollama) und gegen diesen Stack | Zahlen im Plan-Anhang |
+| 2 (2 Tage) | Messung: LongMemEval-S gegen reines mem0 und gegen diesen Stack, dazu Fixture erneut | Zahlen im Plan-Anhang |
 | 3 (3 Tage) | Codex und Copilot anbinden, OpenCode über Claude/Codex | je Harness eine echte Session |
 | 4 | Löschen: `search`, `semantic`, `store`, `db`-Schema, `summarize`, `consolidate`, `views`, `viewer`, `importers`, `evaluate` | Tests grün, Zeilenzahl sinkt |
 
@@ -80,3 +80,27 @@ Insgesamt etwa 11 Arbeitstage statt 36 plus Dogfooding. Danach 2 Wochen Dogfoodi
 - Neo4j wäre ein dauerhaft laufender JVM-Server (Daemon, Port, Backup, Updates) für einen Nutzer mit voraussichtlich unter 100.000 Fakten. Das widerspricht dem Ziel, weniger zu pflegen.
 - Phase 0 ergänzt: `pip install mem0ai[nlp]` (spaCy) aktivieren und prüfen, dass der Entity-Store gefüllt wird.
 - Phase 2 misst Multi-Hop-Fragen (LongMemEval, Kategorien multi-session und temporal-reasoning). Nur wenn diese Kategorie klar zurückbleibt, wird ein echter Graph geprüft: Graphiti mit FalkorDB (Neo4j nur, wenn FalkorDB nicht reicht). Das ist dann ein eigener Spike mit Messung, kein Vorab-Einbau.
+
+## 9. Nachbesserungen (2026-10-12, aus Messungen)
+
+### 9.1 Zugriffsmodell: Qdrant erlaubt nur einen Prozess
+Gemessen: Ein zweiter Prozess auf demselben Qdrant-Pfad bricht ab („Storage folder … already accessed by another instance"). Parallele Sessions und Harnesses würden kollidieren. Lösung:
+- Genau ein Schreiber: der Memory-Agent, serialisiert über `filelock` (schon Abhängigkeit). Jede Operation öffnet den Store, arbeitet und schließt ihn wieder, immer unter dem Lock.
+- Der Hook importiert mem0 nie. Er liest einen Snapshot (`injection/<projekt>.json` mit den obersten Fakten), den der Memory-Agent nach jedem `add` neu schreibt. So bleibt der Hook schnell und lockfrei.
+- MCP-Suche öffnet den Store kurz unter demselben Lock mit Timeout und antwortet bei Zeitüberschreitung aus dem Snapshot.
+- Phase 0 testet das mit zwei parallelen Prozessen. Fällt der Test durch, ist Chroma (`PersistentClient`) der Ersatz-Store, nicht ein Qdrant-Server.
+
+### 9.2 Eigene Wahrheit: Event-Log, mem0 ist ein Index
+Der append-only Spool/Event-Log bleibt die Quelle. Der mem0-Bestand ist daraus neu aufbaubar (`agent-mem reindex`). Das macht mem0-Versionswechsel, Modellwechsel und Provider-Ausfall unkritisch und begrenzt die Abhängigkeit von einem Fremdprojekt.
+
+### 9.3 Messung zuerst, mit Stoppregeln
+Phase 0 misst, bevor gebaut wird. Maßstab ist der Bestand aus der früheren Messung (25-Fälle-Fixture, hit@1 hybrid 0,80, Abstention 3/5 richtig). Stopp oder Plan ändern, wenn mem0 plus Widerspruchsschicht darunter liegt, bei Abstention schlechter ist oder `add` im Median über 10 s braucht. Gemessen wurde bisher: 3,4 s pro `add` mit Haiku über `claude -p`, `search` unter 0,1 s (Einzelmessung).
+
+### 9.4 Provider-Kette statt Einzelpfad
+Reihenfolge je Harness: Abo-Login des Harness → lokales Ollama (läuft, getestet mit `qwen3.5:4b` und `qwen3.6:35b`) → rohe Beobachtung im Spool. Quota-Fehler wechseln auf die nächste Stufe, nichts geht verloren.
+
+### 9.5 Privacy vor mem0
+`privacy.clean_text` läuft auf dem Bündel vor `memory.add` und noch einmal auf jedem extrahierten Fakt vor dem Speichern. Quellen mit `tool_external` erzeugen nie Regeln oder Präferenzen (Regel aus `AGENTS.md`). Jeder Fakt trägt `project`, `harness`, `session`, `turn` als Metadaten, Suche filtert auf `project`.
+
+### 9.6 Takt
+Ein `add` pro Turn, nicht pro Tool-Call. Mehr als ein Turn in der Warteschlange wird zu einem Bündel zusammengefasst. Tageslimit für Aufrufe, danach Stufe 2 oder 3 aus §9.4.
