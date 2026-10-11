@@ -1,0 +1,76 @@
+# Plan: Extern zuerst, wenig eigener Code
+
+Stand: 2026-10-12. Ersetzt die Reihenfolge und den Umfang von `PLAN.md`, `REBUILD.md` und `STACK.md`. Der Memory-Agent (`PLAN.md` §3.1) bleibt als Zugang pro Harness, siehe unten.
+
+## 1. Leitregel
+Eigener Code nur dort, wo es kein fertiges Open-Source-Teil gibt. Alles andere wird eingekauft, gepinnt und nicht gepflegt.
+
+Eigen bleibt nur, was kein Fremdprojekt liefert: Hook-Capture pro Harness, Injection mit Deadline, Privacy-Filter, die dünne Anbindung des Memory-Agents und die Widerspruchsschicht.
+
+## 2. Stack: extern gegen eigen
+
+| Aufgabe | Lösung | Eigener Code |
+|---|---|---|
+| Extraktion, Dedup, Speichern, Suche | `mem0ai` (pinnen, aktuell 2.2.1) | Konfiguration |
+| LLM für mem0 | Memory-Agent aus §3 (Abo-Login) | je Harness ca. 30 Zeilen |
+| Embedder | mem0-Provider `fastembed` (vorhanden) | keiner |
+| Vektor-Store | mem0-Provider `qdrant` im Pfad-Modus (eingebettet, kein Server) | keiner |
+| MCP-Server | offizielles `mcp`-SDK (FastMCP), 4 Tools über mem0 | ca. 60 Zeilen |
+| Hook-Capture, Spool, Privacy, Identität | vorhanden (`capture`, `normalize`, `spool`, `privacy`, `identity`) | wird behalten |
+| Widerspruch (`invalid_at`) | eigene Schicht über mem0 `update`/`delete` | klein, siehe §4 |
+| Benchmarks | offizielle LongMemEval- und LoCoMo-Repos | nur Adapter |
+| Viewer | entfällt, `get_all` als CLI-Tabelle | keiner |
+
+Zu Phase 0 gehört die Prüfung, ob Qdrant im Pfad-Modus Hybridsuche (Keyword) in mem0 liefert. FAISS kann das nicht, mem0 warnt dort selbst. Die mem0-eigenen MCP-Server (Cloud mit Key, OpenMemory mit Docker) habe ich nicht neu geprüft und gehe nach altem Wissen davon aus, dass sie nicht passen. Deshalb der schmale eigene Wrapper.
+
+## 3. Der Memory-Agent
+
+### 3.1 Zugang pro Harness
+Die Tabelle aus `PLAN.md` §3.1 gilt unverändert (Claude: `claude -p`, Codex: `codex exec --output-schema`, Copilot: SDK oder `copilot -p`, OpenCode über Claude/Codex). Neu ist, wie er an mem0 hängt:
+
+```python
+class ClaudeCliLLM(LLMBase):   # mem0.llms.base
+    def generate_response(self, messages, response_format=None, tools=None, **kw):
+        ...  # subprocess: claude -p ..., Prompt über stdin, Text zurück
+memory = Memory.from_config(cfg); memory.llm = ClaudeCliLLM(...)
+```
+
+Verifiziert am 2026-10-12 (Spike, `scratchpad/mem0b/spike_cli.py`): mem0 lief mit `claude -p --model haiku` unter dem Abo-Login, ohne Key, ohne Daemon. Zwei Korrekturen am Entwurf in `evidence/observer-cli-flags.md`:
+- `--bare` bricht das Login („Not logged in"). Es darf nicht verwendet werden.
+- Funktionierende Isolation: `claude -p --restricted --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --model haiku`, Arbeitsverzeichnis leer, `AGENT_MEM_INTERNAL=1`. Ohne `--setting-sources ""` laufen fremde Plugin-Hooks (z. B. claude-mem) im Beobachter mit.
+- mem0 validiert Provider-Namen fest. Der Provider wird deshalb nach `from_config` per `memory.llm = …` gesetzt, nicht per Config.
+
+Codex und Copilot bekommen dieselbe Klasse mit anderem Subprozess, Phase 0 prüft sie einzeln.
+
+### 3.2 Beobachten
+Turn-Bündel aus dem Spool (Prompt, gekürzte Tool-Calls, Antwort, deterministische Anhänge) gehen als `messages` an `memory.add(..., user_id, metadata={project, harness, session, turn})`. mem0 extrahiert und dedupliziert selbst. Der eigene Prompt/Schema-Code aus `PLAN.md` §3.2 entfällt, solange mem0s Extraktion die Messung besteht. Ausfall wie bisher: Turn bleibt im Spool, Retry mit Backoff, rohe Beobachtung als Fallback.
+
+### 3.3 Lernen
+Von den Jobs in `PLAN.md` §3.3 bleiben zunächst zwei: `observe` (mem0 `add`) und `resolve` (§4). `lesson`, `rule`, `reflect`, `evolve`, `consolidate` werden erst gebaut, wenn Messungen zeigen, dass sie fehlen.
+
+## 4. Widerspruchsschicht
+mem0 2.2.1 fügt bei Korrekturen nur hinzu (getestet mit `qwen3.5:4b`, `qwen3.6:35b` und `claude haiku`: jeweils zwei ADDs, der alte Fakt bleibt gültig). Nach jedem `add` sucht ein Schritt die Top-5 ähnlichen Fakten, gibt sie mit dem neuen Fakt an den Memory-Agent und bekommt je Paar `KEEP` oder `SUPERSEDE` zurück. Bei `SUPERSEDE` wird der alte Fakt per `metadata.invalid_at` markiert (mem0 `update`), nicht gelöscht. Die Suche filtert standardmäßig auf Fakten ohne `invalid_at`.
+
+## 5. Injection und MCP
+- SessionStart und UserPromptSubmit: `memory.search` mit Filter auf Projekt und `invalid_at` leer, höchstens 3 Treffer, als Daten gerahmt, Deadline wie bisher. Hook-Pfad bleibt Standardbibliothek, mem0 wird nur im Memory-Agent-Prozess importiert (Import ist schwer).
+- MCP-Tools: `mem_search`, `mem_get`, `mem_remember`, `mem_forget`.
+- Durchsetzung (Deny, Rezepte, Dead Ends) und Viewer sind nicht Teil der ersten Lieferung.
+
+## 6. Phasen
+| Phase | Inhalt | Fertig, wenn |
+|---|---|---|
+| 0 (2 Tage) | Qdrant-Pfad + Hybridsuche prüfen; Codex- und Copilot-Subprozess prüfen; mem0 pinnen; Latenz pro `add` messen | je Harness ein `add` mit Abo-Login läuft, Zahlen notiert |
+| 1 (4 Tage) | Spool → Memory-Agent → mem0 → Injection für Claude Code; Widerspruchsschicht | echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst alten Fakt ab |
+| 2 (2 Tage) | Messung: 25-Fälle-Fixture und LongMemEval-S gegen reines mem0 (Ollama) und gegen diesen Stack | Zahlen im Plan-Anhang |
+| 3 (3 Tage) | Codex und Copilot anbinden, OpenCode über Claude/Codex | je Harness eine echte Session |
+| 4 | Löschen: `search`, `semantic`, `store`, `db`-Schema, `summarize`, `consolidate`, `views`, `viewer`, `importers`, `evaluate` | Tests grün, Zeilenzahl sinkt |
+
+Insgesamt etwa 11 Arbeitstage statt 36 plus Dogfooding. Danach 2 Wochen Dogfooding, dann Entscheidung über `lesson`/`rule`/Graph anhand der Messung.
+
+## 7. Risiken
+- mem0 ist ein Fremdprojekt mit schneller Versionsfolge. Gegenmittel: Pin, ein Adapter-Modul (`memory.py`), Test gegen genau diese Version.
+- `memory.llm` zu überschreiben ist ein interner Eingriff. Gegenmittel: Test, der beim Upgrade bricht.
+- Latenz pro `add` über `claude -p` liegt im Sekundenbereich. Gegenmittel: läuft im Hintergrund, nie im Hook.
+- Quota des Abos. Gegenmittel: Raw-Fallback und Tageslimit.
+- mem0-Telemetrie: `MEM0_TELEMETRY=False` im Memory-Agent-Prozess, per Test abgesichert.
+- Der Spike ist eine Einzelprobe (zwei Sätze). Die Qualität beweist erst Phase 2.

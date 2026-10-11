@@ -1,5 +1,8 @@
 # Beobachter-Aufrufe: verifizierte CLI-Flags (2026-10-08, lokal)
 
+> **Korrektur 2026-10-12:** `--bare` bricht das Abo-Login ("Not logged in"). Funktionierend: `claude -p --restricted --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --model haiku`. Beleg: `evidence/spike-mem0-claude-cli.py`.
+
+
 Geprüft mit `--help` der installierten Binaries. Copilot CLI ist auf dieser Maschine nicht installiert (nur `~/.copilot` der IDE), Phase 0 muss es installieren.
 
 ## Claude Code 2.1.294
