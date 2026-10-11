@@ -37,3 +37,13 @@ Alles ohne Messwert fliegt: Reranker als Standard, Viewer-Ansichten außer Fakte
 
 ## Offen (wird in der Umsetzung entschieden)
 Embedder-Wahl per Messung (e5-small, embeddinggemma, Qwen3-Embedding), Schwellwert je Modell neu kalibrieren.
+
+## mem0 als externe Abhängigkeit (Entscheidung 2026-10-11)
+Frage des Nutzers: mem0 als Open-Source-SDK einbinden statt nachbauen?
+
+Befund (Einzelprobe, mem0ai 2.2.1, Ollama, nomic-embed-text, faiss, MEM0_DIR isoliert): läuft ohne API-Key. Bei der Korrektur "nox statt pytest" erzeugt mem0 mit qwen3.5:4b und mit qwen3.6:35b je zwei ADDs. Der widersprochene Fakt bleibt gültig. Telemetrie (PostHog) ist standardmäßig an, `MEM0_TELEMETRY=False` ist Pflicht.
+
+Entscheidung: mem0 wird als austauschbares Speicher- und Such-Backend hinter der Harness-Schicht eingesetzt, der Kern bleibt wie oben. Reihenfolge:
+1. Harness-Schicht plus mem0-Backend liefern, damit es sofort täglich läuft.
+2. Widerspruchsbehandlung (`invalid_at`, Observer-Entscheidung) als eigene Schicht darüber, die mem0 per `update`/`delete` ansteuert.
+3. Eigenes SQLite-Backend nur bauen, wenn der Vergleichslauf zeigt, dass mem0 der Engpass ist. Bis dahin keine zweite Implementierung.
