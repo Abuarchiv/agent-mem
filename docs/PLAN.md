@@ -107,7 +107,7 @@ Nach jedem `add` liefert mem0 Ereignisse (`ADD`, `UPDATE`, `DELETE`, `NONE`) mit
 3. Für jeden neuen Fakt: `search(neuer Fakt, k=5)` im selben Namespace, ohne ihn selbst. Treffer mit Score ≥ `contradiction.min_score` (Standard 0,6, in Phase 0 kalibriert) gehen mit dem neuen Fakt in einen einzigen LLM-Aufruf: Antwort als JSON-Liste `[{id, verdict: KEEP|SUPERSEDE}]`. Bei `SUPERSEDE`: `store.supersede(alt, neu)`.
 4. Gültigkeit überall mit `invalid_at IS NULL` filtern (steht in den Suchen schon).
 
-Pro Turn also höchstens zwei Modellaufrufe: mem0-Extraktion (die Zahl interner mem0-Aufrufe misst Phase 0) und das Widerspruchsurteil (nur bei Kandidaten).
+Pro Turn also höchstens zwei Modellaufrufe: die mem0-Extraktion (genau ein Aufruf pro `add`, siehe A.10) und das Widerspruchsurteil (nur bei Kandidaten). Ergebnisse der mem0-Suche werden gegen `memories.invalid_at` nachgefiltert (mit Überhol-Faktor 3 beim Abruf), denn das Ablaufdatum von mem0 (`expiration_date`) ist nur tagesgenau und taugt nicht für sofortige Ungültigkeit.
 
 ### 4.7 Injection (Hook, stdlib)
 `inject.py` bleibt unverändert: Es liest bereits `memories` mit `kind IN (…, 'fact')` und `invalid_at IS NULL` (`inject.py:175-177`), gewichtet nach Aktivierung und `importance`. Gespiegelte Fakten erscheinen dadurch ohne Codeänderung. Inhalt und Form der Injektion (Legende, Index, höchstens 3 Treffer) bleiben wie in der Datei.
@@ -176,7 +176,7 @@ Nicht gemessen und nicht behauptet: End-to-End-Antwortgenauigkeit mit Judge-Mode
 
 | Phase | Arbeit | Abnahme | Dauer |
 |---|---|---|---|
-| 0 Messen | Fixture bauen (25 Fälle plus 10 Widerspruchspaare). Reines mem0 (Ollama und Claude) und Bestand auf Fixture und LongMemEval-S messen. Embedder-Kandidaten messen (§12, E2). Anzahl interner mem0-LLM-Aufrufe zählen. spaCy-Entity-Store prüfen. Copilot installieren und `copilot -p` prüfen. Hook-Laufzeit des Bestands messen. Score-Schwelle für §4.6 kalibrieren. | Fixture liegt unter `tests/fixtures/`, Zahlen im Anhang B. Alle Stoppregeln aus §12 sind ausgewertet. | 3 Tage |
+| 0 Messen | Fixture bauen (25 Fälle plus 10 Widerspruchspaare). Reines mem0 (Ollama und Claude) und Bestand auf Fixture und LongMemEval-S messen. Embedder-Kandidaten messen (§12, E2). spaCy-Entity-Store prüfen. Copilot installieren und `copilot -p` prüfen. Hook-Laufzeit des Bestands messen. Score-Schwelle für §4.6 kalibrieren. | Fixture liegt unter `tests/fixtures/`, Zahlen im Anhang B. Alle Stoppregeln aus §12 sind ausgewertet. | 3 Tage |
 | 1 Worker | Migration `002`, Queue, `spawn_worker`, Worker, Provider (Stufe 1, 4, 5), `mem0_adapter`, Spiegel, Widerspruchsschicht, Datenschutztests, neue `AGENTS.md` aus §13 schreiben. Nur Claude Code. | Echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst den alten Fakt ab. Tabelle §8 Phase-1-Zeilen erfüllt. Alle Tests, `ruff`, `pyright` grün. | 5 Tage |
 | 2 Retrieval | Hook-Suche gegen MCP-Suche gegen mem0-Suche auf Fixture und LongMemEval-S vergleichen (§12, E3). Sieger festlegen. Injection und MCP auf Sieger. | Schwellen aus §8 erfüllt, Bericht im Anhang B. | 3 Tage |
 | 3 Harnesses | Stufe 2 (Codex) und Stufe 3 (Copilot, falls geprüft) in die Kette, Plugins für Codex und Copilot, OpenCode über die Kette. | Je Harness eine echte Session: Capture, Recall in neuer Session, Compaction, Deinstallation. | 3 Tage |
@@ -253,6 +253,10 @@ Skripte liegen unter `docs/evidence/spikes/`.
 - **A.6 Graph in mem0**: Im installierten Paket kein `graph_store`, kein Neo4j, Kuzu oder Memgraph. Entitäten (PROPER, QUOTED, TOPIC, IDENTIFIER) kommen aus spaCy und liegen in einer zweiten Collection (`entity_store`). Keyword-Suche (BM25) bietet unter den lokalen Stores nur Qdrant.
 - **A.7 Codex**: `codex exec --ephemeral --ignore-user-config -s read-only … --output-schema … -o …` lieferte `{"a":"ok"}` unter dem CLI-Login, 24.569 Tokens für einen Trivialaufruf. Copilot CLI ist nicht installiert (`which copilot` leer).
 - **A.8 Lizenzen**: mem0ai Apache-2.0, qdrant-client Apache-2.0, filelock MIT. fastembed und spaCy nicht geprüft; Phase 0 trägt das nach.
+- **A.10 Was mem0 2.2.1 bei `add` und `search` tut** (Quelltext `mem0/memory/main.py`, Zeilen 881 bis 1075 und 1642 bis 1735):
+  - `add`: (1) letzte 10 Nachrichten der Session laden; (2) die neuen Nachrichten einbetten und die 10 ähnlichsten vorhandenen Fakten im Vektor-Store suchen; (3) **ein** LLM-Aufruf mit diesen Fakten, den neuen und den letzten Nachrichten, Antwort `{"memory": [{"text": …}]}`, nur Hinzufügen (kein Update, kein Löschen); (4) alle neuen Fakten in einem Stapel einbetten; (5) Duplikate per MD5-Hash verwerfen; (6) Fakten samt Vektor, `data`, `text_lemmatized`, `hash`, `created_at` in den Vektor-Store schreiben; (7) Entitäten per spaCy (ohne LLM) ziehen, einbetten und in der Entity-Collection verknüpfen.
+  - `search`: Anfrage einbetten, semantische Suche (Überhol-Faktor, mindestens 60), BM25 über lemmatisierte Anfrage (falls der Store Keyword-Suche kann), Entitäts-Boost, dann `score_and_rank` mit Schwelle 0,1.
+  - Embeddings werden also an vier Stellen gebraucht: Anfrage bei `add` (Vorwissen für das LLM), neue Fakten (Speicher), Entitäten (Verknüpfung), Anfrage bei `search`.
 - **A.9 Schema**: `memories` hat `invalid_at`, `superseded_by`, `valid_from`, `importance`, `dedupe_key`, `kind IN (… 'fact' …)`; `store.supersede` und `store.add_memory(dedupe=…)` existieren.
 
 ## Anhang B: Messberichte
