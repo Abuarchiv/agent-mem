@@ -95,6 +95,7 @@ def _main(args: list[str]) -> int:
     p.add_argument("--llm-model")
     p.add_argument("--custom-prompt", type=Path, help="file with mem0 custom_instructions (E8)")
     p.add_argument("--min-score", type=float, default=0.0, help="abstain below this score (fixture)")
+    p.add_argument("--embedder", help="fastembed model name (E2), default from config")
     p = sub.add_parser("setup", help="show how to connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p.add_argument(
@@ -137,6 +138,7 @@ def _main(args: list[str]) -> int:
             llm_model=ns.llm_model,
             custom_instructions=ns.custom_prompt.read_text(encoding="utf-8") if ns.custom_prompt else None,
             min_score=ns.min_score,
+            embedder_model=ns.embedder,
         )
         if ns.fixture:
             report = runner.fixture(ns.fixture)

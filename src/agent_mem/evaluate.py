@@ -163,11 +163,14 @@ class Runner:
         llm_model: str | None = None,
         custom_instructions: str | None = None,
         min_score: float = 0.0,
+        embedder_model: str | None = None,
     ) -> None:
         self.backend = backend
         self.llm, self.llm_model, self.custom_instructions = llm, llm_model, custom_instructions
         self.min_score = min_score
         base_config = load()
+        if embedder_model:
+            base_config.semantic.model = embedder_model
         self.embedder = semantic.load_embedder(base_config, allow_download=True) if semantic_search else None
         self.add_seconds: list[float] = []
 
