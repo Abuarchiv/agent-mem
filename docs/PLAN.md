@@ -7,11 +7,11 @@ Stand: 2026-10-12. Dies ist der einzige Plan. Er ersetzt alle früheren Dokument
 Agent Mem gibt Coding-Agents (Claude Code, Codex, Copilot CLI, OpenCode) ein gemeinsames, dauerhaftes Gedächtnis, das:
 
 1. täglich läuft, ohne die Session zu verlangsamen,
-6. von Dritten in unter fünf Minuten installierbar ist und ohne Nacharbeit läuft (§14).
 2. ohne API-Key auskommt (Abo-Login der Harnesses, sonst lokales Ollama),
 3. Widersprüche erkennt (neue Aussage löst alte ab),
 4. messbar mindestens so gut ist wie der bisherige Stand und wie reines mem0,
-5. wenig eigenen Code zur Pflege hat.
+5. wenig eigenen Code zur Pflege hat,
+6. von Dritten in unter fünf Minuten installierbar ist und ohne Nacharbeit läuft (§14).
 
 Nicht-Ziele: Cloud-Sync, Mehrbenutzer, Verschlüsselung der Datenbank, eigener Graph-Server, Daemon, API-Key-Pfad für Fremdprovider.
 
