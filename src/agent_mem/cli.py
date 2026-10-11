@@ -97,6 +97,7 @@ def _main(args: list[str]) -> int:
     p.add_argument("--min-score", type=float, default=0.0, help="abstain below this score (fixture)")
     p.add_argument("--embedder", help="fastembed model name (E2), default from config")
     p.add_argument("--vector-floor", type=float, help="override retrieval.min_vector_score (sqlite backend)")
+    p.add_argument("--progress", type=Path, help="JSONL with one line per finished question; resumes on rerun")
     p = sub.add_parser("setup", help="show how to connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p.add_argument(
@@ -145,7 +146,7 @@ def _main(args: list[str]) -> int:
         if ns.fixture:
             report = runner.fixture(ns.fixture)
         elif ns.dataset:
-            report = runner.longmemeval(ns.dataset, limit=ns.limit, subset=ns.subset)
+            report = runner.longmemeval(ns.dataset, limit=ns.limit, subset=ns.subset, progress=ns.progress)
         else:
             parser.error("eval needs a dataset or --fixture")
         print(json.dumps(report, indent=2, ensure_ascii=False))

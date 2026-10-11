@@ -193,8 +193,17 @@ class Runner:
         self.add_seconds.extend(getattr(backend, "add_seconds", []))
 
     def longmemeval(
-        self, dataset: Path, *, ks: tuple[int, ...] = (5, 10), limit: int | None = None, subset: Path | None = None
+        self,
+        dataset: Path,
+        *,
+        ks: tuple[int, ...] = (5, 10),
+        limit: int | None = None,
+        subset: Path | None = None,
+        progress: Path | None = None,
     ) -> dict[str, Any]:
+        """``progress`` is a JSONL file with one line per finished question. Long runs (mem0 with a
+        local model take hours) can crash or be interrupted; finished questions are skipped on rerun
+        and their scores are taken from the file."""
         items = json.loads(dataset.read_text(encoding="utf-8"))
         if subset:
             wanted = {s["question_id"] for s in json.loads(subset.read_text(encoding="utf-8"))["items"]}
@@ -202,8 +211,18 @@ class Runner:
         if limit:
             items = items[:limit]
         per_type: dict[str, list[dict[int, float]]] = defaultdict(list)
+        done: dict[str, dict[str, Any]] = {}
+        if progress and progress.exists():
+            for line in progress.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    row = json.loads(line)
+                    done[row["question_id"]] = row
         for item in items:
-            if str(item.get("question_id", "")).endswith("_abs"):
+            qid = str(item.get("question_id", ""))
+            if qid.endswith("_abs"):
+                continue
+            if qid in done:
+                per_type[item.get("question_type", "all")].append({k: float(done[qid]["hits"][str(k)]) for k in ks})
                 continue
             with tempfile.TemporaryDirectory() as tmp:
                 backend = self.open(Path(tmp))
@@ -213,11 +232,21 @@ class Runner:
                     if session_id and session_id not in ranked_sessions:
                         ranked_sessions.append(session_id)
                 gold = {str(s) for s in item["answer_session_ids"]}
-                per_type[item.get("question_type", "all")].append(
-                    {k: float(bool(gold & set(ranked_sessions[:k]))) for k in ks}
-                )
+                hits = {k: float(bool(gold & set(ranked_sessions[:k]))) for k in ks}
+                per_type[item.get("question_type", "all")].append(hits)
                 self._collect(backend)
                 backend.close()
+                if progress:
+                    row = {
+                        "question_id": qid,
+                        "question_type": item.get("question_type"),
+                        "hits": {str(k): v for k, v in hits.items()},
+                        "ranked": ranked_sessions[: max(ks)],
+                        "gold": sorted(gold),
+                        "add_seconds": getattr(backend, "add_seconds", []),
+                    }
+                    with progress.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(row) + "\n")
         report: dict[str, Any] = {}
         all_scores: list[dict[int, float]] = []
         for kind, scores in sorted(per_type.items()):
