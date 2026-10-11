@@ -83,9 +83,16 @@ def _main(args: list[str]) -> int:
     p = sub.add_parser("models", help="embedding model status or download")
     p.add_argument("action", choices=["status", "install"], nargs="?", default="status")
     p = sub.add_parser("eval", help="retrieval evaluation (LongMemEval-S format)")
-    p.add_argument("dataset", type=Path)
+    p.add_argument("dataset", type=Path, nargs="?", help="LongMemEval-S JSON (omit with --fixture)")
     p.add_argument("--limit", type=int)
     p.add_argument("--no-semantic", action="store_true")
+    p.add_argument("--backend", choices=("sqlite", "mem0"), default="sqlite")
+    p.add_argument("--subset", type=Path, help="JSON with question ids (tests/fixtures/longmemeval_subset.json)")
+    p.add_argument("--fixture", type=Path, help="run tests/fixtures/memory_cases.json instead of a dataset")
+    p.add_argument("--llm", choices=("ollama", "claude", "codex"), default="ollama", help="mem0 backend only")
+    p.add_argument("--llm-model")
+    p.add_argument("--custom-prompt", type=Path, help="file with mem0 custom_instructions (E8)")
+    p.add_argument("--min-score", type=float, default=0.0, help="abstain below this score (fixture)")
     p = sub.add_parser("setup", help="show how to connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p.add_argument(
@@ -119,9 +126,23 @@ def _main(args: list[str]) -> int:
         print(to_json(checks) if ns.json else format_checks(checks))
         return 0 if all(c.ok or c.warn_only for c in checks) else 1
     if ns.command == "eval":
-        from .evaluate import longmemeval
+        from .evaluate import Runner
 
-        print(json.dumps(longmemeval(ns.dataset, limit=ns.limit, semantic_search=not ns.no_semantic), indent=2))
+        runner = Runner(
+            ns.backend,
+            semantic_search=not ns.no_semantic,
+            llm=ns.llm,
+            llm_model=ns.llm_model,
+            custom_instructions=ns.custom_prompt.read_text(encoding="utf-8") if ns.custom_prompt else None,
+            min_score=ns.min_score,
+        )
+        if ns.fixture:
+            report = runner.fixture(ns.fixture)
+        elif ns.dataset:
+            report = runner.longmemeval(ns.dataset, limit=ns.limit, subset=ns.subset)
+        else:
+            parser.error("eval needs a dataset or --fixture")
+        print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0
     if ns.command == "paths":
         print(

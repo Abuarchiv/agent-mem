@@ -35,7 +35,7 @@ dependencies = [
 semantic = ["fastembed>=0.8; sys_platform != 'darwin' or platform_machine != 'x86_64'"]
 # Background observer (docs/PLAN.md §4.5): mem0 does extraction and dedup, Qdrant is the local
 # vector store. Pinned; upgrades only with a green adapter test. Imported lazily by observe/ only.
-observer = ["mem0ai[nlp]==2.2.1", "qdrant-client>=1.12"]
+observer = ["mem0ai[nlp]==2.2.1", "qdrant-client>=1.12", "ollama>=0.4"]
 
 [project.scripts]
 agent-mem = "agent_mem.cli:main"

@@ -1,0 +1,540 @@
+{
+  "version": 1,
+  "description": "Retrieval fixture (docs/PLAN.md §8a). 25 cases: 20 answerable, 5 abstention. Each case has its own history (sessions of user/assistant messages, with distractor turns), a question, and either expect_any (one of these substrings must appear in the top-1 result, case-insensitive) or abstain=true (no result may be returned above the backend's threshold). Plus 10 contradiction pairs (§8d): after ingesting before and after, the top result for the question must contain a current substring and none of the obsolete ones.",
+  "cases": [
+    {
+      "id": "c01", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Richte das Projekt ein. Wir nutzen uv als Paketmanager, kein pip und kein poetry."},
+          {"role": "assistant", "content": "Erledigt: pyproject.toml angelegt, `uv sync` installiert die Abhängigkeiten, `uv run pytest` führt die Tests aus."},
+          {"role": "user", "content": "Schreib mir einen Regex, der ISO-Daten wie 2026-10-12 erkennt."},
+          {"role": "assistant", "content": "`\\b\\d{4}-\\d{2}-\\d{2}\\b` erkennt das Format, prüft aber nicht die Gültigkeit des Datums."}
+        ],
+        [
+          {"role": "user", "content": "Füge httpx als Abhängigkeit hinzu."},
+          {"role": "assistant", "content": "Mit `uv add httpx` hinzugefügt, uv.lock aktualisiert."}
+        ]
+      ],
+      "question": "Womit installiere ich in diesem Projekt die Abhängigkeiten?",
+      "expect_any": ["uv"]
+    },
+    {
+      "id": "c02", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Set up a local Postgres 16 with docker compose. Use port 5433 on the host because 5432 is taken by another project."},
+          {"role": "assistant", "content": "Added compose.yaml with service `db` (postgres:16), host port 5433 mapped to 5432 in the container, volume `pgdata`."},
+          {"role": "user", "content": "Can you explain the difference between a list and a tuple in Python?"},
+          {"role": "assistant", "content": "Lists are mutable and tuples are immutable; tuples can be dictionary keys, lists cannot."}
+        ],
+        [
+          {"role": "user", "content": "Write the DATABASE_URL for the local setup."},
+          {"role": "assistant", "content": "`postgresql://app:app@localhost:5433/app` — note the host port 5433."}
+        ]
+      ],
+      "question": "Which port does the local Postgres listen on?",
+      "expect_any": ["5433"]
+    },
+    {
+      "id": "c03", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Formatierung: ruff format mit Zeilenlänge 110, nicht 88. Trag das in die pyproject ein."},
+          {"role": "assistant", "content": "`[tool.ruff] line-length = 110` gesetzt, `ruff format` läuft durch."}
+        ],
+        [
+          {"role": "user", "content": "Wie sortiere ich ein Dict nach Werten?"},
+          {"role": "assistant", "content": "`dict(sorted(d.items(), key=lambda kv: kv[1]))`."},
+          {"role": "user", "content": "Der Formatter hat die Zeile umgebrochen, obwohl sie 105 Zeichen hat."},
+          {"role": "assistant", "content": "Die Editor-Einstellung stand auf 88. Die Projektregel ist 110, ich habe die Editor-Config angeglichen."}
+        ]
+      ],
+      "question": "Welche maximale Zeilenlänge gilt für den Code?",
+      "expect_any": ["110"]
+    },
+    {
+      "id": "c04", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Tests fail with 'RuntimeError: Event loop is closed' when fixtures call asyncio.run."},
+          {"role": "assistant", "content": "Tried wrapping fixtures in asyncio.run — same error. Root cause: multiple event loops per test session. Fix: installed pytest-asyncio and set `asyncio_mode = \"auto\"` in pyproject; fixtures are now `async def` without asyncio.run. 42 tests pass."}
+        ],
+        [
+          {"role": "user", "content": "Rename the module utils.py to helpers.py."},
+          {"role": "assistant", "content": "Renamed and updated 7 imports."}
+        ]
+      ],
+      "question": "How did we fix the 'event loop is closed' error in the tests?",
+      "expect_any": ["pytest-asyncio", "asyncio_mode"]
+    },
+    {
+      "id": "c05", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Deployment: Die API läuft auf Fly.io, App heißt kassen-api, Region fra. Schreib die fly.toml."},
+          {"role": "assistant", "content": "fly.toml mit `app = \"kassen-api\"`, `primary_region = \"fra\"`, internem Port 8080 angelegt."},
+          {"role": "user", "content": "Was ist der Unterschied zwischen PUT und PATCH?"},
+          {"role": "assistant", "content": "PUT ersetzt die Ressource vollständig, PATCH ändert nur Teile."}
+        ],
+        [
+          {"role": "user", "content": "Deploy bitte."},
+          {"role": "assistant", "content": "`fly deploy` durchgelaufen, Version v23 in fra aktiv."}
+        ]
+      ],
+      "question": "Wo wird die API deployt?",
+      "expect_any": ["fly", "fra"]
+    },
+    {
+      "id": "c06", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Commit this. And remember: commit messages in English, imperative mood, no emojis, no trailers."},
+          {"role": "assistant", "content": "Committed as `Add retry to payment client`. Noted the convention: English, imperative, no emojis."}
+        ],
+        [
+          {"role": "user", "content": "What does `git rebase -i` do?"},
+          {"role": "assistant", "content": "It lets you reorder, squash, edit or drop commits interactively before replaying them."},
+          {"role": "user", "content": "Commit the test changes."},
+          {"role": "assistant", "content": "Committed as `Cover timeout path in payment tests`."}
+        ]
+      ],
+      "question": "How should commit messages be written in this project?",
+      "expect_any": ["imperative", "english", "no emojis"]
+    },
+    {
+      "id": "c07", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Leg einen Branch für Ticket LIN-482 an. Konvention: feature/<ticket>-<kurzname>, Tickets kommen aus Linear."},
+          {"role": "assistant", "content": "Branch `feature/LIN-482-export-csv` angelegt und ausgecheckt."}
+        ],
+        [
+          {"role": "user", "content": "Wie viele Sekunden hat ein Tag?"},
+          {"role": "assistant", "content": "86.400."},
+          {"role": "user", "content": "Neuer Branch für LIN-490, Thema Rechnungs-PDF."},
+          {"role": "assistant", "content": "`feature/LIN-490-rechnung-pdf` angelegt."}
+        ]
+      ],
+      "question": "Wie heißen Feature-Branches in diesem Projekt?",
+      "expect_any": ["feature/"]
+    },
+    {
+      "id": "c08", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "The Stripe key must come from STRIPE_SECRET in .env.local. Never commit it, .env.local is gitignored."},
+          {"role": "assistant", "content": "Reading `os.environ[\"STRIPE_SECRET\"]`, loaded from .env.local via python-dotenv. Confirmed .env.local is in .gitignore."},
+          {"role": "user", "content": "Give me a one-liner to count lines in all .py files."},
+          {"role": "assistant", "content": "`find . -name '*.py' | xargs wc -l | tail -1`."}
+        ],
+        [
+          {"role": "user", "content": "Payments fail locally with 'No API key provided'."},
+          {"role": "assistant", "content": "STRIPE_SECRET was missing from your .env.local. Added a check that fails fast with a clear message."}
+        ]
+      ],
+      "question": "Where does the Stripe API key come from?",
+      "expect_any": [".env.local", "STRIPE_SECRET"]
+    },
+    {
+      "id": "c09", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Wir nutzen Node 22 über fnm, nicht nvm. Leg eine .node-version an."},
+          {"role": "assistant", "content": "`.node-version` mit `22` angelegt, `fnm use` wechselt automatisch."}
+        ],
+        [
+          {"role": "user", "content": "Erklär mir kurz Promise.allSettled."},
+          {"role": "assistant", "content": "Wartet auf alle Promises und liefert je Eintrag status und value oder reason, ohne bei einem Fehler abzubrechen."},
+          {"role": "user", "content": "CI schlägt fehl mit 'unsupported engine'."},
+          {"role": "assistant", "content": "Die CI nutzte Node 18. Auf 22 gesetzt, passend zur .node-version."}
+        ]
+      ],
+      "question": "Welche Node-Version verwendet das Projekt?",
+      "expect_any": ["22"]
+    },
+    {
+      "id": "c10", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Decision: the CLI tool stores its data in SQLite, not Postgres. It's a single-user tool and must work offline without a server."},
+          {"role": "assistant", "content": "Using the stdlib sqlite3 module with WAL mode. No external database."},
+          {"role": "user", "content": "How do I reverse a string in Python?"},
+          {"role": "assistant", "content": "`s[::-1]`."}
+        ],
+        [
+          {"role": "user", "content": "Add a backup command."},
+          {"role": "assistant", "content": "`backup` uses `VACUUM INTO` to write a consistent copy of the SQLite file."}
+        ]
+      ],
+      "question": "Which database does the CLI tool use, and why?",
+      "expect_any": ["sqlite"]
+    },
+    {
+      "id": "c11", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Die Alembic-Migration hat die neue Enum-Variante nicht angelegt, Prod ist kaputt."},
+          {"role": "assistant", "content": "Ursache: `alembic revision --autogenerate` erkennt Änderungen an Postgres-Enums nicht. Lehre: Enum-Änderungen immer von Hand als `ALTER TYPE ... ADD VALUE` in die Migration schreiben. Hotfix-Migration angelegt."}
+        ],
+        [
+          {"role": "user", "content": "Wie konvertiere ich einen String in ein datetime?"},
+          {"role": "assistant", "content": "`datetime.fromisoformat(s)` für ISO-Format, sonst `strptime` mit Formatstring."}
+        ]
+      ],
+      "question": "Worauf muss ich bei Alembic-Autogenerate achten?",
+      "expect_any": ["enum"]
+    },
+    {
+      "id": "c12", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Start the dev server."},
+          {"role": "assistant", "content": "`make dev` starts the API on :8000 and the web app on :5173 together via honcho. Both are up."},
+          {"role": "user", "content": "What's the difference between `==` and `is`?"},
+          {"role": "assistant", "content": "`==` compares values, `is` compares identity."}
+        ],
+        [
+          {"role": "user", "content": "The web app isn't reachable."},
+          {"role": "assistant", "content": "You started only `uvicorn`. Use `make dev`, it starts both processes."}
+        ]
+      ],
+      "question": "How do I start the development server?",
+      "expect_any": ["make dev"]
+    },
+    {
+      "id": "c13", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Antworte mir bitte auf Deutsch. Code-Kommentare und Docstrings aber auf Englisch, das Team ist international."},
+          {"role": "assistant", "content": "Verstanden: Antworten auf Deutsch, Kommentare und Docstrings auf Englisch."}
+        ],
+        [
+          {"role": "user", "content": "Füge eine Funktion hinzu, die Beträge rundet."},
+          {"role": "assistant", "content": "`round_amount` hinzugefügt, mit englischem Docstring wie vereinbart."},
+          {"role": "user", "content": "Was bedeutet idempotent?"},
+          {"role": "assistant", "content": "Mehrfaches Ausführen hat dasselbe Ergebnis wie einmaliges."}
+        ]
+      ],
+      "question": "In welcher Sprache sollen Code-Kommentare geschrieben werden?",
+      "expect_any": ["englisch", "english"]
+    },
+    {
+      "id": "c14", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Build fails after upgrading to Tailwind v4: 'It looks like you're trying to use tailwindcss directly as a PostCSS plugin'."},
+          {"role": "assistant", "content": "Tried `@tailwindcss/postcss` first, still conflicted with the old config. Fix that worked: deleted postcss.config.js and switched to the `@tailwindcss/vite` plugin in vite.config.ts. Build is green."},
+          {"role": "user", "content": "Rename the Button component to PrimaryButton."},
+          {"role": "assistant", "content": "Renamed, 12 imports updated."}
+        ]
+      ],
+      "question": "How did we fix the Tailwind v4 build error?",
+      "expect_any": ["@tailwindcss/vite", "tailwindcss/vite"]
+    },
+    {
+      "id": "c15", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Login über Keycloak: Realm heißt intern, Client web-app, Redirect auf /callback."},
+          {"role": "assistant", "content": "OIDC-Config mit Realm `intern` und Client `web-app` eingetragen, Redirect-URI `/callback` registriert."}
+        ],
+        [
+          {"role": "user", "content": "Wie schreibe ich einen Context-Manager?"},
+          {"role": "assistant", "content": "Klasse mit `__enter__` und `__exit__` oder `@contextlib.contextmanager` mit `yield`."},
+          {"role": "user", "content": "Token-Validierung schlägt fehl: wrong issuer."},
+          {"role": "assistant", "content": "Der Issuer muss `https://auth.example.de/realms/intern` sein, du hattest `master`."}
+        ]
+      ],
+      "question": "Wie heißt der Keycloak-Realm der Anwendung?",
+      "expect_any": ["intern"]
+    },
+    {
+      "id": "c16", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Set up CI with GitHub Actions. Tests must run on Python 3.11 and 3.13."},
+          {"role": "assistant", "content": "Added .github/workflows/ci.yml with a matrix over python-version 3.11 and 3.13 on ubuntu-latest, running `uv run pytest`."},
+          {"role": "user", "content": "What's a good name for a function that merges two dicts?"},
+          {"role": "assistant", "content": "`merge_dicts` or `merged` if it returns a new one."}
+        ],
+        [
+          {"role": "user", "content": "CI is red on one job only."},
+          {"role": "assistant", "content": "The 3.11 job fails: you used `type` statements (3.12+). Replaced with `TypeAlias`."}
+        ]
+      ],
+      "question": "Which Python versions does CI test against?",
+      "expect_any": ["3.11", "3.13"]
+    },
+    {
+      "id": "c17", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Das ist ein Monorepo mit pnpm workspaces: apps/ für Anwendungen, packages/ für geteilte Bibliotheken."},
+          {"role": "assistant", "content": "pnpm-workspace.yaml mit `apps/*` und `packages/*` angelegt, `pnpm install` läuft."}
+        ],
+        [
+          {"role": "user", "content": "Was ist der Unterschied zwischen let und const?"},
+          {"role": "assistant", "content": "const verhindert Neuzuweisung, let erlaubt sie; beide sind blockgebunden."},
+          {"role": "user", "content": "Füge das Paket zod zur Web-App hinzu."},
+          {"role": "assistant", "content": "`pnpm --filter web add zod` ausgeführt."}
+        ]
+      ],
+      "question": "Welches Workspace-Werkzeug nutzt das Monorepo?",
+      "expect_any": ["pnpm"]
+    },
+    {
+      "id": "c18", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "Don't ever run `git push --force` on main. On feature branches use `--force-with-lease` only."},
+          {"role": "assistant", "content": "Understood: no force push to main; `--force-with-lease` on feature branches only."},
+          {"role": "user", "content": "How do I list files changed in the last commit?"},
+          {"role": "assistant", "content": "`git show --stat --oneline HEAD`."}
+        ],
+        [
+          {"role": "user", "content": "Push the rebased feature branch."},
+          {"role": "assistant", "content": "Pushed with `git push --force-with-lease origin feature/LIN-482-export-csv`."}
+        ]
+      ],
+      "question": "What is the rule for force pushing?",
+      "expect_any": ["force-with-lease", "never", "main"]
+    },
+    {
+      "id": "c19", "lang": "de",
+      "history": [
+        [
+          {"role": "user", "content": "Logging mit structlog: JSON in Produktion, lesbare Konsole in Entwicklung."},
+          {"role": "assistant", "content": "structlog konfiguriert, `JSONRenderer` bei `ENV=prod`, sonst `ConsoleRenderer`."}
+        ],
+        [
+          {"role": "user", "content": "Wie lese ich eine Datei zeilenweise?"},
+          {"role": "assistant", "content": "`with open(p) as f: for line in f: ...`."},
+          {"role": "user", "content": "Füge Log-Zeilen beim Start des Workers hinzu."},
+          {"role": "assistant", "content": "`log.info(\"worker.start\", queue=len(items))` über structlog hinzugefügt."}
+        ]
+      ],
+      "question": "Welche Logging-Bibliothek verwenden wir?",
+      "expect_any": ["structlog"]
+    },
+    {
+      "id": "c20", "lang": "en",
+      "history": [
+        [
+          {"role": "user", "content": "The payments module is owned by team Ledger. Questions go to #ledger-dev on Slack, not to platform."},
+          {"role": "assistant", "content": "Noted: payments → team Ledger, channel #ledger-dev."},
+          {"role": "user", "content": "What is a dataclass?"},
+          {"role": "assistant", "content": "A decorator that generates __init__, __repr__ and __eq__ from annotated fields."}
+        ],
+        [
+          {"role": "user", "content": "Who should review the refund change?"},
+          {"role": "assistant", "content": "Someone from team Ledger, they own payments. I added the ledger-reviewers group."}
+        ]
+      ],
+      "question": "Who owns the payments module?",
+      "expect_any": ["ledger"]
+    },
+    {
+      "id": "c21", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Wir nutzen uv als Paketmanager und ruff als Linter."},
+          {"role": "assistant", "content": "Eingerichtet: `uv sync`, `uv run ruff check`."}
+        ],
+        [
+          {"role": "user", "content": "Füge pydantic hinzu."},
+          {"role": "assistant", "content": "`uv add pydantic` ausgeführt."}
+        ]
+      ],
+      "question": "Welche Redis-Version läuft in Produktion?"
+    },
+    {
+      "id": "c22", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Deploy the API to Fly.io, region fra."},
+          {"role": "assistant", "content": "Deployed, v12 active in fra."}
+        ],
+        [
+          {"role": "user", "content": "Add a health endpoint."},
+          {"role": "assistant", "content": "`GET /health` returns 200 with the version."}
+        ]
+      ],
+      "question": "What is the on-call rotation schedule?"
+    },
+    {
+      "id": "c23", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Login über Keycloak, Realm intern, Client web-app."},
+          {"role": "assistant", "content": "OIDC eingerichtet."}
+        ],
+        [
+          {"role": "user", "content": "Füge Logout hinzu."},
+          {"role": "assistant", "content": "`/logout` leitet an den Keycloak-End-Session-Endpoint weiter."}
+        ]
+      ],
+      "question": "Wie lautet das Passwort der Produktionsdatenbank?"
+    },
+    {
+      "id": "c24", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Start the dev server with make dev."},
+          {"role": "assistant", "content": "Running, API on :8000 and web on :5173."}
+        ],
+        [
+          {"role": "user", "content": "Add a 404 page."},
+          {"role": "assistant", "content": "Added NotFound.tsx and the catch-all route."}
+        ]
+      ],
+      "question": "Which font does the marketing site use?"
+    },
+    {
+      "id": "c25", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Monorepo mit pnpm workspaces, apps/ und packages/."},
+          {"role": "assistant", "content": "pnpm-workspace.yaml angelegt."}
+        ],
+        [
+          {"role": "user", "content": "Baue alle Pakete."},
+          {"role": "assistant", "content": "`pnpm -r build` durchgelaufen, 6 Pakete gebaut."}
+        ]
+      ],
+      "question": "Wer hat das Unternehmen 2019 gegründet?"
+    }
+  ],
+  "contradictions": [
+    {
+      "id": "x01", "lang": "de",
+      "before": [[
+        {"role": "user", "content": "Tests laufen mit pytest, direkt über `uv run pytest`."},
+        {"role": "assistant", "content": "Verstanden, `uv run pytest` ausgeführt, 88 Tests grün."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Korrektur: Wir haben auf nox umgestellt. Tests laufen jetzt nur noch über `nox -s tests`, nicht mehr direkt mit pytest."},
+        {"role": "assistant", "content": "Notiert: Tests über `nox -s tests`. noxfile.py vorhanden, Lauf grün."}
+      ]],
+      "question": "Womit laufen die Tests?",
+      "current": ["nox"], "obsolete": ["uv run pytest"]
+    },
+    {
+      "id": "x02", "lang": "en",
+      "before": [[
+        {"role": "user", "content": "The web dev server runs on port 3000."},
+        {"role": "assistant", "content": "Started on http://localhost:3000."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "We moved the web dev server to port 4000, 3000 collides with Grafana now. Update the config."},
+        {"role": "assistant", "content": "vite.config.ts updated, dev server now on http://localhost:4000."}
+      ]],
+      "question": "Which port does the web dev server use?",
+      "current": ["4000"], "obsolete": ["3000"]
+    },
+    {
+      "id": "x03", "lang": "de",
+      "before": [[
+        {"role": "user", "content": "Lokal läuft Postgres 15 über docker compose."},
+        {"role": "assistant", "content": "compose.yaml mit `postgres:15` angelegt."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Wir sind auf Postgres 16 hochgezogen, 15 wird nicht mehr genutzt. Pass compose an."},
+        {"role": "assistant", "content": "Image auf `postgres:16` geändert, Daten migriert."}
+      ]],
+      "question": "Welche Postgres-Version läuft lokal?",
+      "current": ["16"], "obsolete": ["15"]
+    },
+    {
+      "id": "x04", "lang": "en",
+      "before": [[
+        {"role": "user", "content": "Use npm for installing packages in this repo."},
+        {"role": "assistant", "content": "`npm install` done, package-lock.json created."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Switching the repo to pnpm. Delete package-lock.json; from now on only pnpm, never npm."},
+        {"role": "assistant", "content": "Removed package-lock.json, added pnpm-lock.yaml, `pnpm install` done."}
+      ]],
+      "question": "Which package manager does the repo use?",
+      "current": ["pnpm"], "obsolete": ["npm install", "package-lock"]
+    },
+    {
+      "id": "x05", "lang": "de",
+      "before": [[
+        {"role": "user", "content": "Der Hauptbranch heißt master."},
+        {"role": "assistant", "content": "Branch `master` ausgecheckt."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Wir haben master zu main umbenannt. master existiert nicht mehr."},
+        {"role": "assistant", "content": "Lokal und remote auf `main` umgestellt, Default-Branch in GitHub geändert."}
+      ]],
+      "question": "Wie heißt der Hauptbranch?",
+      "current": ["main"], "obsolete": ["master"]
+    },
+    {
+      "id": "x06", "lang": "en",
+      "before": [[
+        {"role": "user", "content": "Format Python code with black."},
+        {"role": "assistant", "content": "`black .` applied, 14 files reformatted."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "We dropped black. Formatting is `ruff format` only from now on, remove black from the dev dependencies."},
+        {"role": "assistant", "content": "black removed, `ruff format` configured, pre-commit updated."}
+      ]],
+      "question": "Which formatter do we use for Python?",
+      "current": ["ruff"], "obsolete": ["black"]
+    },
+    {
+      "id": "x07", "lang": "de",
+      "before": [[
+        {"role": "user", "content": "Deployment läuft auf Heroku, App-Name kassen-api."},
+        {"role": "assistant", "content": "`git push heroku main` durchgelaufen."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Wir sind von Heroku zu Fly.io gewechselt. Heroku ist abgeschaltet."},
+        {"role": "assistant", "content": "fly.toml angelegt, `fly deploy` erfolgreich, Heroku-Remote entfernt."}
+      ]],
+      "question": "Wo läuft das Deployment?",
+      "current": ["fly"], "obsolete": ["heroku"]
+    },
+    {
+      "id": "x08", "lang": "en",
+      "before": [[
+        {"role": "user", "content": "We're on Node 18 for this service."},
+        {"role": "assistant", "content": "`.nvmrc` set to 18."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Upgraded the service to Node 22. 18 is end of life, don't use it anymore."},
+        {"role": "assistant", "content": "`.nvmrc` set to 22, CI matrix updated, tests pass."}
+      ]],
+      "question": "Which Node version does the service use?",
+      "current": ["22"], "obsolete": ["18"]
+    },
+    {
+      "id": "x09", "lang": "de",
+      "before": [[
+        {"role": "user", "content": "Der HTTP-Client bekommt ein Timeout von 5 Sekunden."},
+        {"role": "assistant", "content": "`httpx.Client(timeout=5)` gesetzt."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "5 Sekunden reißen bei den Reports. Timeout auf 30 Sekunden erhöhen, das ist jetzt der Standard."},
+        {"role": "assistant", "content": "Timeout auf 30 Sekunden gesetzt, Konstante `HTTP_TIMEOUT = 30`."}
+      ]],
+      "question": "Welches Timeout hat der HTTP-Client?",
+      "current": ["30"], "obsolete": ["5 sek", "timeout=5"]
+    },
+    {
+      "id": "x10", "lang": "en",
+      "before": [[
+        {"role": "user", "content": "Write code comments in German, the team is local."},
+        {"role": "assistant", "content": "Comments in German from now on."}
+      ]],
+      "after": [[
+        {"role": "user", "content": "Change of plan: two new colleagues don't speak German. Code comments in English from now on, not German."},
+        {"role": "assistant", "content": "Switched to English comments; I'll translate existing ones as I touch them."}
+      ]],
+      "question": "Which language should code comments be in?",
+      "current": ["english"], "obsolete": ["german"]
+    }
+  ]
+}
