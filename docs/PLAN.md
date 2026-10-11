@@ -7,6 +7,7 @@ Stand: 2026-10-12. Dies ist der einzige Plan. Er ersetzt alle früheren Dokument
 Agent Mem gibt Coding-Agents (Claude Code, Codex, Copilot CLI, OpenCode) ein gemeinsames, dauerhaftes Gedächtnis, das:
 
 1. täglich läuft, ohne die Session zu verlangsamen,
+6. von Dritten in unter fünf Minuten installierbar ist und ohne Nacharbeit läuft (§14).
 2. ohne API-Key auskommt (Abo-Login der Harnesses, sonst lokales Ollama),
 3. Widersprüche erkennt (neue Aussage löst alte ab),
 4. messbar mindestens so gut ist wie der bisherige Stand und wie reines mem0,
@@ -193,10 +194,10 @@ Nicht gemessen und nicht behauptet: End-to-End-Antwortgenauigkeit mit Judge-Mode
 | 1 Worker | Migration `002` (`observe_queue`, `observe_calls`), Bündelbau, `spawn_worker` (POSIX und Windows), Worker mit Leerlauf und Priorität, Provider (Stufe 1, 4, 5 und `fake`), Quota-Erkennung je Binary, `mem0_adapter` (vier Funktionen), Spiegel, Widerspruchsschicht mit drei Urteilen, `forget` in `mem_forget` und `purge`, `reindex`, `observe --status`, Datenschutztests, neue `AGENTS.md` aus §13 schreiben. Nur Claude Code. | Echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst den alten Fakt ab, Duplikat wird erkannt, `mem_forget` entfernt den Fakt auch aus Qdrant. Tabelle §8 Phase-1-Zeilen erfüllt. Alle Tests, `ruff`, `pyright` grün; CI ohne Marker `local`. | 6 Tage |
 | 2 Retrieval | Hook-Suche gegen MCP-Suche gegen mem0-Suche auf Fixture und LongMemEval-S vergleichen (§12, E3). Sieger festlegen. Injection und MCP auf Sieger. | Schwellen aus §8 erfüllt, Bericht im Anhang B. | 3 Tage |
 | 3 Harnesses | Stufe 2 (Codex) und Stufe 3 (Copilot, falls geprüft) in die Kette, Plugins für Codex und Copilot, OpenCode über die Kette. | Je Harness eine echte Session: Capture, Recall in neuer Session, Compaction, Deinstallation. | 3 Tage |
-| 4 Aufräumen | Code des Retrieval-Verlierers löschen (§12, E3). `README`, `ARCHITECTURE`, `SECURITY` (Bedrohungsmodell aus §6) und `CHANGELOG` an diesen Plan angleichen. Release-Check auf Linux, macOS (arm64, x64), Windows. | CI grün, Zeilenzahl gesunken. | 2 Tage |
+| 4 Aufräumen und Installation | Code des Retrieval-Verlierers löschen (§12, E3). I1 bis I12 aus §14: `setup` mit absoluten Pfaden, Erkennung und Modell-Download, `doctor`-Erweiterung, `uninstall`, Extras-Schnitt, `plugin.json` korrigieren, PyPI-Release-Workflow, Marketplace-Eintrag, Issue-Vorlage. `README`, `ARCHITECTURE`, `SECURITY`, `CHANGELOG`, `CONTRIBUTING` schreiben. | CI grün, Zeilenzahl im Kern gesunken. Frische Installation nach README auf drei OS unter fünf Minuten bis zum ersten Fakt (I9). | 5 Tage |
 | 5 Dogfooding | 2 Wochen echte Nutzung. Wöchentliche Auswertung der Müllquote, Ausfallrate, Latenz, Anteil der eingeblendeten Fakten, die später genutzt wurden (vorhandene Tabelle `accesses`). | Keine Datenverluste, keine Hook-Verlangsamung, Ausfallrate Worker < 5 %. | 14 Tage |
 
-Insgesamt 19 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deployt oder veröffentlicht; Commits bleiben lokal, bis der Nutzer es ausdrücklich erlaubt.
+Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deployt oder veröffentlicht; Commits bleiben lokal, bis der Nutzer es ausdrücklich erlaubt.
 
 ## 10. Code: behalten, ändern, löschen
 
@@ -255,6 +256,41 @@ Diese Regeln stammen aus der früheren `AGENTS.md`, die im Arbeitsbaum durch „
 - **R8 Viewer.** `viewer/` wird nur vom CLI geladen, escaped jeden gespeicherten String; `purge` löscht geschriebene Seiten.
 - **R9 Entwicklung.** `uv sync --all-extras`, `uv run pytest`, `uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright`. `uv.lock` gehört ins Repository, damit Pins reproduzierbar sind. Vor einem Release: CI grün auf Linux, macOS (arm64, x64) und Windows, dazu je Harness eine echte Session von Hand (Capture, Recall in neuer Session, Compaction, Deinstallation).
 - **R10 Git.** Nur lokale Commits, kein Push, keine Releases, solange der Nutzer es nicht ausdrücklich erlaubt. Keine KI-Hinweise in Commits, PRs, Tags oder Dateien.
+
+## 14. Installation und Betrieb für Dritte
+
+Ziel: Jemand ohne Kontakt zu uns installiert Agent Mem in unter fünf Minuten, und es läuft ohne Nacharbeit. Maßstab sind claude-mem (Plugin aus dem Marketplace, Kontext mit Token-Ersparnis, Viewer, Arbeitsstand) und agentmemory (lokale Modelle, kein Server). Beide haben etwas, das wir noch nicht haben: eine Installation, die nicht erklärt werden muss.
+
+Bestand (2026-10-12): `README.md`, `ARCHITECTURE.md`, `CHANGELOG.md` sind leer. `plugins/claude/.claude-plugin/plugin.json` sagt noch „No LLM calls". Die Hooks rufen `agent-mem hook claude` über `PATH`; in IDE- oder GUI-gestarteten Sessions ist `PATH` oft unvollständig. Die Observer-Abhängigkeiten (mem0, qdrant, fastembed, spaCy) wiegen rund 400 MB plus Modelle. CI läuft schon auf Ubuntu, macOS arm64, macOS Intel und Windows.
+
+| # | Entscheidung | Begründung |
+|---|---|---|
+| I1 | Ein Installationsweg: `uv tool install agent-mem` oder `pipx install agent-mem`, dann `agent-mem setup <harness>`. Veröffentlichung auf PyPI über `release.yml`, Claude-Code-Marketplace-Eintrag (`/plugin marketplace add …`) zeigt auf dasselbe Paket. | Ein Weg lässt sich testen und erklären. |
+| I2 | `setup` schreibt den **absoluten Pfad** des `agent-mem`-Binarys in die Hook-Dateien, nie den bloßen Namen. | Hooks aus IDE oder GUI finden sonst das Binary nicht. Häufigster Installationsfehler bei claude-mem-artigen Werkzeugen. |
+| I3 | Drei Stufen: Kern (nur stdlib, Capture, FTS5, Injection, Viewer, MCP), `[semantic]` (fastembed), `[observer]` (mem0, qdrant, spaCy). Der Kern läuft ohne die anderen vollständig, mit Rohstufe statt Fakten. | Wer nur 10 MB will, bekommt ein funktionierendes Gedächtnis. Wer Fakten will, zahlt die 400 MB bewusst. |
+| I4 | `setup` erkennt Harnesses und Provider (`claude`, `codex`, `copilot`, `ollama` im `PATH`, Login-Zustand per Trivialaufruf), lädt die Modelle mit Fortschrittsanzeige und zeigt zuletzt eine Tabelle: was läuft, was fehlt, was es im Abo kostet. Es fragt nie nach einem API-Key. | Erster Eindruck entscheidet. Keine Überraschung beim ersten Turn. |
+| I5 | `doctor` prüft zusätzlich: Observer-Extra vorhanden, Warteschlange und letzter Worker-Lauf, Provider erreichbar, Qdrant-Größe gegen A.11, Hook-Pfade zeigen auf ein existierendes Binary, Hook-Laufzeit. `doctor --json` ist der Anhang für Fehlerberichte. | Fehler müssen sich selbst erklären; wir können nicht bei jedem Rechner zuschauen. |
+| I6 | `agent-mem uninstall <harness>` entfernt Hooks und MCP-Einträge und lässt die Daten liegen; `purge` löscht Daten. Beides ohne Rückfrage außer bei `purge`. | Sauberes Entfernen gehört zur Installation. |
+| I7 | Versionierung semver. Jede Schema- oder Embedder-Änderung ist ein Minor mit Migration (R6) bzw. automatischem `reindex` beim ersten Start. `mem0ai` gepinnt; Upgrade nur mit grünem Adapter-Test (D1). `CHANGELOG.md` je Release. | Upgrades dürfen keine Daten brechen. |
+| I8 | Dokumentation vor Release 2.0: `README.md` (Installation in drei Zeilen, was es tut, was es kostet, was es speichert, was es nie tut), `ARCHITECTURE.md` (aus §3 bis §5), `SECURITY.md` (Bedrohungsmodell aus §6, Meldeweg), `CHANGELOG.md`, `CONTRIBUTING.md` (R9, Tests mit `fake`-Provider). Alles in Englisch. | Open Source ohne README wird nicht installiert. |
+| I9 | Abnahme „frische Maschine": Vor jedem Release eine Installation nach README auf einem frischen Benutzerkonto je OS (macOS, Linux, Windows), ohne Vorwissen, Zeit gemessen, bis die erste Session Fakten liefert. Ziel unter fünf Minuten plus Modell-Download. | Nur so sehen wir, was Dritte sehen. |
+| I10 | Keine Telemetrie, kein Netzwerk außer Modell-Downloads. Steht im README an erster Stelle. mem0-Telemetrie ist per Test ausgeschaltet (§6, Punkt 4). | Unterscheidungsmerkmal gegenüber claude-mem (OpenRouter) und mem0 (PostHog). |
+| I11 | Unterstützungsmatrix im README: Python ≥ 3.11; Ubuntu, macOS arm64, macOS Intel (ohne fastembed, Embedder über Ollama), Windows; Harness-Versionen, mit denen getestet wurde. | Erwartungen klären, bevor jemand installiert. |
+| I12 | Fehlerberichte: GitHub-Issue-Vorlage verlangt `agent-mem doctor --json` und die letzten 50 Zeilen des Logs (Pfad aus `agent-mem paths`). Logs enthalten nie Prompt-Inhalte (R4). | Reproduzierbare Berichte statt Rätselraten. |
+
+Was Agent Mem gegenüber claude-mem und agentmemory können muss, damit „besser" messbar ist:
+
+| Merkmal | claude-mem | agentmemory | Agent Mem (Ziel) |
+|---|---|---|---|
+| Harnesses | Claude Code | Browser/TS | Claude Code, Codex, Copilot CLI, OpenCode |
+| Modellaufrufe | OpenRouter oder Claude, API-Key oder Abo | keine (lokale Embeddings) | Abo-Login oder Ollama, nie Key |
+| Daemon | Bun-Worker-Prozess | kein | kein (Worker mit Leerlauf, R1) |
+| Widersprüche | nicht | nicht | ja (§4.6), gemessen (§8) |
+| Datenhoheit | SQLite + Chroma | lokal | SQLite als Wahrheit, alles ableitbar |
+| Installation | Marketplace, ein Befehl | npm | I1 bis I4 |
+| Sichtbarkeit | Viewer-UI, Token-Ersparnis | — | Viewer (D10), `status`, `observe --status` |
+
+Phase 4 (§9) übernimmt I1 bis I12 und I9 als Abnahme. Phase 4 wird dafür von 2 auf 5 Tage verlängert; gesamt 22 Arbeitstage.
 
 ## Anhang A: Gemessene Fakten (alle auf dieser Maschine, 2026-10-11/12)
 
