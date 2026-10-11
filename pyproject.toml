@@ -33,6 +33,9 @@ dependencies = [
 # Semantic search with the multilingual E5 model (ONNX, no PyTorch). ONNX Runtime publishes no
 # wheels for Intel Macs; there the extra installs nothing and search stays lexical + graph.
 semantic = ["fastembed>=0.8; sys_platform != 'darwin' or platform_machine != 'x86_64'"]
+# Background observer (docs/PLAN.md §4.5): mem0 does extraction and dedup, Qdrant is the local
+# vector store. Pinned; upgrades only with a green adapter test. Imported lazily by observe/ only.
+observer = ["mem0ai[nlp]==2.2.1", "qdrant-client>=1.12"]
 
 [project.scripts]
 agent-mem = "agent_mem.cli:main"
