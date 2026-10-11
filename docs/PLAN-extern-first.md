@@ -19,7 +19,7 @@ Eigen bleibt nur, was kein Fremdprojekt liefert: Hook-Capture pro Harness, Injec
 | Hook-Capture, Spool, Privacy, Identität | vorhanden (`capture`, `normalize`, `spool`, `privacy`, `identity`) | wird behalten |
 | Widerspruch (`invalid_at`) | eigene Schicht über mem0 `update`/`delete` | klein, siehe §4 |
 | Benchmarks | offizielle LongMemEval- und LoCoMo-Repos | nur Adapter |
-| Viewer | entfällt, `get_all` als CLI-Tabelle | keiner |
+| Viewer | bleibt unverändert, Nutzung wird später entschieden | keiner neu |
 
 Zu Phase 0 gehört die Prüfung, ob Qdrant im Pfad-Modus Hybridsuche (Keyword) in mem0 liefert. FAISS kann das nicht, mem0 warnt dort selbst. Die mem0-eigenen MCP-Server (Cloud mit Key, OpenMemory mit Docker) habe ich nicht neu geprüft und gehe nach altem Wissen davon aus, dass sie nicht passen. Deshalb der schmale eigene Wrapper.
 
@@ -54,7 +54,7 @@ mem0 2.2.1 fügt bei Korrekturen nur hinzu (getestet mit `qwen3.5:4b`, `qwen3.6:
 ## 5. Injection und MCP
 - SessionStart und UserPromptSubmit: `memory.search` mit Filter auf Projekt und `invalid_at` leer, höchstens 3 Treffer, als Daten gerahmt, Deadline wie bisher. Hook-Pfad bleibt Standardbibliothek, mem0 wird nur im Memory-Agent-Prozess importiert (Import ist schwer).
 - MCP-Tools: `mem_search`, `mem_get`, `mem_remember`, `mem_forget`.
-- Durchsetzung (Deny, Rezepte, Dead Ends) und Viewer sind nicht Teil der ersten Lieferung.
+- Durchsetzung (Deny, Rezepte, Dead Ends) ist nicht Teil der ersten Lieferung. Der Viewer bleibt, siehe §10.
 
 ## 6. Phasen
 | Phase | Inhalt | Fertig, wenn |
@@ -63,7 +63,7 @@ mem0 2.2.1 fügt bei Korrekturen nur hinzu (getestet mit `qwen3.5:4b`, `qwen3.6:
 | 1 (4 Tage) | Spool → Memory-Agent → mem0 → Injection für Claude Code; Widerspruchsschicht | echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst alten Fakt ab |
 | 2 (2 Tage) | Messung: LongMemEval-S gegen reines mem0 und gegen diesen Stack, dazu Fixture erneut | Zahlen im Plan-Anhang |
 | 3 (3 Tage) | Codex und Copilot anbinden, OpenCode über Claude/Codex | je Harness eine echte Session |
-| 4 | Löschen: `search`, `semantic`, `store`, `db`-Schema, `summarize`, `consolidate`, `views`, `viewer`, `importers`, `evaluate` | Tests grün, Zeilenzahl sinkt |
+| 4 | Löschen: `search`, `semantic`, `store`, `db`-Schema, `summarize`, `consolidate`, `importers`, `evaluate` (Viewer und `views` bleiben) | Tests grün, Zeilenzahl sinkt |
 
 Insgesamt etwa 11 Arbeitstage statt 36 plus Dogfooding. Danach 2 Wochen Dogfooding, dann Entscheidung über `lesson`/`rule`/Graph anhand der Messung.
 
@@ -104,3 +104,18 @@ Reihenfolge je Harness: Abo-Login des Harness → lokales Ollama (läuft, getest
 
 ### 9.6 Takt
 Ein `add` pro Turn, nicht pro Tool-Call. Mehr als ein Turn in der Warteschlange wird zu einem Bündel zusammengefasst. Tageslimit für Aufrufe, danach Stufe 2 oder 3 aus §9.4.
+
+## 10. Viewer und Hintergrund-Beobachtung (Entscheidung 2026-10-12)
+
+### 10.1 Viewer bleibt
+`viewer/` und `views.py` werden nicht gelöscht und nicht angefasst. Sie lesen weiter aus der SQLite-Datenbank, die das Hook-Capture schreibt (Sessions, Turns, Events, Spool, §9.2). Was der Viewer aus mem0-Fakten zeigen soll (Fakten-Liste, Zeitachse, Entitäten), wird später entschieden. Bis dahin zeigt er den Event-Log. Löschen in Phase 4 betrifft ihn nicht.
+
+### 10.2 Beobachtung läuft im Hintergrund, nie im Hook
+Das war schon Absicht und wird hier festgeschrieben:
+1. Der Hook schreibt nur das Event in Spool/SQLite und kehrt sofort zurück (Millisekunden, Standardbibliothek, keine LLM-Aufrufe).
+2. Danach startet der Hook losgelöst (`start_new_session`, Ausgabe nach `/dev/null`) den Befehl `agent-mem observe`, falls kein Worker den Lock hält. Es gibt keinen Daemon: Der Worker arbeitet die Warteschlange ab (`claude -p` → mem0 → Snapshot, §9.1) und beendet sich, wenn sie leer ist.
+3. Läuft schon ein Worker, tut der Hook nichts weiter. Der Worker nimmt neue Turns beim nächsten Durchlauf mit.
+4. Fehler, Quota oder Absturz des Workers lassen den Turn im Spool (§9.4). Die Session merkt davon nichts.
+5. Die Session verlangsamt sich nur durch das, was der Hook liest: den Snapshot. Der Abruf der Fakten kostet damit Dateizugriffe, keine Modellaufrufe.
+
+Prüfen in Phase 1: Hook-Laufzeit mit und ohne Worker messen. Sie soll beide Male unter 100 ms liegen.
