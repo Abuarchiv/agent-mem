@@ -17,8 +17,8 @@ Nicht-Ziele: Cloud-Sync, Mehrbenutzer, Verschlüsselung der Datenbank, eigener G
 
 ## 2. Festgeschriebene Entscheidungen
 
-| # | Entscheidung | Begründung (Beleg) |
-|---|---|---|
+| \# | Entscheidung | Begründung (Beleg) |
+| --- | --- | --- |
 | D1 | `mem0ai` (gepinnt, aktuell 2.2.1, Apache-2.0) übernimmt Extraktion und Dedup. | Läuft ohne Key lokal (Anhang A.1). |
 | D2 | Das LLM für mem0 ist ein eigener Provider, der den Harness-Befehl startet (`claude -p`, `codex exec`). Er wird nach `Memory.from_config` per `memory.llm = …` gesetzt. | mem0 prüft Provider-Namen fest und lässt eigene nicht zu (A.2). |
 | D3 | Die Beobachtung läuft immer im Hintergrund. Der Hook schreibt nur und kehrt zurück. | Hook-Pfad bleibt stdlib, `add` braucht 3,4 s (A.3). |
@@ -31,7 +31,7 @@ Nicht-Ziele: Cloud-Sync, Mehrbenutzer, Verschlüsselung der Datenbank, eigener G
 | D10 | Der Viewer bleibt unverändert. Was er künftig zeigt, wird später entschieden. | Entscheidung des Nutzers. Er liest `memories`, dadurch zeigt er die gespiegelten Fakten automatisch. |
 | D11 | Embedder nur aus der fastembed-Liste, ohne eigene Registrierung. Sieger per Messung (§8, Phase 0). | Weniger Eigenpflege. |
 | D12 | Provider-Kette für den Worker: Claude (Haiku) → Codex → Copilot → Ollama → rohe Beobachtung. Je Stufe überspringbar, wenn nicht installiert oder Quota erschöpft. **Standard ist anbietertreu:** Ein Turn geht nur an den Anbieter, der ihn schon gesehen hat (Claude-Turn → Claude, Codex-Turn → Codex, Copilot-Turn → Copilot), dann Ollama, dann roh. OpenCode-Turns gehen an Ollama und roh. `observe.cross_vendor = true` schaltet die volle Kette frei. | Alle Stufen außer Copilot gemessen (A.7). Ohne Anbietertreue würde Code aus einer Claude-Session bei Quota-Ende an OpenAI gehen und umgekehrt; das entscheidet der Nutzer, nicht die Kette. |
-| D13 | Alle Fakten liegen in einem Namespace je Projekt (`user_id = "<nutzer>|p:<projekt_id>"`). Kein `run_id`, kein globaler Namespace in dieser Fassung. | mem0 filtert mit `run_id` auch die Ähnlichkeitssuche beim `add` auf die Session und sähe Fakten anderer Sessions nicht (`main.py:386-388`). Ein globaler Namespace bräuchte eine Zuordnung pro Fakt, die mem0 nicht liefert; Präferenzen und Regeln kommen weiter aus `learn` (R5). |
+| D13 | Alle Fakten liegen in einem Namespace je Projekt (\`user_id = " | p:&lt;projekt_id&gt;"`). Kein `run_id\`, kein globaler Namespace in dieser Fassung. |
 
 ## 3. Architektur und Datenfluss
 
@@ -54,6 +54,7 @@ SQLite memories (Fakten gültig/ungültig)
 ```
 
 Garantien:
+
 - Der Hook ruft nie ein Modell und importiert weder mem0 noch qdrant noch fastembed (Regel R2, §13).
 - Kein Turn geht verloren: Er bleibt in `observe_queue`, bis `add` gelingt oder die Rohstufe ihn gesichert hat.
 - Ein Ausfall von mem0, Qdrant oder jedem Provider verändert nur die Qualität der Fakten, nie die Erfassung.
@@ -61,12 +62,15 @@ Garantien:
 ## 4. Komponenten
 
 ### 4.1 Capture (bleibt)
+
 `hook.py`, `capture.py`, `normalize/*`, `events.py`, `spool.py`, `privacy.py`, `identity.py`, `signals.py`: unverändert übernommen. Neu ist nur der Aufruf `spawn_worker()` am Ende des Stop-Hooks (§4.3).
 
 ### 4.2 Warteschlange (neu, Migration `002_observe.sql`)
+
 Tabelle `observe_queue(turn_id PRIMARY KEY, state CHECK IN ('pending','running','done','raw','failed'), attempts, next_try, provider, last_error, updated_at)`. Ein Eintrag wird beim Abschluss eines Turns angelegt (in `capture.apply`, selbe Transaktion). `state='running'` hat ein Lease (Zeitstempel); abgelaufene Leases gelten wieder als `pending`. Migrationstest nach Regel R6 (§13).
 
 ### 4.3 Worker `agent-mem observe`
+
 1. Start durch den Hook: `subprocess.Popen([sys.executable, '-m', 'agent_mem', 'observe', '--drain'], stdin/stdout/stderr=DEVNULL)` mit `start_new_session=True` (POSIX) bzw. `creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` (Windows). Kein `uv run` im Hook-Pfad. Vorher nicht-blockierender Versuch auf `observe.lock`. Hält ein Worker den Lock, tut der Hook nichts.
 2. Schleife: nächsten `pending` Turn mit `next_try <= jetzt` leasen, bearbeiten, Ergebnis schreiben. Leere Warteschlange → bis zu `observe.idle_seconds` (Standard 90) auf neue Einträge warten, dann Lock freigeben und beenden. Grund: Jeder Start lädt mem0, Qdrant, fastembed und spaCy neu (mehrere Sekunden CPU); ein Turn alle 30 s würde sonst dauernd neu starten. Begrenzte Lebenszeit, also kein Daemon (R1).
 3. Der Worker setzt sich selbst auf niedrige Priorität (`os.nice(10)`, Windows `BELOW_NORMAL_PRIORITY_CLASS`). „Nicht verlangsamen" (D3) heißt auch CPU und Akku, nicht nur Hook-Latenz.
@@ -80,7 +84,7 @@ Tabelle `observe_queue(turn_id PRIMARY KEY, state CHECK IN ('pending','running',
 Gemeinsame Regeln: Der Prozess liest, kopiert oder speichert nie Tokens. Er startet nur das offizielle Binary unter dem Login des Nutzers. Jeder Aufruf: leeres temporäres Arbeitsverzeichnis, `AGENT_MEM_INTERNAL=1`, Prompt über stdin, Zeitlimit 120 s. Die Antwort wird auf gültiges JSON geprüft (Codefences entfernen, einmal wiederholen, sonst Fehler).
 
 | Stufe | Befehl | Status |
-|---|---|---|
+| --- | --- | --- |
 | 1 Claude Code | `claude -p --restricted --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --model haiku` | gemessen, läuft (A.3). `--bare` ist verboten: bricht das Login. Ohne `--setting-sources ""` laufen fremde Plugin-Hooks mit. |
 | 2 Codex | `codex exec --ephemeral --ignore-user-config -s read-only -C <leer> --skip-git-repo-check --output-schema <datei> -o <aus>` | gemessen, läuft. Ein Trivialaufruf verbrauchte 24.569 Tokens: teuer, deshalb Stufe 2. |
 | 3 Copilot CLI | `copilot -p` oder Copilot SDK mit `useLoggedInUser` | nicht installiert. Phase 3 installiert und prüft. Fällt die Prüfung durch, entfällt die Stufe ohne Planänderung. |
@@ -92,6 +96,7 @@ OpenCode hat keinen eigenen Beobachter. Seine Turns arbeitet derselbe Worker ab,
 Tests: Die Stufen 1 bis 4 laufen nicht in CI (kein Login, kein Ollama). Es gibt eine Stufe `fake` (liest Antworten aus einer Fixture-Datei), mit der Worker, Spiegel und Widerspruchsschicht in CI getestet werden. Tests gegen echte Binaries tragen den pytest-Marker `local` und laufen nur von Hand (R9).
 
 ### 4.5 mem0-Konfiguration
+
 ```
 llm:          (Platzhalter ollama, danach memory.llm = ProviderKette)
 embedder:     fastembed, Modell = Sieger Phase 0
@@ -99,16 +104,19 @@ vector_store: qdrant, path=<Datenverzeichnis>/qdrant, on_disk
 version-pin:  mem0ai==2.2.1 (Upgrade nur mit grünem Adapter-Test)
 extras:       mem0ai[nlp] (spaCy für Entity-Linking)
 ```
+
 Alles läuft über ein Modul `observe/mem0_adapter.py` mit vier Funktionen: `extract(bundle, namespace) -> list[Fact]`, `search(query, namespace, k)`, `forget(mem0_id)` und `reindex(facts)`. Nur dieses Modul importiert mem0. Es ist die Austauschstelle, falls mem0 die Messung (§8) nicht besteht.
 
 Namespace: nur `user_id = "<nutzer>|p:<projekt_id>"` (D13). Kein `run_id`. Jeder `add` bekommt `metadata={"turn_id": …, "session_id": …, "harness": …}`, damit Fakten auf Turns rückführbar sind und die LongMemEval-Messung (§8) Sessions zählen kann.
 
 Extraktions-Prompt: Der Standard-Prompt von mem0 ist auf Assistenten-Chats zugeschnitten (Vorlieben, Personen, Termine). Für Coding-Turns mit Tool-Ausgaben liefert er voraussichtlich Kleinkram. Phase 0 misst Standard gegen einen eigenen `custom_fact_extraction_prompt` (Konventionen, Entscheidungen, Sackgassen, Befehle, Präferenzen; Sprache des Nutzers; ein Satz pro Fakt) auf der Fixture. Der Sieger steht in §12, E8.
 
-Plattform: Auf Intel-Macs gibt es kein ONNX Runtime und damit kein fastembed. Dort ist der Embedder `ollama` mit `nomic-embed-text`. Die Konfiguration wählt automatisch.
+Plattform: Auf Intel-Macs gibt es kein ONNX Runtime und damit kein fastembed. (WEG Lassen weil keine verwendet intel
 
 ### 4.6 Spiegel und Widerspruchsschicht
+
 mem0 2.2.1 arbeitet nur hinzufügend: `add` liefert ausschließlich `ADD`-Einträge mit Id und Text (A.10, `main.py:1030-1075`). Es gibt kein `UPDATE`, `DELETE` oder `NONE`, und Dedup ist nur ein MD5-Vergleich des exakten Texts. Nahe Duplikate („Wir nutzen nox", „Tests laufen mit nox") häufen sich deshalb an. Der Worker:
+
 1. Pro `ADD`: `store.add_memory(kind='fact', source='agent', trust='observer', importance=0.5, turn_id, origin=harness, dedupe='mem0:<uuid>')`. Titel = erste Zeile des Fakts, Body = Fakt.
 2. Für alle neuen Fakten des Bündels zusammen: je Fakt `search(fakt, k=3)` im Namespace, ohne die Fakten des Bündels selbst. Treffer mit Score ≥ `contradiction.min_score` (Standard 0,6, in Phase 0 kalibriert) werden gesammelt, höchstens 15 Paare pro Bündel. Alle Paare gehen in **einen** LLM-Aufruf: Antwort als JSON-Liste `[{new_id, old_id, verdict: KEEP|SUPERSEDE|DUPLICATE}]`.
    - `SUPERSEDE`: `store.supersede(alt, neu)`; mem0-Eintrag des alten Fakts per `forget` entfernen, sonst sieht die nächste Extraktion ihn weiter als Vorwissen.
@@ -120,20 +128,26 @@ mem0 2.2.1 arbeitet nur hinzufügend: `add` liefert ausschließlich `ADD`-Eintr�
 Pro Bündel also höchstens zwei Modellaufrufe: die mem0-Extraktion (genau ein Aufruf pro `add`, A.10) und ein gemeinsames Urteil über alle Paare. Ohne Kandidaten entfällt der zweite. Ergebnisse der mem0-Suche werden gegen `memories.invalid_at` nachgefiltert (Überhol-Faktor 3), denn das Ablaufdatum von mem0 (`expiration_date`) ist nur tagesgenau.
 
 ### 4.7 Injection (Hook, stdlib)
+
 `inject.py` bleibt unverändert: Es liest bereits `memories` mit `kind IN (…, 'fact')` und `invalid_at IS NULL` (`inject.py:175-177`), gewichtet nach Aktivierung und `importance`. Gespiegelte Fakten erscheinen dadurch ohne Codeänderung. Inhalt und Form der Injektion (Legende, Index, höchstens 3 Treffer) bleiben wie in der Datei.
+
 - Copilot CLI hat keinen Kontext zur Prompt-Zeit: nur SessionStart und PreToolUse.
 - Ob der Hook nur FTS5 nutzt oder zusätzlich die vorhandene Vektorsuche (`semantic.py`), entscheidet die Messung in Phase 2 (§12, E3).
 
 ### 4.8 MCP-Server (bleibt, Quelle wechselt)
+
 `mcp_server.py` behält seine fünf Tools (`mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`). `mem_search` nutzt den Retrieval-Sieger aus Phase 2. Läuft nur im Session-Prozess, öffnet Qdrant nur kurz unter dem Lock (Timeout 2 s, danach Antwort aus SQLite).
 
 ### 4.9 Viewer (bleibt, unberührt)
+
 `viewer/` und `views.py` ändern sich nicht. Sie importieren `consolidate`, `learn`, `search`, `store`, `health`. Diese Module und das Schema bleiben deshalb bestehen. Dass der Viewer nun auch gespiegelte Fakten zeigt, ist ein Nebeneffekt von D6.
 
 ### 4.10 Graph
+
 Nur der mem0-Entity-Store (spaCy). Phase 0 prüft, dass er gefüllt wird. Kein eigener Graph-Code.
 
 ## 5. Datenmodell
+
 - Neu: `observe_queue` und `observe_calls` (§4.2, §4.3), beide in Migration `002_observe.sql`. Keine weitere Migration.
 - `memories`: unverändert. Fakten erscheinen als `kind='fact'`. Die mem0-Id steckt im Dedupe-Schlüssel.
 - mem0-Daten sind ableitbar: `<Datenverzeichnis>/qdrant` (zwei Collections: Fakten und `entity_store`) und `<Datenverzeichnis>/mem0/history.db`. Letztere enthält neben der Änderungshistorie auch die an `add` übergebenen Nachrichten (`storage.py:257`, `save_messages`), also eine zweite Kopie des bereinigten Bündels. Sie unterliegt denselben Rechten und demselben `purge` wie SQLite.
@@ -141,10 +155,10 @@ Nur der mem0-Entity-Store (spaCy). Phase 0 prüft, dass er gefüllt wird. Kein e
 - Backups (`VACUUM INTO`) sichern SQLite. Qdrant und mem0 werden nicht gesichert.
 
 ## 6. Privacy und Sicherheit
+
 1. `privacy.clean_text` läuft auf dem Bündel vor `memory.add` und auf jedem Fakt vor `store.add_memory` (letzteres erzwingt `add_memory` selbst).
 2. Quellen mit `tool_external` (Web, fremde MCP-Tools) erzeugen nie Regeln oder Präferenzen und werden nie automatisch injiziert (Regel R5, §13). Ihr Inhalt kommt nicht ins Bündel (§4.3, Punkt 4): Fremdtext könnte den Beobachter anweisen, erfundene Fakten zu liefern, die später in Sessions eingeblendet werden. Der Beobachter-Prompt rahmt das Bündel als Daten.
-3. Der Beobachter-Prozess ist isoliert: leeres Verzeichnis, keine Tools, keine MCP-Server, keine Settings, `AGENT_MEM_INTERNAL=1`, damit er sich nicht selbst erfasst.
-3a. Datenfluss zwischen Anbietern nur mit Zustimmung: Standard ist Anbietertreue (D12). Ein Turn verlässt nie den Anbieter, der ihn in der Session schon gesehen hat, außer zu Ollama (lokal).
+3. Der Beobachter-Prozess ist isoliert: leeres Verzeichnis, keine Tools, keine MCP-Server, keine Settings, `AGENT_MEM_INTERNAL=1`, damit er sich nicht selbst erfasst. 3a. Datenfluss zwischen Anbietern nur mit Zustimmung: Standard ist Anbietertreue (D12). Ein Turn verlässt nie den Anbieter, der ihn in der Session schon gesehen hat, außer zu Ollama (lokal).
 4. mem0-Telemetrie aus, per Test abgesichert (Test startet den Adapter und prüft die Umgebungsvariable).
 5. Einträge werden beim Anzeigen als Daten gerahmt, nie als Anweisung.
 6. Ausgabe von Ollama bleibt lokal. Es gibt keinen Netzwerkzugriff außer dem einmaligen Modell-Download.
@@ -154,7 +168,7 @@ Nur der mem0-Entity-Store (spaCy). Phase 0 prüft, dass er gefüllt wird. Kein e
 ## 7. Fehlerfälle
 
 | Fall | Verhalten |
-|---|---|
+| --- | --- |
 | Worker stürbe mitten im Turn | Lease läuft ab, Turn wird neu versucht. mem0-Dedup verhindert Doppelfakten, der Spiegel dedupt zusätzlich über `dedupe`. |
 | Quota/Login der Stufe 1 | Stufe 2…4 in Reihenfolge. Fehlerart wird in `last_error` gespeichert. |
 | Alle Stufen fehlen | Rohstufe (`kind='summary'`), Turn `state='raw'`, später per `--reprocess-raw` mit Modell nachholbar. |
@@ -174,12 +188,12 @@ LongMemEval-S, Umfang: `evaluate.py` baut je Frage eine frische Datenbank und ni
 Referenzwerte: Frühere Zahlen (hit@1 0,75 / 0,80 / 0,85) stammen aus einer Notiz ohne auffindbaren Beleg und gelten nicht als Schwelle. Maßstab ist der Bestand, den Phase 0 auf dem neuen Fixture und auf LongMemEval-S frisch misst.
 
 | Metrik | Messpunkt | Schwelle |
-|---|---|---|
+| --- | --- | --- |
 | Fixture hit@1 | Phase 2, neuer Stand | ≥ Bestand (Phase 0) − 0,02 |
 | Fixture Abstention | Phase 2 | ≥ Bestand (Phase 0) |
 | LongMemEval-S Recall@5 | Phase 0 (Bestand, reines mem0) und Phase 2 (neu) | neu ≥ Bestand − 0,02 |
-| Hook-Laufzeit p95 | Phase 1, mit und ohne Worker | < 100 ms |
-| `add` Median | Phase 0 | < 10 s |
+| Hook-Laufzeit p95 | Phase 1, mit und ohne Worker | &lt; 100 ms |
+| `add` Median | Phase 0 | &lt; 10 s |
 | Modellaufrufe pro Turn | Phase 1 | ≤ 3 |
 | Müllquote Fakten | Phase 1, 30 Stichproben | ≤ 30 % |
 | Widerspruchstest | Phase 1, 10 Paare (Korrektur wie „pytest → nox") | ≥ 8 von 10 gelöst |
@@ -189,20 +203,20 @@ Nicht gemessen und nicht behauptet: End-to-End-Antwortgenauigkeit mit Judge-Mode
 ## 9. Phasen
 
 | Phase | Arbeit | Abnahme | Dauer |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 0 Messen | Fixture bauen (25 Fälle plus 10 Widerspruchspaare). LongMemEval-S laden, Teilmenge festlegen, `evaluate.py --backend mem0` schreiben. Reines mem0 (Ollama und Claude) und Bestand auf Fixture und Teilmenge messen. Extraktions-Prompt Standard gegen eigenen vergleichen (E8). Embedder-Kandidaten messen (E2). spaCy-Entity-Store prüfen. Copilot installieren und `copilot -p` prüfen. Hook-Laufzeit des Bestands messen. Score-Schwelle für §4.6 kalibrieren. Bündelgröße an 20 echten Turns messen (§4.3, Punkt 4). Lizenzen fastembed und spaCy nachtragen (A.8). | Fixture liegt unter `tests/fixtures/`, Zahlen im Anhang B. Alle Stoppregeln aus §12 sind ausgewertet. | 5 Tage (davon 2 Nächte Ollama-Läufe im Hintergrund) |
 | 1 Worker | Migration `002` (`observe_queue`, `observe_calls`), Bündelbau, `spawn_worker` (POSIX und Windows), Worker mit Leerlauf und Priorität, Provider (Stufe 1, 4, 5 und `fake`), Quota-Erkennung je Binary, `mem0_adapter` (vier Funktionen), Spiegel, Widerspruchsschicht mit drei Urteilen, `forget` in `mem_forget` und `purge`, `reindex`, `observe --status`, Datenschutztests, neue `AGENTS.md` aus §13 schreiben. Nur Claude Code. | Echte Session erzeugt Fakten, nächste Session bekommt sie, Korrektur löst den alten Fakt ab, Duplikat wird erkannt, `mem_forget` entfernt den Fakt auch aus Qdrant. Tabelle §8 Phase-1-Zeilen erfüllt. Alle Tests, `ruff`, `pyright` grün; CI ohne Marker `local`. | 6 Tage |
 | 2 Retrieval | Hook-Suche gegen MCP-Suche gegen mem0-Suche auf Fixture und LongMemEval-S vergleichen (§12, E3). Sieger festlegen. Injection und MCP auf Sieger. | Schwellen aus §8 erfüllt, Bericht im Anhang B. | 3 Tage |
 | 3 Harnesses | Stufe 2 (Codex) und Stufe 3 (Copilot, falls geprüft) in die Kette, Plugins für Codex und Copilot, OpenCode über die Kette. | Je Harness eine echte Session: Capture, Recall in neuer Session, Compaction, Deinstallation. | 3 Tage |
 | 4 Aufräumen und Installation | Code des Retrieval-Verlierers löschen (§12, E3). I1 bis I12 aus §14: `setup` mit absoluten Pfaden, Erkennung und Modell-Download, `doctor`-Erweiterung, `uninstall`, Extras-Schnitt, `plugin.json` korrigieren, PyPI-Release-Workflow, Marketplace-Eintrag, Issue-Vorlage. `README`, `ARCHITECTURE`, `SECURITY`, `CHANGELOG`, `CONTRIBUTING` schreiben. | CI grün, Zeilenzahl im Kern gesunken. Frische Installation nach README auf drei OS unter fünf Minuten bis zum ersten Fakt (I9). | 5 Tage |
-| 5 Dogfooding | 2 Wochen echte Nutzung. Wöchentliche Auswertung der Müllquote, Ausfallrate, Latenz, Anteil der eingeblendeten Fakten, die später genutzt wurden (vorhandene Tabelle `accesses`). | Keine Datenverluste, keine Hook-Verlangsamung, Ausfallrate Worker < 5 %. | 14 Tage |
+| 5 Dogfooding | 2 Wochen echte Nutzung. Wöchentliche Auswertung der Müllquote, Ausfallrate, Latenz, Anteil der eingeblendeten Fakten, die später genutzt wurden (vorhandene Tabelle `accesses`). | Keine Datenverluste, keine Hook-Verlangsamung, Ausfallrate Worker &lt; 5 %. | 14 Tage |
 
 Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deployt oder veröffentlicht; Commits bleiben lokal, bis der Nutzer es ausdrücklich erlaubt.
 
 ## 10. Code: behalten, ändern, löschen
 
 | Modul | Schicksal |
-|---|---|
+| --- | --- |
 | `hook`, `capture`, `normalize/*`, `events`, `spool`, `privacy`, `identity`, `signals`, `timeutil`, `logutil`, `config`, `db` | behalten. `capture` legt Queue-Eintrag an, `config` erhält Worker-Optionen. |
 | `store`, `search`, `inject`, `learn`, `consolidate`, `health`, `views`, `viewer/*`, `mcp_server`, `cli`, `commands` | behalten (Viewer-Abhängigkeiten). `inject` und `search` lesen Fakten. |
 | `summarize` | behalten (opt-in, getestet). Ob Fakten ihn ersetzen, entscheidet der Dogfooding-Bericht, nicht dieser Plan. |
@@ -215,7 +229,7 @@ Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deplo
 ## 11. Risiken
 
 | Risiko | Gegenmaßnahme |
-|---|---|
+| --- | --- |
 | mem0 entwickelt sich schnell oder bricht Schnittstellen | Pin, einziger Importpunkt `mem0_adapter`, Adapter-Test in CI. |
 | `memory.llm` zu überschreiben ist ein interner Eingriff | Test, der bei Upgrade bricht. Austauschstelle laut §12 E1. |
 | Abo-Policies der Anbieter ändern sich | Kette D12 mit Ollama und Rohstufe, nichts hängt an einer Stufe. |
@@ -224,14 +238,14 @@ Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deplo
 | Latenz der Hintergrundverarbeitung stört nicht, aber Fakten sind verzögert verfügbar | Erwartete Verzögerung wenige Sekunden bis Minuten, akzeptiert. |
 | Doppelte Daten (SQLite und Qdrant) laufen auseinander | SQLite ist Wahrheit, `reindex` baut neu. |
 | Intel-Mac ohne ONNX | Ollama-Embedder als Automatik. |
-| Fakten in fremder Sprache oder zu langem Text | Phase 1 prüft Sprache und Länge der Ausgabe an Stichproben, mem0-Prompt über `custom_fact_extraction_prompt` anpassbar. |
+| Fakten in fremder Sprache oder zu langem Text | Phase 1 prüft Sprache und Länge der Ausgabe an Stichproben, mem0-Prompt über `custom_instructions` anpassbar (B.7). |
 
 ## 12. Vorab entschiedene Verzweigungen
 
 Jede offene Frage hat einen Messpunkt und einen festgelegten Ausgang. Kein Ausgang verlangt eine Planänderung.
 
 | Nr. | Frage | Messung | Wenn ja / wenn nein |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | E1 | Besteht reines mem0 (mit Widerspruchsschicht) die Schwellen aus §8? | Phase 0 und 1 | Ja: weiter. Nein: `mem0_adapter.extract` wird durch einen eigenen Beobachter ersetzt (`claude -p --json-schema` mit festem Schema, Ausgabe direkt in `store.add_memory`). Rest des Plans unverändert. |
 | E2 | Welcher Embedder? | Kandidaten aus der fastembed-Liste (`multilingual-e5-small`, `embeddinggemma-300m`, `Qwen3-Embedding-0.6B-Q`), gemessen auf Fixture und LongMemEval-S mit Latenz | Höchster Recall@5; bei Abstand unter 0,01 der kleinere. Schwellenwerte je Modell neu kalibrieren. |
 | E3 | Wer liefert Retrieval: Hook-FTS5 (+ vorhandene Vektoren) oder mem0/Qdrant-Hybrid? | Phase 2, beide auf denselben Daten | Sieger bedient Hook und MCP. Verliert mem0-Suche: Qdrant dient nur noch dem Dedup. Verliert die SQLite-Suche: `semantic.py` bleibt, Hook ruft bei Bedarf `agent-mem query` (Budget 400 ms). Das Verlierer-Modul wird in Phase 4 gelöscht. |
@@ -263,8 +277,8 @@ Ziel: Jemand ohne Kontakt zu uns installiert Agent Mem in unter fünf Minuten, u
 
 Bestand (2026-10-12): `README.md`, `ARCHITECTURE.md`, `CHANGELOG.md` sind leer. `plugins/claude/.claude-plugin/plugin.json` sagt noch „No LLM calls". Die Hooks rufen `agent-mem hook claude` über `PATH`; in IDE- oder GUI-gestarteten Sessions ist `PATH` oft unvollständig. Die Observer-Abhängigkeiten (mem0, qdrant, fastembed, spaCy) wiegen rund 400 MB plus Modelle. CI läuft schon auf Ubuntu, macOS arm64, macOS Intel und Windows.
 
-| # | Entscheidung | Begründung |
-|---|---|---|
+| \# | Entscheidung | Begründung |
+| --- | --- | --- |
 | I1 | Ein Installationsweg: `uv tool install agent-mem` oder `pipx install agent-mem`, dann `agent-mem setup <harness>`. Veröffentlichung auf PyPI über `release.yml`, Claude-Code-Marketplace-Eintrag (`/plugin marketplace add …`) zeigt auf dasselbe Paket. | Ein Weg lässt sich testen und erklären. |
 | I2 | `setup` schreibt den **absoluten Pfad** des `agent-mem`-Binarys in die Hook-Dateien, nie den bloßen Namen. | Hooks aus IDE oder GUI finden sonst das Binary nicht. Häufigster Installationsfehler bei claude-mem-artigen Werkzeugen. |
 | I3 | Drei Stufen: Kern (nur stdlib, Capture, FTS5, Injection, Viewer, MCP), `[semantic]` (fastembed), `[observer]` (mem0, qdrant, spaCy). Der Kern läuft ohne die anderen vollständig, mit Rohstufe statt Fakten. | Wer nur 10 MB will, bekommt ein funktionierendes Gedächtnis. Wer Fakten will, zahlt die 400 MB bewusst. |
@@ -281,7 +295,7 @@ Bestand (2026-10-12): `README.md`, `ARCHITECTURE.md`, `CHANGELOG.md` sind leer. 
 Was Agent Mem gegenüber claude-mem und agentmemory können muss, damit „besser" messbar ist:
 
 | Merkmal | claude-mem | agentmemory | Agent Mem (Ziel) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Harnesses | Claude Code | Browser/TS | Claude Code, Codex, Copilot CLI, OpenCode |
 | Modellaufrufe | OpenRouter oder Claude, API-Key oder Abo | keine (lokale Embeddings) | Abo-Login oder Ollama, nie Key |
 | Daemon | Bun-Worker-Prozess | kein | kein (Worker mit Leerlauf, R1) |
@@ -298,13 +312,13 @@ Skripte liegen unter `docs/evidence/spikes/`.
 
 - **A.1 mem0 ohne Key, Widerspruch** (`mem0_ollama_contradiction.py`): mem0ai 2.2.1, Ollama `qwen3.5:4b-mlx` und `qwen3.6:35b-mlx`, Embedder `nomic-embed-text`, FAISS. Nachrichten „Wir nutzen pytest" und „Korrektur: nox statt pytest" ergaben bei beiden Modellen zwei ADDs; der alte Fakt blieb gültig. Einzelprobe, saubere Läufe mit isoliertem `MEM0_DIR`.
 - **A.2 Provider-Validierung**: Ein eigener Provider-Name in der Config scheitert („Unsupported LLM provider"). Setzen von `memory.llm` nach `from_config` funktioniert.
-- **A.3 mem0 über `claude -p`** (`mem0_claude_cli.py`): Haiku unter Abo-Login, gleiche zwei Nachrichten, zwei ADDs, `add` 3,4 s, `search` unter 0,1 s. `--bare` ergibt „Not logged in". Ohne `--setting-sources ""` laufen die Hooks von claude-mem im Beobachter mit und verfälschen die Ausgabe.
+- **A.3 mem0 über** `claude -p` (`mem0_claude_cli.py`): Haiku unter Abo-Login, gleiche zwei Nachrichten, zwei ADDs, `add` 3,4 s, `search` unter 0,1 s. `--bare` ergibt „Not logged in". Ohne `--setting-sources ""` laufen die Hooks von claude-mem im Beobachter mit und verfälschen die Ausgabe.
 - **A.4 Qdrant mit Sperre** (`qdrant_lock_two_processes.py`): Zwei Prozesse, je 15 Operationen mit `filelock` und `close()`, 30 von 30 Punkten, Median 7 bis 8 ms pro Öffnen und Schreiben. Ohne Sperre scheitert der zweite Zugriff: „already accessed by another instance".
 - **A.5 Chroma** (`chroma_two_processes.py`): Zwei parallele Schreiber, 40 von 40 Einträgen ohne Sperre. mem0 hat für Chroma keine Keyword-Suche.
 - **A.6 Graph in mem0**: Im installierten Paket kein `graph_store`, kein Neo4j, Kuzu oder Memgraph. Entitäten (PROPER, QUOTED, TOPIC, IDENTIFIER) kommen aus spaCy und liegen in einer zweiten Collection (`entity_store`). Keyword-Suche (BM25) bietet unter den lokalen Stores nur Qdrant.
 - **A.7 Codex**: `codex exec --ephemeral --ignore-user-config -s read-only … --output-schema … -o …` lieferte `{"a":"ok"}` unter dem CLI-Login, 24.569 Tokens für einen Trivialaufruf. Copilot CLI ist nicht installiert (`which copilot` leer).
-- **A.8 Lizenzen**: mem0ai Apache-2.0, qdrant-client Apache-2.0, filelock MIT. fastembed und spaCy nicht geprüft; Phase 0 trägt das nach.
-- **A.10 Was mem0 2.2.1 bei `add` und `search` tut** (Quelltext `mem0/memory/main.py`, Zeilen 881 bis 1075 und 1642 bis 1735):
+- **A.8 Lizenzen** (geprüft 2026-10-12 aus den Paketmetadaten): mem0ai 2.2.1 Apache-2.0, qdrant-client 1.19.1 Apache-2.0, fastembed 0.9.0 Apache-2.0, spaCy 3.8.16 MIT, onnxruntime 1.31.0 MIT, ollama 0.6.3 MIT, filelock MIT. mem0 zieht außerdem openai (Apache-2.0), posthog (MIT) und sqlalchemy (MIT) als Pflichtabhängigkeiten. Alles permissiv.
+- **A.10 Was mem0 2.2.1 bei** `add` **und** `search` **tut** (Quelltext `mem0/memory/main.py`, Zeilen 881 bis 1075 und 1642 bis 1735):
   - `add`: (1) letzte 10 Nachrichten der Session laden; (2) die neuen Nachrichten einbetten und die 10 ähnlichsten vorhandenen Fakten im Vektor-Store suchen; (3) **ein** LLM-Aufruf mit diesen Fakten, den neuen und den letzten Nachrichten, Antwort `{"memory": [{"text": …}]}`, nur Hinzufügen (kein Update, kein Löschen); (4) alle neuen Fakten in einem Stapel einbetten; (5) Duplikate per MD5-Hash verwerfen; (6) Fakten samt Vektor, `data`, `text_lemmatized`, `hash`, `created_at` in den Vektor-Store schreiben; (7) Entitäten per spaCy (ohne LLM) ziehen, einbetten und in der Entity-Collection verknüpfen.
   - `search`: Anfrage einbetten, semantische Suche (Überhol-Faktor, mindestens 60), BM25 über lemmatisierte Anfrage (falls der Store Keyword-Suche kann), Entitäts-Boost, dann `score_and_rank` mit Schwelle 0,1.
   - Embeddings werden also an vier Stellen gebraucht: Anfrage bei `add` (Vorwissen für das LLM), neue Fakten (Speicher), Entitäten (Verknüpfung), Anfrage bei `search`.
@@ -313,4 +327,13 @@ Skripte liegen unter `docs/evidence/spikes/`.
 - **A.12 mem0 2.2.1, weitere Quelltextbefunde** (`memory/main.py`, `memory/storage.py`): `add` liefert nur `ADD`-Einträge (Zeilen 1030 bis 1075), es gibt keinen Update- oder Löschpfad in der Extraktion. `run_id` filtert auch die Ähnlichkeitssuche beim `add` (Zeilen 386 bis 388). `save_messages` speichert die übergebenen Nachrichten in `history.db` (`storage.py:257`). `add(..., infer=False)` embeddet ohne Modellaufruf (Zeile 770). Entity-Ids dürfen keine Leerzeichen enthalten; `|` ist erlaubt. Embedder-Liste in `embeddings/configs.py:16-28` enthält `fastembed` und `ollama`.
 
 ## Anhang B: Messberichte
-Wird in Phase 0 und 2 gefüllt. Format je Lauf: Datum, Commit, Modell, Datensatz, Zahlen. Kein Eintrag wird nachträglich geändert; neue Läufe kommen darunter.
+
+Wird in Phase 0 und 2 gefüllt. Format je Lauf: Datum, Commit, Modell, Datensatz, Zahlen. Kein Eintrag wird nachträglich geändert; neue Läufe kommen darunter. Rohberichte liegen unter `docs/evidence/runs/`.
+
+- **B.1 Hook-Laufzeit Bestand** (2026-10-12, Commit a1a478c, `agent-mem hook claude`, Stop-Ereignis, 20 Turns, frisches Datenverzeichnis, inklusive Prozessstart): Median 67 ms, p95 93 ms, Maximum 154 ms. Schwelle §8 (< 100 ms p95) ist im Bestand erfüllt; Phase 1 misst erneut mit `spawn_worker`.
+- **B.2 Fixture, Bestand (sqlite)** (2026-10-12, Commit db14e40, `agent-mem eval --fixture tests/fixtures/memory_cases.json --backend sqlite`, Embedder multilingual-e5-small): hit@1 1,00 (20/20), Abstention 0,40 (2/5), Widerspruchspaare 0/10. Der Bestand findet die Turns, kann aber nicht ablehnen und löst keinen Widerspruch; damit ist die Fixture für hit@1 zu leicht und für Abstention und Widersprüche der eigentliche Maßstab.
+- **B.3 Bündelgröße an echten Turns** (2026-10-12, 103 Turns aus den sechs jüngsten Claude-Code-Transkripten dieser Maschine, Schätzung 4 Zeichen pro Token, Median 3 Tool-Aufrufe je Turn): vollständig Median 1.588, p75 7.833, p95 29.080, Maximum 112.198 Tokens. Mit Tool-Ausgaben auf 800 Zeichen und Argumenten auf 2.000 Zeichen gekürzt: Median 810, p75 3.336, p95 9.136, Maximum 22.241. Nur Nutzer plus Assistent: Median 130, p95 4.359. Folge: Die Standardwerte aus §4.3 (800 Zeichen, 6.000 Tokens) treffen; die 6.000er-Grenze teilt etwa jeden achten Turn, 4.000 etwa jeden fünften.
+- **B.4 Copilot CLI als Stufe 3 (E5)** (2026-10-12): `@github/copilot` 1.0.95 per `npm install -g` installiert; `copilot -p "…" -s` antwortet unter dem bestehenden GitHub-Login ohne weitere Anmeldung. Befund für den Provider: Mit `-p` wird stdin ignoriert und ein Prompt von 30.000 Zeichen auf der Kommandozeile liefert eine leere Antwort; ohne `-p` liest `copilot -s` den Prompt von stdin und liefert gültiges JSON. Memory und Tools sind im Prompt-Modus standardmäßig aus. `--model` akzeptiert nur Modelle der eigenen Liste (`claude-haiku-4.5` nicht verfügbar), Standardmodell wird genutzt. **E5: Ja, Stufe 3 bleibt.** Provider `CopilotCliLLM` ist eingebaut.
+- **B.5 mem0-Telemetrie und Heimatverzeichnis** (2026-10-12): mem0 liest `MEM0_TELEMETRY` und `MEM0_DIR` beim Import und kopiert die Werte in Modulvariablen (`memory/telemetry.py:14`, `memory/setup.py:11`, `configs/base.py:13`, `memory/main.py:51`). Mit Telemetrie an legt `Memory.__init__` einen zweiten Qdrant-Store `<MEM0_DIR>/migrations_qdrant` an (`main.py:516-541`); zwei Prozesse kollidierten dort („already accessed by another instance"), obwohl beide ein eigenes Datenverzeichnis hatten. Behoben: Das Paket `agent_mem.observe` setzt beide Variablen vor dem ersten mem0-Import, der Adapter überschreibt zusätzlich die Modulvariablen; Test `tests/test_observe.py` sichert das ab und prüft, dass der Hook-Pfad weder mem0 noch qdrant noch fastembed importiert.
+- **B.6 Entity-Store** (2026-10-12): Collection `agent_mem_entities` wird gefüllt nur im Pfad `infer=True` (`main.py:1103`, `extract_entities_batch` nach der Extraktion). `add(..., infer=False)` legt keine Entitäten an. Folge für §5: `reindex` baut den Entity-Store nicht mit auf; Phase 1 ruft dafür `_link_entities_for_memory` je Fakt (interne API, durch Adapter-Test abgesichert) oder verzichtet auf den Entity-Boost nach einem Reindex. spaCy-Modell ist `en_core_web_sm` (englisch); mem0 lädt es sonst zur Laufzeit per pip in die aktive Umgebung nach, deshalb steht es in der dev-Gruppe und gehört in `setup` (I4).
+- **B.7 Adapter-Rauchtest** (2026-10-12, Commit db14e40, Fall c01 der Fixture, Ollama `qwen3.5:4b-mlx`, Embedder e5-small über den eigenen Adapter): `add` 50,2 s (erster Aufruf mit Modellstart) und 29,3 s; `search` 0,02 s; 5 Fakten, alle englisch trotz deutscher Eingabe, Stil „User is setting up …". Der Standard-Prompt von mem0 heißt in 2.2.1 `custom_instructions` (ergänzt den Prompt, ersetzt ihn nicht); der in §11 genannte Name `custom_fact_extraction_prompt` existiert nicht mehr. Die Zeit von 30 s pro `add` mit dem 4b-Modell bedeutet für die LongMemEval-Teilmenge (40 Fragen, rund 2.000 Sessions) etwa 17 Stunden; der Lauf wird deshalb auf zwei Nächte verteilt oder auf 20 Fragen gekürzt, Entscheidung nach dem Fixture-Lauf.

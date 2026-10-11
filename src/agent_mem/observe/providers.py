@@ -109,12 +109,32 @@ class CodexCliLLM(LLMBase):
         return _clean_json(out) if wants_json else out.strip()
 
 
+class CopilotCliLLM(LLMBase):
+    """Stage 3: ``copilot -s`` with the prompt on stdin (measured 2026-10-12: ``-p`` ignores stdin and
+    drops prompts over roughly 30k characters on argv; stdin-only mode works under the GitHub login).
+    Memory and tools are off by default in prompt mode."""
+
+    def __init__(self, config: BaseLlmConfig | None = None) -> None:
+        super().__init__(config or BaseLlmConfig(model=""))
+        self.model = str(self.config.model or "")
+
+    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
+        wants_json = kwargs.get("response_format") is not None
+        cmd = ["copilot", "-s"]
+        if self.model:
+            cmd += ["--model", self.model]
+        out = _run(cmd, _flatten(messages, wants_json))
+        return _clean_json(out) if wants_json else out.strip()
+
+
 def make_llm(kind: str, model: str | None = None) -> LLMBase:
-    """``claude`` or ``codex`` (harness binaries) or ``ollama`` (local)."""
+    """``claude``, ``codex`` or ``copilot`` (harness binaries) or ``ollama`` (local)."""
     if kind == "claude":
         return ClaudeCliLLM(BaseLlmConfig(model=model or "haiku"))
     if kind == "codex":
         return CodexCliLLM(BaseLlmConfig(model=model or ""))
+    if kind == "copilot":
+        return CopilotCliLLM(BaseLlmConfig(model=model or ""))
     if kind == "ollama":
         from mem0.llms.ollama import OllamaLLM
 

@@ -255,12 +255,20 @@ class Runner:
                 backend.ingest(pair["before"], [f"{pair['id']}-before"])
                 backend.ingest(pair["after"], [f"{pair['id']}-after"])
                 ranked = backend.ranked(pair["question"], 3)
-                top = ranked[0][1].lower() if ranked else ""
-                ok = any(c.lower() in top for c in pair["current"]) and not any(
-                    o.lower() in top for o in pair["obsolete"]
-                )
+                texts = [r[1].lower() for r in ranked]
+                top = texts[0] if texts else ""
+                has_current = any(c.lower() in top for c in pair["current"])
+                # A result that states the obsolete value without the current one is a stale fact
+                # still being served ("tests run with pytest"). "Switched from pytest to nox" is fine.
+                stale = [
+                    t
+                    for t in texts
+                    if any(o.lower() in t for o in pair["obsolete"])
+                    and not any(c.lower() in t for c in pair["current"])
+                ]
+                ok = has_current and not stale
                 resolved.append(int(ok))
-                details.append({"id": pair["id"], "ok": ok, "top": top[:160]})
+                details.append({"id": pair["id"], "ok": ok, "top": top[:160], "stale": [s[:100] for s in stale]})
                 self._collect(backend)
                 backend.close()
         return {

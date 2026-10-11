@@ -89,7 +89,9 @@ def _main(args: list[str]) -> int:
     p.add_argument("--backend", choices=("sqlite", "mem0"), default="sqlite")
     p.add_argument("--subset", type=Path, help="JSON with question ids (tests/fixtures/longmemeval_subset.json)")
     p.add_argument("--fixture", type=Path, help="run tests/fixtures/memory_cases.json instead of a dataset")
-    p.add_argument("--llm", choices=("ollama", "claude", "codex"), default="ollama", help="mem0 backend only")
+    p.add_argument(
+        "--llm", choices=("ollama", "claude", "codex", "copilot"), default="ollama", help="mem0 backend only"
+    )
     p.add_argument("--llm-model")
     p.add_argument("--custom-prompt", type=Path, help="file with mem0 custom_instructions (E8)")
     p.add_argument("--min-score", type=float, default=0.0, help="abstain below this score (fixture)")

@@ -33,6 +33,7 @@ EMBEDDER_PROVIDER = "agent_mem"
 LLM_PROVIDERS = {
     "claude": "agent_mem_claude",
     "codex": "agent_mem_codex",
+    "copilot": "agent_mem_copilot",
     "ollama": "ollama",
 }
 
@@ -69,6 +70,7 @@ def _register() -> None:
     EmbedderFactory.provider_to_class[EMBEDDER_PROVIDER] = "agent_mem.observe.mem0_adapter.SemanticEmbedder"
     LlmFactory.provider_to_class["agent_mem_claude"] = ("agent_mem.observe.providers.ClaudeCliLLM", BaseLlmConfig)
     LlmFactory.provider_to_class["agent_mem_codex"] = ("agent_mem.observe.providers.CodexCliLLM", BaseLlmConfig)
+    LlmFactory.provider_to_class["agent_mem_copilot"] = ("agent_mem.observe.providers.CopilotCliLLM", BaseLlmConfig)
 
 
 def _ensure_env(mem0_dir: Path) -> None:
@@ -115,7 +117,7 @@ class Mem0Adapter:
         dims = int(self.embedder.query("dimension probe").shape[0])
         if llm not in LLM_PROVIDERS:
             raise ValueError(f"unknown llm provider {llm!r}")
-        llm_defaults = {"ollama": "qwen3.5:4b-mlx", "claude": "haiku", "codex": ""}
+        llm_defaults = {"ollama": "qwen3.5:4b-mlx", "claude": "haiku", "codex": "", "copilot": ""}
         mem0_config = MemoryConfig(
             **{
                 "llm": {
