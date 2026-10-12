@@ -268,3 +268,28 @@ def test_viewer_rebuilds_the_page_only_after_a_write_and_restarts_after_an_upgra
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_login_item_removes_itself_once_agent_mem_is_uninstalled(config: Config, tmp_path: Path):
+    import plistlib
+
+    from agent_mem.ui import server
+
+    if sys.platform != "darwin":
+        return  # systemd: ConditionPathExists; Windows: the .cmd deletes itself (both declarative)
+    server.install_autostart(config)
+    target = server.autostart_path()
+    assert target is not None
+    argv = plistlib.loads(target.read_bytes())["ProgramArguments"]
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "launchctl").write_text(f'#!/bin/sh\necho "$@" > {tmp_path / "launchctl.log"}\n')
+    (stub / "launchctl").chmod(0o755)
+    env = {"PATH": f"{stub}:/bin:/usr/bin", "HOME": str(tmp_path)}
+
+    ran = subprocess.run([*argv[:4], "/bin/echo", "viewer-started"], capture_output=True, env=env, check=False)
+    assert ran.stdout.strip() == b"viewer-started" and target.exists()  # installed: the viewer runs
+
+    gone = subprocess.run([*argv[:4], str(tmp_path / "missing-python"), "-m", "agent_mem"], env=env, check=False)
+    assert gone.returncode == 0 and not target.exists()
+    assert (tmp_path / "launchctl.log").read_text().startswith("bootout gui/")

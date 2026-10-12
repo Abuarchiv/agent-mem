@@ -12,6 +12,7 @@ import html
 import http.server
 import os
 import plistlib
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -260,7 +261,16 @@ def install_autostart(config: Config) -> str:
         content = plistlib.dumps(
             {
                 "Label": LABEL,
-                "ProgramArguments": argv,
+                # Through sh: once `uv tool uninstall` removed the interpreter, the item deletes itself instead of
+                # failing every ten seconds for good.
+                "ProgramArguments": [
+                    "/bin/sh",
+                    "-c",
+                    f'[ -x "$1" ] && exec "$@"; rm -f {shlex.quote(str(target))}; '
+                    f"launchctl bootout gui/$(id -u)/{LABEL}; exit 0",
+                    "agent-mem-viewer",
+                    *argv,
+                ],
                 "EnvironmentVariables": {"AGENT_MEM_DATA_DIR": data_dir, "AGENT_MEM_INTERNAL": "1", "PATH": path},
                 "RunAtLoad": True,
                 # Restart after a crash, not after a clean exit (another viewer already answers).
@@ -272,12 +282,15 @@ def install_autostart(config: Config) -> str:
     elif sys.platform == "win32":
         quoted = " ".join(f'"{part}"' for part in argv)
         content = (
-            f'@echo off\r\nset "AGENT_MEM_DATA_DIR={data_dir}"\r\nset AGENT_MEM_INTERNAL=1\r\nstart "" {quoted}\r\n'
+            f'@echo off\r\nset "AGENT_MEM_DATA_DIR={data_dir}"\r\nset AGENT_MEM_INTERNAL=1\r\n'
+            # Uninstalled: remove this file instead of showing an error at every login.
+            f'if exist "{argv[0]}" (start "" {quoted}) else (del "%~f0")\r\n'
         )
     else:
         quoted = " ".join('"' + part.replace("\\", "\\\\").replace('"', '\\"') + '"' for part in argv)
         content = (
-            "[Unit]\nDescription=agent-mem viewer on 127.0.0.1\n\n[Service]\n"
+            # Uninstalled: the unit is skipped instead of failing and restarting.
+            f"[Unit]\nDescription=agent-mem viewer on 127.0.0.1\nConditionPathExists={argv[0]}\n\n[Service]\n"
             f'Environment="AGENT_MEM_DATA_DIR={data_dir}" AGENT_MEM_INTERNAL=1 "PATH={path}"\nExecStart={quoted}\n'
             "Restart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n"
         )
