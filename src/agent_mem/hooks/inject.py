@@ -134,17 +134,18 @@ def _profile_line(conn: sqlite3.Connection, project_id: str) -> str | None:
 def _last_session_lines(
     conn: sqlite3.Connection, project_id: str, session_id: str
 ) -> list[tuple[str, tuple[str, int] | None]]:
+    # Through the turns: a session that started in a parent folder still worked here (capture._narrow_turn).
     session = conn.execute(
-        "SELECT id, harness, title, summary_json FROM sessions WHERE project_id = ? AND id != ? "
-        "ORDER BY last_event_at DESC LIMIT 1",
+        "SELECT s.id, s.harness, s.title, s.summary_json FROM turns t JOIN sessions s ON s.id = t.session_id "
+        "WHERE t.project_id = ? AND t.session_id != ? ORDER BY t.started_at DESC, t.id DESC LIMIT 1",
         (project_id, session_id),
     ).fetchone()
     if session is None:
         return []
     turns = conn.execute(
-        "SELECT id, started_at, prompt, answer, title FROM turns WHERE session_id = ? AND outcome != 'open' "
-        "ORDER BY id DESC LIMIT 2",
-        (session["id"],),
+        "SELECT id, started_at, prompt, answer, title FROM turns WHERE session_id = ? AND project_id = ? "
+        "AND outcome != 'open' ORDER BY id DESC LIMIT 2",
+        (session["id"], project_id),
     ).fetchall()
     if session["title"] and turns:
         # The observer's running summary: what the next session needs, not the last two prompts.
@@ -275,6 +276,11 @@ def prompt_hints(
     prompt: str,
     harness: str,
 ) -> Block | None:
+    # Inside a project its own name ("agent-mem") is in almost every memory, like the word "project".
+    row = conn.execute("SELECT name FROM projects WHERE id = ?", (project_id,)).fetchone()
+    for part in re.split(r"[\W_]+", (row[0] or "") if row else ""):
+        if len(part) >= 3:
+            prompt = re.sub(rf"\b{re.escape(part)}\b", " ", prompt, flags=re.IGNORECASE)
     terms = search.query_terms(prompt)
     if len(terms) < 1:
         return None

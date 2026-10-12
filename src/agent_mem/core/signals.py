@@ -420,6 +420,16 @@ def request_text(prompt: str | None) -> str:
     return notice.group(1).strip() if notice else (prompt or "")
 
 
+def headline(text: str, limit: int = 160) -> str:
+    """The first line, cut at a word boundary with an ellipsis instead of mid-word."""
+    line = first_line(text, 100_000)
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > limit // 2 else cut).rstrip(" ,;:") + "…"
+
+
 def first_line(text: str, limit: int = 160) -> str:
     for line in text.splitlines():
         stripped = line.strip().lstrip("#>*- ").strip()

@@ -183,3 +183,41 @@ def test_a_bundle_never_mixes_projects(conn, config: Config, tmp_path):
     bundles = bundle.build(conn, config, turn_ids)
     names = [conn.execute("SELECT name FROM projects WHERE id = ?", (b.project_id,)).fetchone()[0] for b in bundles]
     assert names == ["Lernen", "agent-mem"] and [len(b.turn_ids) for b in bundles] == [1, 1]
+
+
+def test_headline_cuts_at_a_word_boundary():
+    from agent_mem.core.signals import headline
+
+    text = "Injected memories come oldest first so that a change reads as a change, and a note tells the model " * 2
+    cut = headline(text, 80)
+    assert len(cut) <= 80 and cut.endswith("…") and not cut[:-1].endswith(" ")
+    assert text.startswith(cut[:-1]) and text[len(cut) - 1] == " "
+    assert headline("short line\nsecond", 80) == "short line"
+
+
+def test_last_session_is_found_through_its_turns(conn, config: Config, tmp_path):
+    import subprocess
+
+    from tests.conftest import Driver as Fresh
+
+    parent = tmp_path / "Lernen"
+    nested = parent / "agent-mem"
+    nested.mkdir(parents=True)
+    for root in (parent, nested):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (nested / "app.py").write_text("x = 1\n")
+    driver = Fresh(conn, config, parent)  # the session starts in the parent folder
+    driver.prompt("s1", "Fix agent-mem")
+    driver.cwd = str(nested)
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "Fixed.")
+    summary.summarize(
+        conn,
+        Answer({"turns": [], "session": {"title": "Viewer repariert", "next_steps": ["Doku"]}}),
+        "claude:s1",
+        [1],
+    )
+    driver.start("s2")
+    project_id = conn.execute("SELECT id FROM projects WHERE name = 'agent-mem'").fetchone()[0]
+    block = inject.session_start(conn, config, project_id, "claude:s2", "claude")
+    assert block is not None and "last session, claude] Viewer repariert" in block.text
