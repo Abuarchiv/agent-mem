@@ -199,6 +199,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
             # A new embedder (upgrade, I7) re-embeds everything in one run; vectors are upserted per owner.
             limit = 100_000 if previous not in (None, "unavailable", embedder.model) else 512
             stats["embedded"] = semantic.embed_pending(conn, embedder, limit=limit)
+            stats["duplicates_retired"] = semantic.merge_duplicates(conn, config, embedder.model)
 
     if force_consolidate or consolidate.due(conn, config):
         since = db.get_meta(conn, "consolidated_at")

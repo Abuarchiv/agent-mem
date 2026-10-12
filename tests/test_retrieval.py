@@ -301,3 +301,28 @@ def test_facts_from_one_long_session_are_not_capped(driver: Driver, conn, config
     query = search.Query(text="parser tokens", project_id=project, limit=10)
     facts = [h for h in search.search(conn, config, query) if h.owner[0] == "m"]
     assert len(facts) == 6  # the per-session cap is for turns; six facts of one session are six things
+
+
+def test_a_newer_near_duplicate_retires_the_older_fact(conn, config: Config):
+    import numpy as np
+
+    from agent_mem.memory import semantic, store
+
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
+
+    def fact(body: str, vector: list[float], trust: str = "observer") -> int:
+        memory = store.add_memory(conn, project_id="p", kind="fact", title="", body=body, source="agent", trust=trust)
+        conn.execute(
+            "INSERT INTO vectors(owner_type, owner_id, model, vec) VALUES ('m', ?, 'm1', ?)",
+            (memory, semantic.to_blob(np.array(vector, dtype=np.float32))),
+        )
+        return memory
+
+    old = fact("Tests run with uv run pytest.", [1.0, 0.0, 0.1])
+    mine = fact("Tests run with make test.", [1.0, 0.0, 0.12], trust="user")  # the user's own note
+    other = fact("The viewer listens on port 37778.", [0.0, 1.0, 0.0])
+    new = fact("Tests run with uv run --frozen pytest.", [1.0, 0.0, 0.11])
+    assert semantic.merge_duplicates(conn, config, "m1") == 1
+    rows = dict(conn.execute("SELECT id, superseded_by FROM memories").fetchall())
+    assert rows[old] == new and rows[mine] is None and rows[other] is None and rows[new] is None
+    assert semantic.merge_duplicates(conn, config, "m1") == 0  # only new memories are compared next time

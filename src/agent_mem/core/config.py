@@ -91,6 +91,9 @@ class Semantic:
     # E2 (docs/PLAN.md B.19): same Recall@5 as embeddinggemma at a fifth of the size; e5-small needs a custom registration.
     model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     batch_size: int = 32
+    # A new fact this close to an older one of the same project replaces it (B.32: on real facts every pair
+    # from 0.90 up was the same statement, reworded or updated). 1.0 turns it off.
+    duplicate_min_cosine: float = 0.90
 
 
 @dataclass

@@ -187,6 +187,17 @@ def supersede(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
     )
 
 
+def retire(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
+    """``supersede``, and a mirrored fact leaves mem0 too, or the next extraction sees it as current."""
+    supersede(conn, old_id, new_id)
+    key = conn.execute("SELECT dedupe_key FROM memories WHERE id = ?", (old_id,)).fetchone()
+    if key and str(key[0] or "").startswith("mem0:"):
+        conn.execute(
+            "INSERT OR IGNORE INTO observe_forget(mem0_id, ts) VALUES (?, ?)",
+            (str(key[0])[len("mem0:") :], timeutil.iso()),
+        )
+
+
 def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bool:
     """Hard delete including keys, vectors, links, anchors and access history."""
     if owner_type == "m":

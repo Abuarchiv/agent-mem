@@ -147,12 +147,5 @@ def review(conn: sqlite3.Connection, llm: Any, project_id: str) -> int:
     pairs = parse(text, facts)
     with db.transaction(conn):
         for old, new in pairs:
-            store.supersede(conn, old, new)
-            key = conn.execute("SELECT dedupe_key FROM memories WHERE id = ?", (old,)).fetchone()
-            if key and str(key[0] or "").startswith("mem0:"):
-                # The mem0 copy goes too, or the next extraction would see the retired fact as current.
-                conn.execute(
-                    "INSERT OR IGNORE INTO observe_forget(mem0_id, ts) VALUES (?, ?)",
-                    (str(key[0])[len("mem0:") :], timeutil.iso()),
-                )
+            store.retire(conn, old, new)
     return len(pairs)

@@ -13,9 +13,9 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from agent_mem.core import timeutil
+from agent_mem.core import db, timeutil
 from agent_mem.core.config import Config
-from agent_mem.memory import search
+from agent_mem.memory import search, store
 
 Owner = tuple[str, int]
 
@@ -175,6 +175,51 @@ def embed_pending(conn: sqlite3.Connection, embedder: Embedder, limit: int = 512
             raise
         done += len(kept)
     return done
+
+
+DUPLICATE_KINDS = ("fact", "decision", "preference", "dead_end", "lesson")
+
+
+def merge_duplicates(conn: sqlite3.Connection, config: Config, model: str) -> int:
+    """Retire an older memory when a newer one of the same project says the same thing (cosine at or above
+    ``semantic.duplicate_min_cosine``). The newer one stays: it is the current wording. Only the observer's and
+    agents' memories take part; what the user wrote is never retired. Returns the number retired."""
+    threshold = config.semantic.duplicate_min_cosine
+    if threshold >= 1.0:
+        return 0
+    marks = ",".join("?" for _ in DUPLICATE_KINDS)
+    last = int(db.get_meta(conn, "duplicates.last_memory_id") or 0)
+    rows = conn.execute(
+        f"SELECT m.id, m.project_id, v.vec FROM memories m JOIN vectors v ON v.owner_type = 'm' AND v.owner_id = m.id "
+        f"AND v.model = ? WHERE m.invalid_at IS NULL AND m.project_id IS NOT NULL AND m.trust IN ('observer', 'agent') "
+        f"AND m.kind IN ({marks}) ORDER BY m.id",
+        (model, *DUPLICATE_KINDS),
+    ).fetchall()
+    if not rows:
+        return 0
+    ids = np.array([int(row[0]) for row in rows])
+    projects = np.array([str(row[1]) for row in rows])
+    matrix = np.stack([from_blob(row[2]) for row in rows])
+    matrix /= np.maximum(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-9)
+    retired: set[int] = set()
+    pairs: list[tuple[int, int]] = []
+    for index in np.flatnonzero(ids > last):
+        if int(ids[index]) in retired:
+            continue
+        older = np.flatnonzero((ids < ids[index]) & (projects == projects[index]))
+        if not len(older):
+            continue
+        scores = matrix[older] @ matrix[index]
+        for position in np.flatnonzero(scores >= threshold):
+            old = int(ids[older[position]])
+            if old not in retired:
+                retired.add(old)
+                pairs.append((old, int(ids[index])))
+    with db.transaction(conn):
+        for old, new in pairs:
+            store.retire(conn, old, new)
+        db.set_meta(conn, "duplicates.last_memory_id", str(int(ids.max())))
+    return len(pairs)
 
 
 @dataclass
