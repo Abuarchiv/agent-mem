@@ -1,0 +1,105 @@
+{
+  "multi-session-causal": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "multi-session-review": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "preference": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 2
+  },
+  "single-session-api": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-bug": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-db": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-feature": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-infra": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 2
+  },
+  "single-session-perf": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-refactor": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-release": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "single-session-test": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "temporal": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 1
+  },
+  "overall": {
+    "R@5": 1.0,
+    "R@10": 1.0,
+    "All@5": 1.0,
+    "All@10": 1.0,
+    "n": 15
+  },
+  "meta": {
+    "backend": "sqlite",
+    "embedder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "date": "2026-10-12T12:42:06.354Z"
+  }
+}

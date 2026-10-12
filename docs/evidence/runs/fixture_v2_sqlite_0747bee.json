@@ -1,0 +1,513 @@
+{
+  "hit@1": 1.0,
+  "abstention": 0.5,
+  "injected_hit@1": 0.9,
+  "injected_abstention": 1.0,
+  "mcp_hit@1": 1.0,
+  "mcp_abstention": 1.0,
+  "contradictions_resolved": "0/10",
+  "n": {
+    "answerable": 20,
+    "abstain": 20,
+    "pairs": 10
+  },
+  "details": [
+    {
+      "id": "c01",
+      "ok": true,
+      "top": "richte das projekt ein. wir nutzen uv als paketmanager, kein pip und kein poetry.\nerledigt: pyproject.toml angelegt, `uv sync` installiert die abhängigkeiten, `",
+      "score": 0.5460247872363115,
+      "injected": [
+        "Richte das Projekt ein. Wir nutzen uv als Paketmanager, kein pip und kein poetry.\nErledigt: pyproject.toml angelegt, `uv sync` installiert die Abhängigkeiten, `"
+      ],
+      "mcp_confident": [
+        "Richte das Projekt ein. Wir nutzen uv als Paketmanager, kein pip und kein poetry.\nErledigt: pyproject.toml angelegt, `uv sync` installiert die Abhängigkeiten, `"
+      ]
+    },
+    {
+      "id": "c02",
+      "ok": true,
+      "top": "set up a local postgres 16 with docker compose. use port 5433 on the host because 5432 is taken by another project.\nadded compose.yaml with service `db` (postgr",
+      "score": 0.46649736750103854,
+      "injected": [
+        "Write the DATABASE_URL for the local setup.\n`postgresql://[REDACTED:url_credentials]@localhost:5433/app` — note the host port 5433.",
+        "Set up a local Postgres 16 with docker compose. Use port 5433 on the host because 5432 is taken by another project.\nAdded compose.yaml with service `db` (postgr"
+      ],
+      "mcp_confident": [
+        "Set up a local Postgres 16 with docker compose. Use port 5433 on the host because 5432 is taken by another project.\nAdded compose.yaml with service `db` (postgr",
+        "Write the DATABASE_URL for the local setup.\n`postgresql://[REDACTED:url_credentials]@localhost:5433/app` — note the host port 5433."
+      ]
+    },
+    {
+      "id": "c03",
+      "ok": true,
+      "top": "formatierung: ruff format mit zeilenlänge 110, nicht 88. trag das in die pyproject ein.\n`[tool.ruff] line-length = 110` gesetzt, `ruff format` läuft durch.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": [
+        "Formatierung: ruff format mit Zeilenlänge 110, nicht 88. Trag das in die pyproject ein.\n`[tool.ruff] line-length = 110` gesetzt, `ruff format` läuft durch."
+      ]
+    },
+    {
+      "id": "c04",
+      "ok": true,
+      "top": "tests fail with 'runtimeerror: event loop is closed' when fixtures call asyncio.run.\ntried wrapping fixtures in asyncio.run — same error. root cause: multiple e",
+      "score": 0.5280239700746748,
+      "injected": [
+        "Tests fail with 'RuntimeError: Event loop is closed' when fixtures call asyncio.run.\nTried wrapping fixtures in asyncio.run — same error. Root cause: multiple e"
+      ],
+      "mcp_confident": [
+        "Tests fail with 'RuntimeError: Event loop is closed' when fixtures call asyncio.run.\nTried wrapping fixtures in asyncio.run — same error. Root cause: multiple e"
+      ]
+    },
+    {
+      "id": "c05",
+      "ok": true,
+      "top": "deployment: die api läuft auf fly.io, app heißt kassen-api, region fra. schreib die fly.toml.\nfly.toml mit `app = \"kassen-api\"`, `primary_region = \"fra\"`, inter",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Deployment: Die API läuft auf Fly.io, App heißt kassen-api, Region fra. Schreib die fly.toml.\nfly.toml mit `app = \"kassen-api\"`, `primary_region = \"fra\"`, inter"
+      ],
+      "mcp_confident": [
+        "Deployment: Die API läuft auf Fly.io, App heißt kassen-api, Region fra. Schreib die fly.toml.\nfly.toml mit `app = \"kassen-api\"`, `primary_region = \"fra\"`, inter",
+        "Deploy bitte.\n`fly deploy` durchgelaufen, Version v23 in fra aktiv."
+      ]
+    },
+    {
+      "id": "c06",
+      "ok": true,
+      "top": "commit this. and remember: commit messages in english, imperative mood, no emojis, no trailers.\ncommitted as `add retry to payment client`. noted the convention",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Commit this. And remember: commit messages in English, imperative mood, no emojis, no trailers.\nCommitted as `Add retry to payment client`. Noted the convention"
+      ],
+      "mcp_confident": [
+        "Commit this. And remember: commit messages in English, imperative mood, no emojis, no trailers.\nCommitted as `Add retry to payment client`. Noted the convention",
+        "Commit the test changes.\nCommitted as `Cover timeout path in payment tests`."
+      ]
+    },
+    {
+      "id": "c07",
+      "ok": true,
+      "top": "neuer branch für lin-490, thema rechnungs-pdf.\n`feature/lin-490-rechnung-pdf` angelegt.",
+      "score": 0.47019876440758945,
+      "injected": [
+        "Leg einen Branch für Ticket LIN-482 an. Konvention: feature/<ticket>-<kurzname>, Tickets kommen aus Linear.\nBranch `feature/LIN-482-export-csv` angelegt und aus",
+        "Neuer Branch für LIN-490, Thema Rechnungs-PDF.\n`feature/LIN-490-rechnung-pdf` angelegt."
+      ],
+      "mcp_confident": [
+        "Neuer Branch für LIN-490, Thema Rechnungs-PDF.\n`feature/LIN-490-rechnung-pdf` angelegt."
+      ]
+    },
+    {
+      "id": "c08",
+      "ok": true,
+      "top": "the stripe key must come from stripe_secret in .env.local. never commit it, .env.local is gitignored.\nthe stripe key must come from stripe_secret in .env.local.",
+      "score": 0.8391774193548387,
+      "injected": [
+        "The Stripe key must come from STRIPE_SECRET in .env.local. Never commit it, .env.local is gitignored.\nThe Stripe key must come from STRIPE_SECRET in .env.local.",
+        "The Stripe key must come from STRIPE_SECRET in .env.local. Never commit it, .env.local is gitignored.\nReading `os.environ[\"STRIPE_SECRET\"]`, loaded from .env.lo",
+        "Payments fail locally with 'No API key provided'.\nSTRIPE_SECRET was missing from your .env.local. Added a check that fails fast with a clear message."
+      ],
+      "mcp_confident": [
+        "The Stripe key must come from STRIPE_SECRET in .env.local. Never commit it, .env.local is gitignored.\nThe Stripe key must come from STRIPE_SECRET in .env.local.",
+        "The Stripe key must come from STRIPE_SECRET in .env.local. Never commit it, .env.local is gitignored.\nReading `os.environ[\"STRIPE_SECRET\"]`, loaded from .env.lo",
+        "Payments fail locally with 'No API key provided'.\nSTRIPE_SECRET was missing from your .env.local. Added a check that fails fast with a clear message."
+      ]
+    },
+    {
+      "id": "c09",
+      "ok": true,
+      "top": "wir nutzen node 22 über fnm, nicht nvm.\nwir nutzen node 22 über fnm, nicht nvm.",
+      "score": 0.7993951612903225,
+      "injected": [
+        "Wir nutzen Node 22 über fnm, nicht nvm. Leg eine .node-version an.\n`.node-version` mit `22` angelegt, `fnm use` wechselt automatisch.",
+        "CI schlägt fehl mit 'unsupported engine'.\nDie CI nutzte Node 18. Auf 22 gesetzt, passend zur .node-version."
+      ],
+      "mcp_confident": [
+        "Wir nutzen Node 22 über fnm, nicht nvm.\nWir nutzen Node 22 über fnm, nicht nvm.",
+        "Wir nutzen Node 22 über fnm, nicht nvm. Leg eine .node-version an.\n`.node-version` mit `22` angelegt, `fnm use` wechselt automatisch.",
+        "CI schlägt fehl mit 'unsupported engine'.\nDie CI nutzte Node 18. Auf 22 gesetzt, passend zur .node-version."
+      ]
+    },
+    {
+      "id": "c10",
+      "ok": true,
+      "top": "decision: the cli tool stores its data in sqlite, not postgres. it's a single-user tool and must work offline without a server.\nusing the stdlib sqlite3 module ",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Decision: the CLI tool stores its data in SQLite, not Postgres. It's a single-user tool and must work offline without a server.\nUsing the stdlib sqlite3 module "
+      ],
+      "mcp_confident": [
+        "Decision: the CLI tool stores its data in SQLite, not Postgres. It's a single-user tool and must work offline without a server.\nUsing the stdlib sqlite3 module "
+      ]
+    },
+    {
+      "id": "c11",
+      "ok": true,
+      "top": "die alembic-migration hat die neue enum-variante nicht angelegt, prod ist kaputt.\nursache: `alembic revision --autogenerate` erkennt änderungen an postgres-enum",
+      "score": 0.5280239700746748,
+      "injected": [
+        "Die Alembic-Migration hat die neue Enum-Variante nicht angelegt, Prod ist kaputt.\nUrsache: `alembic revision --autogenerate` erkennt Änderungen an Postgres-Enum"
+      ],
+      "mcp_confident": [
+        "Die Alembic-Migration hat die neue Enum-Variante nicht angelegt, Prod ist kaputt.\nUrsache: `alembic revision --autogenerate` erkennt Änderungen an Postgres-Enum"
+      ]
+    },
+    {
+      "id": "c12",
+      "ok": true,
+      "top": "start the dev server.\n`make dev` starts the api on :8000 and the web app on :5173 together via honcho. both are up.",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Start the dev server.\n`make dev` starts the API on :8000 and the web app on :5173 together via honcho. Both are up."
+      ],
+      "mcp_confident": [
+        "Start the dev server.\n`make dev` starts the API on :8000 and the web app on :5173 together via honcho. Both are up.",
+        "The web app isn't reachable.\nYou started only `uvicorn`. Use `make dev`, it starts both processes."
+      ]
+    },
+    {
+      "id": "c13",
+      "ok": true,
+      "top": "antworte mir bitte auf deutsch. code-kommentare und docstrings aber auf englisch, das team ist international.\nverstanden: antworten auf deutsch, kommentare und ",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Antworte mir bitte auf Deutsch. Code-Kommentare und Docstrings aber auf Englisch, das Team ist international.\nVerstanden: Antworten auf Deutsch, Kommentare und "
+      ],
+      "mcp_confident": [
+        "Antworte mir bitte auf Deutsch. Code-Kommentare und Docstrings aber auf Englisch, das Team ist international.\nVerstanden: Antworten auf Deutsch, Kommentare und "
+      ]
+    },
+    {
+      "id": "c14",
+      "ok": true,
+      "top": "build fails after upgrading to tailwind v4: 'it looks like you're trying to use tailwindcss directly as a postcss plugin'.\ntried `@tailwindcss/postcss` first, s",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Build fails after upgrading to Tailwind v4: 'It looks like you're trying to use tailwindcss directly as a PostCSS plugin'.\nTried `@tailwindcss/postcss` first, s"
+      ],
+      "mcp_confident": [
+        "Build fails after upgrading to Tailwind v4: 'It looks like you're trying to use tailwindcss directly as a PostCSS plugin'.\nTried `@tailwindcss/postcss` first, s"
+      ]
+    },
+    {
+      "id": "c15",
+      "ok": true,
+      "top": "login über keycloak: realm heißt intern, client web-app, redirect auf /callback.\noidc-config mit realm `intern` und client `web-app` eingetragen, redirect-uri `",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Login über Keycloak: Realm heißt intern, Client web-app, Redirect auf /callback.\nOIDC-Config mit Realm `intern` und Client `web-app` eingetragen, Redirect-URI `"
+      ],
+      "mcp_confident": [
+        "Login über Keycloak: Realm heißt intern, Client web-app, Redirect auf /callback.\nOIDC-Config mit Realm `intern` und Client `web-app` eingetragen, Redirect-URI `"
+      ]
+    },
+    {
+      "id": "c16",
+      "ok": true,
+      "top": "set up ci with github actions. tests must run on python 3.11 and 3.13.\nadded .github/workflows/ci.yml with a matrix over python-version 3.11 and 3.13 on ubuntu-",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Set up CI with GitHub Actions. Tests must run on Python 3.11 and 3.13.\nAdded .github/workflows/ci.yml with a matrix over python-version 3.11 and 3.13 on ubuntu-"
+      ],
+      "mcp_confident": [
+        "Set up CI with GitHub Actions. Tests must run on Python 3.11 and 3.13.\nAdded .github/workflows/ci.yml with a matrix over python-version 3.11 and 3.13 on ubuntu-"
+      ]
+    },
+    {
+      "id": "c17",
+      "ok": true,
+      "top": "das ist ein monorepo mit pnpm workspaces: apps/ für anwendungen, packages/ für geteilte bibliotheken.\npnpm-workspace.yaml mit `apps/*` und `packages/*` angelegt",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Das ist ein Monorepo mit pnpm workspaces: apps/ für Anwendungen, packages/ für geteilte Bibliotheken.\npnpm-workspace.yaml mit `apps/*` und `packages/*` angelegt"
+      ],
+      "mcp_confident": [
+        "Das ist ein Monorepo mit pnpm workspaces: apps/ für Anwendungen, packages/ für geteilte Bibliotheken.\npnpm-workspace.yaml mit `apps/*` und `packages/*` angelegt"
+      ]
+    },
+    {
+      "id": "c18",
+      "ok": true,
+      "top": "don't ever run `git push --force` on main. on feature branches use `--force-with-lease` only.\nunderstood: no force push to main; `--force-with-lease` on feature",
+      "score": 0.47402151858976493,
+      "injected": [
+        "Don't ever run `git push --force` on main. On feature branches use `--force-with-lease` only.\nUnderstood: no force push to main; `--force-with-lease` on feature",
+        "Push the rebased feature branch.\nPushed with `git push --force-with-lease origin feature/LIN-482-export-csv`."
+      ],
+      "mcp_confident": [
+        "Don't ever run `git push --force` on main. On feature branches use `--force-with-lease` only.\nUnderstood: no force push to main; `--force-with-lease` on feature",
+        "Push the rebased feature branch.\nPushed with `git push --force-with-lease origin feature/LIN-482-export-csv`."
+      ]
+    },
+    {
+      "id": "c19",
+      "ok": true,
+      "top": "logging mit structlog: json in produktion, lesbare konsole in entwicklung.\nstructlog konfiguriert, `jsonrenderer` bei `env=prod`, sonst `consolerenderer`.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": [
+        "Logging mit structlog: JSON in Produktion, lesbare Konsole in Entwicklung.\nstructlog konfiguriert, `JSONRenderer` bei `ENV=prod`, sonst `ConsoleRenderer`."
+      ]
+    },
+    {
+      "id": "c20",
+      "ok": true,
+      "top": "the payments module is owned by team ledger. questions go to #ledger-dev on slack, not to platform.\nnoted: payments → team ledger, channel #ledger-dev.",
+      "score": 0.47402151858976493,
+      "injected": [
+        "The payments module is owned by team Ledger. Questions go to #ledger-dev on Slack, not to platform.\nNoted: payments → team Ledger, channel #ledger-dev."
+      ],
+      "mcp_confident": [
+        "The payments module is owned by team Ledger. Questions go to #ledger-dev on Slack, not to platform.\nNoted: payments → team Ledger, channel #ledger-dev.",
+        "Who should review the refund change?\nSomeone from team Ledger, they own payments. I added the ledger-reviewers group."
+      ]
+    },
+    {
+      "id": "c21",
+      "ok": false,
+      "top": "wir nutzen uv als paketmanager und ruff als linter.\nwir nutzen uv als paketmanager und ruff als linter.",
+      "score": 0.8189999999999998,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c22",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c23",
+      "ok": false,
+      "top": "login über keycloak, realm intern, client web-app.\noidc eingerichtet.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c24",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c25",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c26",
+      "ok": false,
+      "top": "die tests laufen mit pytest im ordner tests/.\n88 tests grün.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c27",
+      "ok": false,
+      "top": "deploy the frontend to vercel.\ndeployed, preview url posted.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c28",
+      "ok": false,
+      "top": "der server läuft auf port 8080 hinter nginx.\nnginx.conf leitet / an :8080 weiter.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c29",
+      "ok": false,
+      "top": "bump the version to 2.3.0.\npyproject.toml and changelog updated.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c30",
+      "ok": false,
+      "top": "die nutzer-tabelle heißt users und hat eine spalte email.\nmigration 004 legt users an.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c31",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c32",
+      "ok": false,
+      "top": "die datei config.yaml enthält die feature-flags.\nconfig.yaml gelesen, 12 flags.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c33",
+      "ok": false,
+      "top": "the project uses react 19 with vite.\nvite.config.ts updated for react 19.",
+      "score": 0.47402151858976493,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c34",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c35",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c36",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c37",
+      "ok": false,
+      "top": "cache the exchange rates in redis for an hour.\nsetex rates 3600 in rates.py.",
+      "score": 0.47019876440758945,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c38",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c39",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "c40",
+      "ok": true,
+      "top": "",
+      "score": null,
+      "injected": [],
+      "mcp_confident": []
+    },
+    {
+      "id": "x01",
+      "ok": false,
+      "top": "korrektur: wir haben auf nox umgestellt. tests laufen jetzt nur noch über `nox -s tests`, nicht mehr direkt mit pytest.\nnotiert: tests über `nox -s tests`. noxf",
+      "stale": [
+        "tests laufen mit pytest, direkt über `uv run pytest`.\nverstanden, `uv run pytest` ausgeführt, 88 tes"
+      ]
+    },
+    {
+      "id": "x02",
+      "ok": false,
+      "top": "the web dev server runs on port 3000.\nstarted on http://localhost:3000.",
+      "stale": [
+        "the web dev server runs on port 3000.\nstarted on http://localhost:3000."
+      ]
+    },
+    {
+      "id": "x03",
+      "ok": false,
+      "top": "lokal läuft postgres 15 über docker compose.\ncompose.yaml mit `postgres:15` angelegt.",
+      "stale": [
+        "lokal läuft postgres 15 über docker compose.\ncompose.yaml mit `postgres:15` angelegt."
+      ]
+    },
+    {
+      "id": "x04",
+      "ok": false,
+      "top": "switching the repo to pnpm. delete package-lock.json; from now on only pnpm, never npm.\nswitching the repo to pnpm. delete package-lock.json; from now on only p",
+      "stale": [
+        "use npm for installing packages in this repo.\n`npm install` done, package-lock.json created."
+      ]
+    },
+    {
+      "id": "x05",
+      "ok": false,
+      "top": "der hauptbranch heißt master.\nbranch `master` ausgecheckt.",
+      "stale": [
+        "der hauptbranch heißt master.\nbranch `master` ausgecheckt."
+      ]
+    },
+    {
+      "id": "x06",
+      "ok": false,
+      "top": "format python code with black.\n`black .` applied, 14 files reformatted.",
+      "stale": [
+        "format python code with black.\n`black .` applied, 14 files reformatted."
+      ]
+    },
+    {
+      "id": "x07",
+      "ok": false,
+      "top": "deployment läuft auf heroku, app-name kassen-api.\n`git push heroku main` durchgelaufen.",
+      "stale": [
+        "deployment läuft auf heroku, app-name kassen-api.\n`git push heroku main` durchgelaufen."
+      ]
+    },
+    {
+      "id": "x08",
+      "ok": false,
+      "top": "we're on node 18 for this service.\n`.nvmrc` set to 18.",
+      "stale": [
+        "we're on node 18 for this service.\n`.nvmrc` set to 18."
+      ]
+    },
+    {
+      "id": "x09",
+      "ok": false,
+      "top": "der http-client bekommt ein timeout von 5 sekunden.\n`httpx.client(timeout=5)` gesetzt.",
+      "stale": [
+        "der http-client bekommt ein timeout von 5 sekunden.\n`httpx.client(timeout=5)` gesetzt."
+      ]
+    },
+    {
+      "id": "x10",
+      "ok": false,
+      "top": "code comments in english from now on, not german.\ncode comments in english from now on, not german.",
+      "stale": [
+        "write code comments in german, the team is local.\ncomments in german from now on."
+      ]
+    }
+  ],
+  "meta": {
+    "backend": "sqlite",
+    "embedder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "date": "2026-10-12T12:42:00.584Z"
+  }
+}
