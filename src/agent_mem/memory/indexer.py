@@ -90,15 +90,21 @@ def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
         # The model-call log only serves today's budget and recent errors.
         calls = conn.execute("DELETE FROM observe_calls WHERE ts < ?", (access_cutoff,)).rowcount
     size_mb = config.db_path.stat().st_size / 1_000_000 if config.db_path.exists() else 0
-    if size_mb > config.retention.max_db_mb:
+    last_vacuum = db.get_meta(conn, "vacuumed_at")
+    # Above the limit the database may stay large (real data), so VACUUM, which locks every hook out, runs once a day
+    # at most and only after trimming freed something; before, it ran on every indexer start, about once a minute.
+    if size_mb > config.retention.max_db_mb and (last_vacuum is None or timeutil.hours_between(last_vacuum) >= 24):
         with db.transaction(conn):
-            conn.execute(
+            freed = conn.execute(
                 "UPDATE events SET payload = json_object('raw_kind', json_extract(payload, '$.raw_kind'), "
                 "'category', json_extract(payload, '$.category'), 'error_line', json_extract(payload, '$.error_line'), "
                 "'trust', json_extract(payload, '$.trust')), trimmed = 1 WHERE trimmed = 0 AND id IN "
                 "(SELECT id FROM events WHERE trimmed = 0 ORDER BY ts LIMIT 5000)"
-            )
-        conn.execute("VACUUM")
+            ).rowcount
+        if freed:
+            conn.execute("VACUUM")
+        with db.transaction(conn):
+            db.set_meta(conn, "vacuumed_at", timeutil.iso())
     # Quarantined events hold full payloads (privacy, R4); kept as long as payloads are, for `doctor` to show.
     quarantined = 0
     if config.quarantine_dir.exists():

@@ -255,3 +255,18 @@ def test_a_damaged_database_is_restored_and_its_wal_kept(config: Config):
     restored = db.connect(config)
     assert db.quick_check(restored)
     restored.close()
+
+
+def test_an_oversized_database_is_vacuumed_once_a_day_not_on_every_run(config: Config, project: Path, monkeypatch):
+    from agent_mem.memory import indexer
+
+    _turn(config, project, "s1", "something to trim")
+    config.retention.max_db_mb = 0  # always "too large"
+    conn = db.connect(config)
+    conn.execute("UPDATE events SET ts = '2000-01-01T00:00:00.000Z'")  # old enough to trim
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+    for _ in range(3):
+        indexer.retention(conn, config)
+    assert sum(s.strip().upper() == "VACUUM" for s in statements) <= 1
+    conn.close()
