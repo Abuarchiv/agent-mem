@@ -75,7 +75,7 @@ def _register() -> None:
     LlmFactory.provider_to_class["agent_mem_fake"] = ("agent_mem.observe.providers.FakeLLM", BaseLlmConfig)
 
 
-def _ensure_env(mem0_dir: Path, entity_model: str = "en_core_web_sm") -> None:
+def _ensure_env(mem0_dir: Path, entity_model: str = "en_core_web_sm", model_path: Path | None = None) -> None:
     """Point mem0 at our directory. Its modules copied the value at import time, so patch those too."""
     import mem0.configs.base as mem0_configs_base
     import mem0.memory.main as mem0_main
@@ -90,7 +90,7 @@ def _ensure_env(mem0_dir: Path, entity_model: str = "en_core_web_sm") -> None:
         setattr(module, "mem0_dir", str(mem0_dir))  # noqa: B010  (module globals read at call time)
     mem0_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(mem0_dir, 0o700)
-    _use_entity_model(entity_model)
+    _use_entity_model(entity_model, model_path)
 
 
 def spacy_model_available(name: str = "en_core_web_sm") -> bool:
@@ -99,13 +99,18 @@ def spacy_model_available(name: str = "en_core_web_sm") -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def _use_entity_model(name: str = "en_core_web_sm") -> None:
+def _use_entity_model(name: str = "en_core_web_sm", path: Path | None = None) -> None:
     """mem0 loads ``en_core_web_sm`` for entity linking; on German facts it returns fragments ("Der", "und
     nur"). Load the configured model into mem0's loader instead. Without the model mem0 would run
     ``spacy download`` (an install into the live environment, which ends the process in a tool install), so
     mark it as failed: entity linking is skipped, facts and search are unaffected (docs/PLAN.md B.27)."""
     from mem0.utils import spacy_models
 
+    if path is not None and spacy_models._nlp_full is None:
+        import spacy
+
+        spacy_models._nlp_full = spacy.load(path)  # downloaded by `agent-mem models install`
+        return
     if not spacy_model_available(name):
         spacy_models._load_failed_full = True
         spacy_models._load_failed_lemma = True
@@ -130,7 +135,9 @@ class Mem0Adapter:
         self.config = config
         self.llm, self.llm_model, self.custom_instructions = llm, llm_model, custom_instructions
         self.mem0_dir = mem0_dir or (config.data_dir / "mem0")
-        _ensure_env(self.mem0_dir, config.observe.entity_model)
+        from agent_mem.observe import concepts
+
+        _ensure_env(self.mem0_dir, config.observe.entity_model, concepts.model_path(config))
         _register()
         from mem0 import Memory
         from mem0.configs.base import MemoryConfig

@@ -98,3 +98,30 @@ def test_concept_variants_are_one_concept_and_a_new_key_relinks(conn) -> None:
     db.set_meta(conn, "concepts.version", "old")
     assert concepts.link_new(conn, lambda text: [("IDENTIFIER", words[text])]) == 2  # relinked from scratch
     assert conn.execute("SELECT COUNT(*) FROM concept_links").fetchone()[0] == 2
+
+
+def test_concept_model_downloads_into_the_model_dir_and_checks_its_checksum(config, tmp_path, monkeypatch) -> None:
+    import hashlib
+    import zipfile
+
+    import pytest
+
+    from agent_mem.observe import concepts
+
+    config.observe.entity_model = "de_core_news_sm"
+    wheel = tmp_path / "w.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("de_core_news_sm/de_core_news_sm-3.8.0/config.cfg", "[nlp]")
+        archive.writestr("de_core_news_sm-3.8.0.dist-info/METADATA", "x")
+    monkeypatch.setattr(concepts.urllib.request, "urlretrieve", lambda url, path: path.write_bytes(wheel.read_bytes()))
+    assert concepts.model_path(config) is None
+    with pytest.raises(ValueError, match="checksum"):
+        concepts.download_model(config)  # the pinned hash is the real wheel's
+    monkeypatch.setitem(concepts.SPACY_SHA256, "de_core_news_sm", hashlib.sha256(wheel.read_bytes()).hexdigest())
+    path = concepts.download_model(config)
+    assert (
+        path == config.model_dir / "spacy" / "de_core_news_sm" / "de_core_news_sm-3.8.0" == concepts.model_path(config)
+    )
+    config.observe.entity_model = "../../etc"
+    with pytest.raises(ValueError, match="not a spaCy model name"):
+        concepts.download_model(config)

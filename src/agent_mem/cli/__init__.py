@@ -140,7 +140,7 @@ def _main(args: list[str]) -> int:
     p.add_argument("action", choices=["list", "enable", "disable", "delete"], nargs="?", default="list")
     p.add_argument("rule_id", nargs="?", type=_rule_id)
     sub.add_parser("lessons", help="suggest lines for AGENTS.md / CLAUDE.md from repeated lessons")
-    p = sub.add_parser("models", help="embedding model status or download")
+    p = sub.add_parser("models", help="embedding and concept model status or download")
     p.add_argument("action", choices=["status", "install"], nargs="?", default="status")
     p = sub.add_parser("eval", help="retrieval evaluation (LongMemEval-S format)")
     p.add_argument("dataset", type=Path, nargs="?", help="LongMemEval-S JSON (omit with --fixture)")
