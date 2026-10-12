@@ -229,3 +229,15 @@ def test_semantic_hit_needs_a_third_of_the_terms(config: Config):
     hit.coverage, hit.matched_terms = search.coverage("logging with structlog", terms)
     assert search.confident(hit, config, terms)  # 1 of 2 with vector support
     assert search.query_terms("Welche Datei enthält den Vertrag?") == ["datei", "vertrag"]
+
+
+def test_prompt_hint_ignores_chat_filler_project_name_and_command_lines(driver: Driver, conn):
+    driver.start("s1")
+    name = conn.execute("SELECT name FROM projects").fetchone()[0]
+    driver.prompt("s1", f"Nun schaue ich mir das gesamte {name} an")
+    driver.bash("s1", "pytest tests/test_start.py && ./start.sh")
+    driver.stop("s1", "Drei Module gefunden.")
+    other = Driver(conn, driver.config, driver.cwd)
+    assert not other.prompt("s2", f"nun schaue dir das gesamte {name} an").context  # only filler and the name
+    assert not other.prompt("s2", "wie starte ich die tests").context  # matched only the command line
+    assert other.prompt("s2", "welche module hast du gefunden").context

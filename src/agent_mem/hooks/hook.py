@@ -348,6 +348,10 @@ def _quarantine_note(config: Config, harness: str, event_name: str | None, reaso
 def main(argv: list[str]) -> int:
     harness = argv[0] if argv else ""
     event_name = argv[1] if len(argv) > 1 else None
+    if harness in {"", "-h", "--help"}:  # typed by a person: explain instead of waiting on stdin
+        print("usage: agent-mem hook {claude,codex,copilot,opencode} [event]\n")
+        print("Called by the harness hooks with the event JSON on stdin. Set up with `agent-mem setup all --write`.")
+        return 0
     try:
         text = run(harness, event_name)
     except Exception as error:  # the agent must never see a crash

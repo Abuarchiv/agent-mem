@@ -200,6 +200,75 @@ STOPWORDS = {
     "unseren",
     "unserem",
     "projekt",
+    # chat filler: a question made of these matched any long turn ("nun schaue … gesamte")
+    "nun",
+    "schau",
+    "schaue",
+    "schauen",
+    "guck",
+    "gucke",
+    "hey",
+    "halt",
+    "eben",
+    "eigentlich",
+    "einfach",
+    "immer",
+    "wieder",
+    "mehr",
+    "viel",
+    "viele",
+    "paar",
+    "sachen",
+    "ganz",
+    "ganze",
+    "gesamte",
+    "gesamten",
+    "gerade",
+    "sehr",
+    "nur",
+    "denn",
+    "weil",
+    "damit",
+    "dabei",
+    "dazu",
+    "dafür",
+    "sein",
+    "bin",
+    "bist",
+    "kein",
+    "keine",
+    "keinen",
+    "mein",
+    "meine",
+    "meinen",
+    "dein",
+    "deine",
+    "deinen",
+    "sollte",
+    "würde",
+    "könnte",
+    "möchte",
+    "okay",
+    "bzw",
+    "etc",
+    "etwas",
+    "now",
+    "look",
+    "more",
+    "much",
+    "very",
+    "really",
+    "still",
+    "again",
+    "only",
+    "whole",
+    "entire",
+    "thing",
+    "things",
+    "stuff",
+    "thanks",
+    "get",
+    "got",
 }
 # "Logging-Bibliothek", "node-version": letters joined by hyphens are searched as their parts.
 _COMPOUND = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)+")
@@ -237,6 +306,9 @@ class Hit:
     matched_terms: int = 0
     origin: str | None = None
     answer: str = ""
+    # What a turn is about: request, answer, files, errors. Command lines are left out: their paths and
+    # flags matched almost any two words of a question ("tests" in tests/test_x.py).
+    topic: str = ""
 
     @property
     def label(self) -> str:
@@ -364,22 +436,24 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
             turn_ids,
         ):
             files = json.loads(row["files_json"] or "[]")
-            text = "\n".join(
+            commands = " ".join(json.loads(row["commands_json"] or "[]"))
+            topic = "\n".join(
                 part
                 for part in (
                     row["prompt"],
                     row["answer"],
                     " ".join(files),
-                    " ".join(json.loads(row["commands_json"] or "[]")),
                     " ".join(json.loads(row["errors_json"] or "[]")),
                 )
                 if part
             )
+            text = "\n".join(part for part in (topic, commands) if part)
             hits[("t", row["id"])] = Hit(
                 owner=("t", row["id"]),
                 kind="turn",
                 title=first_line(request_text(row["prompt"]), 160) or first_line(row["answer"] or "", 160),
                 text=text,
+                topic=topic,
                 answer=row["answer"] or "",
                 ts=row["started_at"],
                 session_id=row["session_id"],
@@ -480,7 +554,7 @@ def search(
             continue
         hit.rrf = score / max_rrf if max_rrf else 0.0
         hit.sources = sources
-        hit.coverage, hit.matched_terms = coverage(hit.text, terms)
+        hit.coverage, hit.matched_terms = coverage(hit.topic if hit.owner[0] == "t" else hit.text, terms)
         candidates.append(hit)
     stats = learn.owner_stats(conn, [h.owner for h in candidates], now)
     for hit in candidates:

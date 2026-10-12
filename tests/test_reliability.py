@@ -86,6 +86,12 @@ def test_invalid_payload_is_quarantined_and_silent(config: Config):
     assert len(list(config.quarantine_dir.glob("*.json"))) == 2
 
 
+def test_hook_help_explains_instead_of_quarantining(config: Config, capsys: pytest.CaptureFixture[str]):
+    assert hook.main(["--help"]) == 0
+    assert "usage: agent-mem hook" in capsys.readouterr().out
+    assert not config.quarantine_dir.exists() or not list(config.quarantine_dir.glob("*.json"))
+
+
 def test_disabled_and_internal_env(config: Config, project: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AGENT_MEM_INTERNAL", "1")
     assert hook.run("claude", None, _prompt_payload(project, "s", "hello there"), config) == ""
