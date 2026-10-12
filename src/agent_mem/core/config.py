@@ -40,7 +40,7 @@ DEFAULT_EXCLUDE_GLOBS = [
 class Budgets:
     """Maximum injected tokens per moment (estimated as characters / 4)."""
 
-    session_start: int = 600
+    session_start: int = 1000
     prompt: int = 200
     failure: int = 120
     warning: int = 80

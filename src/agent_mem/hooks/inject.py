@@ -272,8 +272,30 @@ def session_start(
     lines.extend(_memory_lines(conn, project_id, harness, limit=3, kinds=("lesson",)))
     lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
-    lines.extend(_last_session_lines(conn, project_id, session_id))
+    last = _last_session_lines(conn, project_id, session_id)
+    lines.extend(last)
+    # The work log as an index, like claude-mem's: titles with ids the agent can open (mem_get). Last, so the budget
+    # drops it before facts and lessons; the agent sees what happened lately and can tell a newer decision itself.
+    lines.extend(_work_lines(conn, project_id, session_id, {owner for _, owner in last if owner}))
     return render(lines, config.budgets.session_start)
+
+
+def _work_lines(
+    conn: sqlite3.Connection, project_id: str, session_id: str, taken: set[tuple[str, int]], limit: int = 10
+) -> list[tuple[str, tuple[str, int] | None]]:
+    rows = conn.execute(
+        "SELECT id, started_at, type, title FROM turns WHERE project_id = ? AND session_id != ? AND title IS NOT NULL "
+        "ORDER BY started_at DESC, id DESC LIMIT ?",
+        (project_id, session_id, limit + len(taken)),
+    ).fetchall()
+    picked = [r for r in rows if ("t", int(r["id"])) not in taken][:limit]
+    return [
+        (
+            f"- [T{r['id']} · {timeutil.day(r['started_at'])} · work, {r['type'] or 'change'}] {first_line(r['title'], 120)}",
+            ("t", int(r["id"])),
+        )
+        for r in reversed(picked)
+    ]
 
 
 def _focus_lines(
@@ -563,6 +585,10 @@ def terminal(
             kind, text, ident = match["kind"], match["text"], match["id"] or ""
             if ident:
                 ids.append(ident)
+            if kind.startswith("work, "):
+                glyph, code = _WORK.get(kind[6:], ("›", "2"))
+                groups.setdefault("Recent work", []).append(row(ident, glyph, code, "", text))
+                continue
             if kind == "unresolved":
                 group = "Open errors"
             elif kind.startswith("last session"):
@@ -583,7 +609,10 @@ def terminal(
         *warnings,
         *(paint("31", f"! {line}") for line in notices or []),
     ]
-    if recent:
+    work = groups.pop("Recent work", None)
+    if work:  # from the context: shown first, like a log
+        out += [paint("1", "Recent work"), *work]
+    elif recent:  # after compaction the block has no work log; the hook passes it for the terminal only
         out.append(paint("1", "Recent work"))
         for ident, started, kind, title in recent:
             glyph, code = _WORK.get(kind, ("›", "2"))
@@ -594,7 +623,7 @@ def terminal(
             )
     for group, rows in groups.items():
         out += [paint("1", group), *rows]
-    if not groups and not recent:
+    if not groups and not work and not recent:
         out.append(paint("2", "Nothing to recall here yet; this session is being recorded."))
     if commands:
         out.append(f"{paint('1', 'Commands')}  {_clip(commands, 100)}")

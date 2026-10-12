@@ -300,3 +300,31 @@ def test_lessons_need_evidence_and_reach_the_next_briefing(driver: Driver, conn,
         _memory(conn, project_id, f"Unrelated preference {n} about colors")
     block = inject.session_start(conn, config, project_id, "claude:s9", "claude")
     assert block is not None and "· lesson] When pytest fails with IndexError" in block.text
+
+
+def test_the_model_gets_the_work_log_and_the_terminal_shows_it_from_there(driver: Driver, conn, config: Config):
+    session_id, (first, second) = _session(driver, conn)
+    summary.summarize(
+        conn,
+        Answer(
+            {
+                "turns": [
+                    {"id": first, "type": "bugfix", "title": "Parser-Absturz behoben"},
+                    {"id": second, "type": "change", "title": "Build geprüft"},
+                ],
+            }
+        ),
+        session_id,
+        [first, second],
+    )
+    driver.prompt("s2", "Rename the invoice module")  # a later session: it is the "last session" now
+    driver.stop("s2", "Renamed.")
+    driver.start("s3")
+    project_id = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()[0]
+    block = inject.session_start(conn, config, project_id, "claude:s3", "claude")
+    assert block is not None
+    assert f"[T{first} · " in block.text and "· work, bugfix] Parser-Absturz behoben" in block.text
+    assert block.text.count("Rename the invoice module") == 1  # shown as the last session, not twice
+    lines = inject.terminal(block.text, "proj", color=False).splitlines()
+    assert lines.index("Recent work") < lines.index("Last session · claude")
+    assert any("● Parser-Absturz behoben" in line for line in lines)

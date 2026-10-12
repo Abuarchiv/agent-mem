@@ -115,7 +115,7 @@ It listens on this machine only (no login; turn it off on shared machines). `age
   "capture": true,
   "excluded_projects": ["/path/to/private/repo"],
   "exclude_globs": [".env", ".env.*", "*.pem", "secrets/**"],
-  "budgets": {"session_start": 600, "prompt": 200, "failure": 120, "warning": 80, "compact": 400},
+  "budgets": {"session_start": 1000, "prompt": 200, "failure": 120, "warning": 80, "compact": 400},
   "semantic": {"enabled": true, "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
   "observe": {
     "enabled": true,
