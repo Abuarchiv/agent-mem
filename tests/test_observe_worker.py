@@ -80,38 +80,6 @@ def test_worker_extracts_mirrors_and_finishes(observe_config: Config, project: P
     conn.close()
 
 
-def test_contradiction_supersedes_old_fact(observe_config: Config, project: Path, tmp_path: Path, monkeypatch) -> None:
-    answers = tmp_path / "fake.json"
-    answers.write_text(
-        json.dumps(
-            [
-                {"memory": [{"text": "Tests laufen mit pytest über uv run pytest."}]},
-                {"turns": [], "session": {"title": "Testbefehl festgehalten"}},  # summary call (schema v3)
-                {"memory": [{"text": "Tests laufen jetzt mit nox -s tests, nicht mehr mit pytest."}]},
-                {"verdicts": [{"pair": 1, "verdict": "SUPERSEDE"}]},
-            ]
-        )
-    )
-    monkeypatch.setenv("AGENT_MEM_FAKE_LLM", str(answers))
-    _turn(observe_config, project, "s1", "Tests laufen mit pytest.", "ok")
-    conn = db.connect(observe_config)
-    worker = _worker(observe_config, conn)
-    worker.run(drain=False)
-    _turn(observe_config, project, "s2", "Korrektur: nox statt pytest.", "ok")
-    worker.run(drain=False)
-    worker.close()
-    rows = conn.execute(
-        "SELECT body, invalid_at, superseded_by FROM memories WHERE kind = 'fact' ORDER BY id"
-    ).fetchall()
-    assert len(rows) == 2
-    assert rows[0]["invalid_at"] is not None and rows[0]["superseded_by"] == 2
-    assert rows[1]["invalid_at"] is None
-    # Verdicts come with the work-log call: one model call after each extraction, no separate judge call.
-    purposes = [r[0] for r in conn.execute("SELECT purpose FROM observe_calls WHERE ok = 1 ORDER BY id")]
-    assert purposes == ["extract", "summary", "extract", "summary"]
-    conn.close()
-
-
 def test_raw_stage_when_no_provider(observe_config: Config, project: Path) -> None:
     observe_config.observe.providers = ["copilot-that-does-not-exist"]
     _turn(observe_config, project, "s1", "Wir nutzen pnpm workspaces.", "pnpm-workspace.yaml angelegt.")

@@ -114,8 +114,6 @@ class Observe:
     bundle_turns: int = 5
     bundle_tokens: int = 6_000
     tool_output_chars: int = 800
-    contradiction_min_score: float = 0.4  # B.16: mem0 scores shrink in small indexes; the judge filters
-    contradiction_max_pairs: int = 15
     pause_minutes: int = 60
 
     def stage_for(self, harness: str) -> tuple[str, str] | None:

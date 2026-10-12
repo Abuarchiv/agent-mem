@@ -14,10 +14,9 @@ agent-mem observe  detached, one at a time (observe.lock), low priority, exits a
                    lease turns → bundle (≤ 5 turns, ≤ 6000 tokens, tool output ≤ 800 chars)
                    → mem0.add through the harness CLI of the turn's vendor
                    → mirror facts into SQLite (dedupe_key = mem0:<id>)
-                   → contradiction check: similar old facts → one model verdict per bundle
-                   → work log: type and title per turn, running session summary (one call per bundle)
+                   → work log: type and title per turn, running session summary, lessons with an evidence turn
+                     (one call per bundle)
                    → once a day per project: review of all facts, duplicates and outdated ones retired
-                     (KEEP | SUPERSEDE | DUPLICATE) → store.supersede + forget in Qdrant
                    no stage available → raw summary (kind = summary, trust = raw)
 
 agent-mem index    detached, one at a time: spool replay → stale turns → embeddings
@@ -48,7 +47,7 @@ src/agent_mem/
              the hook path: payload in, SQLite write, context out; standard library only
   memory/    store, search, semantic, learn, consolidate, views, indexer
              memories, retrieval, embeddings, learning, background indexer
-  observe/   queue, bundle, providers, mem0_adapter, contradiction, worker, coding_instructions.md
+  observe/   queue, bundle, providers, mem0_adapter, summary, review, worker, coding_instructions.md
              the background fact worker; the only place that imports mem0 and qdrant
   mcp/       server: the stdio MCP server used by the plugins
   cli/       argument parsing, commands, install (setup --write, uninstall), health (status, doctor)
@@ -74,7 +73,8 @@ Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `
 | `observe/bundle.py` | Turns to model input: prompt, answer, tool names/commands/files/errors, subagent answers, bounded; no `tool_external` |
 | `observe/providers.py` | Stages `claude`, `codex`, `copilot`, `ollama`, `fake`; quota and login detection; vendor-faithful chain |
 | `observe/mem0_adapter.py` | The only import point of mem0: `extract`, `add_raw`, `search`, `forget`, `reindex` |
-| `observe/contradiction.py` | Candidate pairs, one judge call, verdicts applied in SQLite and Qdrant |
+| `observe/summary.py` | Work log per bundle: turn titles and types, session summary, lessons with evidence |
+| `observe/review.py` | Daily per project: duplicates and outdated facts and lessons retired with evidence |
 | `observe/worker.py` | The loop, stats, `observe_calls`, forget propagation, reindex on embedder change |
 | `cli/install.py` | `setup --write` and `uninstall`: hook files with the absolute binary path, MCP entries, detection |
 | `cli/health.py` | `status`, `doctor` (observer queue, providers, index size, hook binary paths) |

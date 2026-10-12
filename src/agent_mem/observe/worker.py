@@ -24,7 +24,7 @@ from agent_mem.core import db, logutil, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store
 from agent_mem.observe import bundle as bundling
-from agent_mem.observe import contradiction, providers, queue, review, summary
+from agent_mem.observe import providers, queue, review, summary
 from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 POLL_SECONDS = 2.0
@@ -135,7 +135,7 @@ class Worker:
             "facts": 0,
             "raw": 0,
             "failed": 0,
-            "superseded": 0,
+            "lessons": 0,
             "forgotten": 0,
             "titled": 0,
             "reviewed": 0,
@@ -204,31 +204,22 @@ class Worker:
             _record_call(self.conn, name, "extract", time.perf_counter() - started, True, b.chars, b.turn_ids, None)
             mirror(self.conn, self.config, b, facts)
             self.stats["facts"] += len(facts)
-            self._after_facts(b, facts, llm, name, namespace)
+            self._work_log(b, llm, name)
             return name
         if last_error:
             raise providers.ProviderError(last_error)
         return "raw"
 
-    def _after_facts(self, b: bundling.Bundle, facts: list[Fact], llm: Any, provider: str, namespace: str) -> None:
-        """One model call for the work log and the contradiction check (two calls before: about 7 s and one CLI start
-        saved per bundle). Facts are stored already; a failure here loses none, stale ones wait for the next bundle."""
-        pairs = (
-            contradiction.candidates(
-                self.adapter,
-                facts,
-                namespace,
-                min_score=self.config.observe.contradiction_min_score,
-                max_pairs=self.config.observe.contradiction_max_pairs,
-            )
-            if facts
-            else []
-        )
+    def _work_log(self, b: bundling.Bundle, llm: Any, provider: str) -> None:
+        """Titles, session summary and lessons in one call. Facts are stored already; a failure here loses none.
+
+        There is no per-bundle contradiction check: both an old and a newer fact stay, with dates, and the agent reads
+        them oldest first ("if entries disagree the newer one holds"). On LongMemEval-S every knowledge-update
+        question had both versions in the top 5 (All@5 1.0, n = 72), and mem0 2.x dropped its UPDATE/DELETE phase
+        for the same reason. The daily review (``observe/review.py``) retires duplicates and replaced facts."""
         started = time.perf_counter()
         try:
-            titled, text, chars = summary.summarize(
-                self.conn, llm, b.session_id, b.turn_ids, contradiction.section(pairs) if pairs else ""
-            )
+            titled, learned, chars = summary.summarize(self.conn, llm, b.session_id, b.turn_ids)
         except Exception as error:
             _record_call(
                 self.conn,
@@ -243,14 +234,7 @@ class Worker:
             return
         _record_call(self.conn, provider, "summary", time.perf_counter() - started, True, chars, b.turn_ids, None)
         self.stats["titled"] += titled
-        if not pairs:
-            return
-        try:
-            counts = contradiction.apply(self.conn, self.adapter, contradiction.parse(text, pairs))
-        except Exception as error:  # facts are mirrored already; a broken verdict must not lose the bundle
-            logutil.write(self.config.log_dir, "observe", error=f"apply: {type(error).__name__}: {error}"[:200])
-            return
-        self.stats["superseded"] += counts["SUPERSEDE"]
+        self.stats["lessons"] += learned
 
     # --- loop ----------------------------------------------------------------------------------
     def drain_forget(self) -> None:

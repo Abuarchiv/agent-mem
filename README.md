@@ -22,7 +22,7 @@ Three sizes:
 | --- | --- | --- |
 | `agent-mem` | about 10 MB | capture, full-text search, context injection, MCP server, raw turn summaries |
 | `agent-mem[semantic]` | plus 220 MB model | vector search (`paraphrase-multilingual-MiniLM-L12-v2`, ONNX, no PyTorch) |
-| `agent-mem[semantic,observer]` | plus about 400 MB | background facts, contradiction handling, deduplication (mem0, Qdrant local mode, spaCy) |
+| `agent-mem[semantic,observer]` | plus about 400 MB | background facts, work log, lessons, daily review of duplicates and outdated facts (mem0, Qdrant local mode, spaCy) |
 
 Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data).
 
@@ -34,8 +34,8 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 | You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). The terminal stays quiet. |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
-| Turn ends | The turn is stored. A detached worker extracts facts from it in the background, gives the turn a type and a title, updates the session summary (learned, done, next steps) and exits when the queue is empty. |
-| Once a day | The worker reads all facts of a project and retires duplicates and facts that a newer one replaced. Your own notes are never touched. |
+| Turn ends | The turn is stored. A detached worker extracts facts from it in the background, gives the turn a type and a title, updates the session summary (learned, done, next steps), writes a lesson when the turn shows a mistake and its fix or a correction of yours, and exits when the queue is empty. |
+| Once a day | The worker reads all facts and lessons of a project and retires duplicates and facts that a newer one replaced. Your own notes are never touched. A newer fact and an older one it contradicts are both shown with dates until then; the agent reads the newer one as current. |
 | Context compaction | Session goal, decisions and open problems are re-injected (Claude Code, Codex) or added to the compaction prompt (OpenCode). Claude Code shows the panel again. |
 | Session ends | Claude Code shows what was saved: turns, files, errors. |
 | Something breaks | Claude Code shows it in the terminal right away (at most every ten minutes per failure) with the command that helps, usually `agent-mem doctor`. |

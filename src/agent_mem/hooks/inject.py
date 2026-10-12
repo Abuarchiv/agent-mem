@@ -223,14 +223,15 @@ def _open_errors(
 
 
 def _memory_lines(
-    conn: sqlite3.Connection, project_id: str, harness: str, limit: int = 5
+    conn: sqlite3.Connection, project_id: str, harness: str, limit: int = 5, kinds: tuple[str, ...] = ()
 ) -> list[tuple[str, tuple[str, int]]]:
+    kinds = kinds or ("decision", "dead_end", "preference", "correction", "summary", "native_note", "fact")
+    marks = ",".join("?" for _ in kinds)
     rows = conn.execute(
         "SELECT id, kind, title, created_at, importance, origin FROM memories "
-        "WHERE (project_id = ? OR project_id IS NULL) AND invalid_at IS NULL "
-        "AND kind IN ('decision', 'dead_end', 'preference', 'correction', 'lesson', 'summary', 'native_note', 'fact') "
+        f"WHERE (project_id = ? OR project_id IS NULL) AND invalid_at IS NULL AND kind IN ({marks}) "
         "ORDER BY created_at DESC LIMIT 200",
-        (project_id,),
+        (project_id, *kinds),
     ).fetchall()
     rows = [r for r in rows if not (harness == "claude" and r["origin"] == "claude-auto-memory")]
     owners = [("m", int(r["id"])) for r in rows]
@@ -267,6 +268,8 @@ def session_start(
         lines.append((profile, None))
     memories = _memory_lines(conn, project_id, harness)
     lines.extend(memories)
+    # Lessons have their own slots: rules for next time, ranked by use like the rest (``observe/summary.py``).
+    lines.extend(_memory_lines(conn, project_id, harness, limit=3, kinds=("lesson",)))
     lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
     lines.extend(_last_session_lines(conn, project_id, session_id))

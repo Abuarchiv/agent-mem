@@ -276,17 +276,27 @@ def test_briefing_pulls_in_memories_about_the_open_next_steps(driver: Driver, co
     assert f"[M{target} · " in block.text and "· fact] The import validation" in block.text
 
 
-def test_contradiction_pairs_ride_along_in_the_work_log_call(driver: Driver, conn):
-    from agent_mem.observe import contradiction
-    from agent_mem.observe.mem0_adapter import Fact
+def test_lessons_need_evidence_and_reach_the_next_briefing(driver: Driver, conn, config: Config):
+    session_id, (first, second) = _session(driver, conn)
+    lesson = "When pytest fails with IndexError on empty invoices, guard the parser before indexing, because imports send empty rows."
+    llm = Answer(
+        {
+            "turns": [{"id": first, "type": "bugfix", "title": "Parser fixed"}],
+            "lessons": [
+                {"turn": first, "text": lesson},
+                {"turn": 999, "text": "When anything happens, do something useful, because evidence is missing."},
+                {"turn": second, "text": "short"},
+            ],
+        }
+    )
+    assert summary.summarize(conn, llm, session_id, [first, second])[1] == 1
+    assert "errors: FAILED test_empty - IndexError" in llm.prompts[0]
+    row = conn.execute("SELECT kind, trust, turn_id, body FROM memories WHERE kind = 'lesson'").fetchone()
+    assert (row["kind"], row["trust"], row["turn_id"], row["body"]) == ("lesson", "observer", first, lesson)
+    assert summary.summarize(conn, llm, session_id, [first, second])[1] == 0  # the same lesson twice: kept once
 
-    session_id, turn_ids = _session(driver, conn)
-    pair = contradiction.Pair(
-        1, Fact(id="new", text="Tests run with nox"), Fact(id="old", text="Tests run with pytest")
-    )
-    llm = Answer({"turns": [], "verdicts": [{"pair": 1, "verdict": "SUPERSEDE"}]})
-    _, text, chars = summary.summarize(conn, llm, session_id, turn_ids, contradiction.section([pair]))
-    assert "1. NEW: Tests run with nox\n   OLD: Tests run with pytest" in llm.prompts[0] and chars == len(
-        llm.prompts[0]
-    )
-    assert [v.verdict for v in contradiction.parse(text, [pair])] == ["SUPERSEDE"]
+    project_id = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()[0]
+    for n in range(6):
+        _memory(conn, project_id, f"Unrelated preference {n} about colors")
+    block = inject.session_start(conn, config, project_id, "claude:s9", "claude")
+    assert block is not None and "· lesson] When pytest fails with IndexError" in block.text
