@@ -120,3 +120,25 @@ def test_retention_bounds_exposures_call_log_and_quarantine(conn, config: Config
     kinds = sorted(r[0] for r in conn.execute("SELECT kind FROM accesses WHERE ts IN (?, ?)", (old, new)))
     assert kinds == ["created", "injected", "used"]  # the old injection went, use and creation stay
     assert len(list(config.quarantine_dir.glob("*.json"))) == 1
+
+
+def test_any_new_dead_end_on_a_file_reopens_the_gate(conn, config: Config, driver: Driver):
+    driver.prompt("s1", "Try the new cache")
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "The cache broke the build, rolled back by hand")
+    indexer.run(config, allow_download=False)
+    guards = config.data_dir / paths.GUARDS
+    assert guards.exists()
+    turn_id = conn.execute("SELECT id FROM turns").fetchone()[0]
+    # As the observer and mem_remember write it: no revert command, linked to the turn's files.
+    store.add_memory(
+        conn,
+        project_id=None,
+        kind="dead_end",
+        title="The cache in app.py breaks the build",
+        body="x",
+        source="agent",
+        trust="observer",
+        turn_id=turn_id,
+    )
+    assert not guards.exists()

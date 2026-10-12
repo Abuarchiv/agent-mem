@@ -159,6 +159,10 @@ def add_memory(
     if ids:
         link(conn, "m", memory_id, ids)
     learn.record_access(conn, [("m", memory_id)], "created", ts=now)
+    if kind == "dead_end" and ids:
+        # Every writer (hook, observer, mem_remember) comes through here: the pre-tool gate must look again.
+        with contextlib.suppress(OSError):
+            (paths.default_data_dir() / paths.GUARDS).unlink()
     return memory_id
 
 
