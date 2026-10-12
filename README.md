@@ -31,7 +31,7 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 | Moment | What happens |
 | --- | --- |
 | Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, the last session, oldest first so an update reads as one. Claude Code shows one line in your terminal: `agent-mem: 5 items injected (~310 tokens)`. |
-| You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). |
+| You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). Claude Code shows which ones: `agent-mem: 2 items injected (M3, T7; ~80 tokens)`. |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
 | Turn ends | The turn is stored. A detached worker extracts facts from it in the background and exits when the queue is empty. |

@@ -11,6 +11,7 @@ import pytest
 
 from agent_mem.core import db, spool
 from agent_mem.core.config import Config
+from agent_mem.core.events import Event
 from agent_mem.hooks import capture, hook
 from agent_mem.memory import indexer
 
@@ -51,6 +52,16 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "compact"}
     data = json.loads(hook.run("claude", None, json.dumps(start), config))
     assert data["systemMessage"].startswith("agent-mem: ") and "tokens" in data["systemMessage"]
+
+
+def test_prompt_injection_shows_terminal_line_with_ids():
+    event = Event(harness="claude", kind="prompt", session_id="s", ts="t", raw_kind="UserPromptSubmit")
+    context = (
+        "<agent-mem>\nMemory:\n- [M3 · 2026-10-12 · fact] uses uv\n- [T7 · 2026-10-11 · turn] parser done\n</agent-mem>"
+    )
+    out = hook.render("claude", event, capture.Response(context=context))
+    assert out["systemMessage"].startswith("agent-mem: 2 items injected (M3, T7; ~")
+    assert "systemMessage" not in hook.render("codex", event, capture.Response(context=context))
 
 
 def test_invalid_payload_is_quarantined_and_silent(config: Config):

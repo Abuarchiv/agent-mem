@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -48,10 +49,14 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
             out: dict[str, Any] = {
                 "hookSpecificOutput": {"hookEventName": event.raw_kind, "additionalContext": response.context}
             }
-            if harness == "claude" and event.kind == "session_start":
+            if harness == "claude" and event.kind in {"session_start", "prompt"}:
                 # One line in the user's terminal; the context itself goes only to the model.
-                items = sum(1 for line in response.context.splitlines() if line.startswith("- "))
-                out["systemMessage"] = f"agent-mem: {items} items injected (~{inject.tokens(response.context)} tokens)"
+                lines = [line for line in response.context.splitlines() if line.startswith("- ")]
+                ids = [m.group(1) for line in lines if (m := re.match(r"- \[([A-Z]\d+) ", line))]
+                cited = f"{', '.join(ids)}; " if ids else ""
+                out["systemMessage"] = (
+                    f"agent-mem: {len(lines)} items injected ({cited}~{inject.tokens(response.context)} tokens)"
+                )
             return out
         return None
     if harness == "copilot":
