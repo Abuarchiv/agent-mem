@@ -158,3 +158,28 @@ def test_migration_004_keeps_the_call_log_and_allows_the_new_purposes(config: Co
         "review",
     ]
     conn.close()
+
+
+def test_a_bundle_never_mixes_projects(conn, config: Config, tmp_path):
+    import subprocess
+
+    from agent_mem.observe import bundle
+    from tests.conftest import Driver as Fresh
+
+    parent = tmp_path / "Lernen"
+    nested = parent / "agent-mem"
+    nested.mkdir(parents=True)
+    for root in (parent, nested):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (nested / "app.py").write_text("x = 1\n")
+    driver = Fresh(conn, config, parent)
+    driver.prompt("s1", "What is in this folder?")
+    driver.stop("s1", "Several projects.")
+    driver.prompt("s1", "Fix agent-mem")
+    driver.cwd = str(nested)
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "Fixed.")
+    turn_ids = [int(r[0]) for r in conn.execute("SELECT id FROM turns ORDER BY id")]
+    bundles = bundle.build(conn, config, turn_ids)
+    names = [conn.execute("SELECT name FROM projects WHERE id = ?", (b.project_id,)).fetchone()[0] for b in bundles]
+    assert names == ["Lernen", "agent-mem"] and [len(b.turn_ids) for b in bundles] == [1, 1]

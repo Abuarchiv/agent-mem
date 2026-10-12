@@ -100,7 +100,12 @@ def build(conn: sqlite3.Connection, config: Config, turn_ids: list[int]) -> list
                     trimmed.append({"role": message["role"], "content": text})
             messages = trimmed
             size = sum(len(m["content"]) for m in messages)
-        if current is not None and (current.chars + size > cap or current.session_id != row["session_id"]):
+        # One bundle, one project: facts are stored under the bundle's project (a session can move into a nested one).
+        if current is not None and (
+            current.chars + size > cap
+            or current.session_id != row["session_id"]
+            or current.project_id != row["project_id"]
+        ):
             bundles.append(current)
             current = None
         if current is None:
