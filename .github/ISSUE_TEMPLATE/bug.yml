@@ -1,0 +1,36 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `agent-mem doctor --json`
+      description: Paste it as is. It contains no prompt text, only component states and paths.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Last 50 lines of the log
+      description: "`tail -n 50 \"$(agent-mem paths | python -c 'import json,sys;print(json.load(sys.stdin)[\"logs\"])')\"/hook.log`. Logs never contain prompt contents."
+      render: text
+  - type: input
+    id: harness
+    attributes:
+      label: Harness and version
+      placeholder: Claude Code 2.x / Codex CLI 0.x / Copilot CLI 1.x / OpenCode 1.x
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and Python
+      placeholder: macOS 15 arm64, Python 3.13 (uv)

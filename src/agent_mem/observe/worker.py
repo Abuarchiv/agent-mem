@@ -126,6 +126,12 @@ class Worker:
     # --- one bundle --------------------------------------------------------------------------
     def process(self, b: bundling.Bundle) -> str:
         chain = providers.chain(self.config, b.harness, self.conn)
+        if chain:
+            try:
+                self.adapter  # noqa: B018  (builds mem0 once; without an embedder there is only the raw stage)
+            except RuntimeError as error:
+                logutil.write(self.config.log_dir, "observe", error=f"adapter: {error}"[:200])
+                chain = []
         if _calls_today(self.conn) >= self.config.observe.daily_limit:
             chain = [name for name in chain if name == "ollama"]
         last_error = None
@@ -261,7 +267,19 @@ class Worker:
                 queue.finish(self.conn, b.turn_ids, "done", provider)
         return True
 
+    def _reindex_if_embedder_changed(self) -> None:
+        """The mem0 index holds vectors of one embedder; after an upgrade it is rebuilt from SQLite (I7)."""
+        model = self.config.semantic.model
+        previous = db.get_meta(self.conn, "observe.embedder")
+        if previous == model:
+            return
+        if previous is not None and (self.config.mem0_dir / "qdrant").exists():
+            self.stats["reindexed"] = _reindex(self.config, self.conn)
+        with db.transaction(self.conn):
+            db.set_meta(self.conn, "observe.embedder", model)
+
     def run(self, *, drain: bool = True) -> dict[str, int]:
+        self._reindex_if_embedder_changed()
         self.drain_forget()
         idle_since = time.monotonic()
         while True:
@@ -306,6 +324,32 @@ def run(
         lock.release()
 
 
+def _reindex(config: Config, conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        "SELECT id, project_id, body, turn_id, origin FROM memories "
+        "WHERE kind = 'fact' AND invalid_at IS NULL AND dedupe_key LIKE 'mem0:%' ORDER BY id"
+    ).fetchall()
+    adapter = Mem0Adapter(config, llm="fake")  # no extraction; add_raw only embeds
+    try:
+        adapter.reindex([])  # wipe
+        count = 0
+        for row in rows:
+            facts = adapter.add_raw(
+                [str(row["body"])],
+                namespace_for(row["project_id"]),
+                {"turn_id": row["turn_id"], "harness": row["origin"], "memory_id": int(row["id"])},
+            )
+            if facts:
+                conn.execute("UPDATE memories SET dedupe_key = ? WHERE id = ?", (f"mem0:{facts[0].id}", row["id"]))
+                count += 1
+        conn.execute("DELETE FROM observe_forget")
+    finally:
+        adapter.close()
+    with db.transaction(conn):
+        db.set_meta(conn, "observe.embedder", config.semantic.model)
+    return count
+
+
 def reindex(config: Config) -> dict[str, int]:
     """Rebuild Qdrant, the entity store and history.db from the valid facts in SQLite (docs/PLAN.md §5).
 
@@ -315,27 +359,11 @@ def reindex(config: Config) -> dict[str, int]:
     lock.acquire(timeout=30)
     conn = db.connect(config)
     try:
-        rows = conn.execute(
-            "SELECT id, project_id, body, turn_id, origin FROM memories "
-            "WHERE kind = 'fact' AND invalid_at IS NULL AND dedupe_key LIKE 'mem0:%' ORDER BY id"
-        ).fetchall()
-        adapter = Mem0Adapter(config, llm="fake")  # no extraction; add_raw only embeds
-        try:
-            adapter.reindex([])  # wipe
-            count = 0
-            for row in rows:
-                facts = adapter.add_raw(
-                    [str(row["body"])],
-                    namespace_for(row["project_id"]),
-                    {"turn_id": row["turn_id"], "harness": row["origin"], "memory_id": int(row["id"])},
-                )
-                if facts:
-                    conn.execute("UPDATE memories SET dedupe_key = ? WHERE id = ?", (f"mem0:{facts[0].id}", row["id"]))
-                    count += 1
-            conn.execute("DELETE FROM observe_forget")
-        finally:
-            adapter.close()
-        return {"facts": count, "skipped": len(rows) - count}
+        total = int(
+            conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0]
+        )
+        count = _reindex(config, conn)
+        return {"facts": count, "skipped": total - count}
     finally:
         conn.close()
         lock.release()

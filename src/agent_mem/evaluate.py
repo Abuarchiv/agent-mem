@@ -121,9 +121,10 @@ class Mem0Backend:
     ) -> None:
         from .observe.mem0_adapter import Mem0Adapter
 
+        self.raw = llm == "none"  # E3: no extraction, mem0 hybrid search over the raw turns
         self.adapter = Mem0Adapter(
             Config(data_dir=root / "data"),
-            llm=llm,
+            llm="fake" if self.raw else llm,
             llm_model=llm_model,
             custom_instructions=custom_instructions,
             embedder=embedder,
@@ -141,7 +142,16 @@ class Mem0Backend:
             if not messages:
                 continue
             started = time.perf_counter()
-            self.adapter.extract(messages, self.NAMESPACE, metadata={"session_id": session_id})
+            if self.raw:
+                texts: list[str] = []  # one chunk per turn, like the sqlite backend
+                for m in messages:
+                    if m["role"] == "user" or not texts:
+                        texts.append(m["content"])
+                    else:
+                        texts[-1] += "\n" + m["content"]
+                self.adapter.add_raw(texts, self.NAMESPACE, metadata={"session_id": session_id})
+            else:
+                self.adapter.extract(messages, self.NAMESPACE, metadata={"session_id": session_id})
             self.add_seconds.append(time.perf_counter() - started)
 
     def ranked(self, question: str, k: int) -> list[tuple[str, str, float]]:
@@ -161,7 +171,7 @@ class Runner:
         backend: str = "sqlite",
         *,
         semantic_search: bool = True,
-        llm: str = "ollama",
+        llm: str = "none",
         llm_model: str | None = None,
         custom_instructions: str | None = None,
         min_score: float = 0.0,

@@ -130,6 +130,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         from . import semantic
 
         embedder = semantic.load_embedder(config, allow_download=allow_download)
+        previous = db.get_meta(conn, "semantic")
         with db.transaction(conn):
             db.set_meta(conn, "semantic", embedder.model if embedder else "unavailable")
             if embedder is not None:
@@ -138,7 +139,9 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
                 # The model is present but failed to load: a real problem worth reporting.
                 db.record_health(conn, "semantic", "embedding model failed to load (lexical search only)")
         if embedder is not None:
-            stats["embedded"] = semantic.embed_pending(conn, embedder)
+            # A new embedder (upgrade, I7) re-embeds everything in one run; vectors are upserted per owner.
+            limit = 100_000 if previous not in (None, "unavailable", embedder.model) else 512
+            stats["embedded"] = semantic.embed_pending(conn, embedder, limit=limit)
 
     stats["federated"] = federate.run(conn, config)
 

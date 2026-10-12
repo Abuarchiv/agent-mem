@@ -116,3 +116,22 @@ def test_spawn_observer_is_throttled_and_respects_no_spawn(config: Config, monke
     monkeypatch.setenv("AGENT_MEM_NO_SPAWN", "1")
     (config.data_dir / ".observer-spawned").unlink()
     assert hook.spawn_observer(config) is False
+
+
+def test_worker_without_embedder_stores_raw(config: Config, monkeypatch) -> None:
+    """No semantic extra, no mem0 index: the stage chain collapses to raw instead of failing forever."""
+    from agent_mem.observe import bundle, providers, worker
+
+    monkeypatch.setattr(providers, "available", lambda name: True)
+    conn = db.connect(config)
+    w = worker.Worker(config, conn)
+
+    def boom(self):
+        raise RuntimeError("no embedder available")
+
+    monkeypatch.setattr(worker.Worker, "adapter", property(boom))
+    b = bundle.Bundle(
+        turn_ids=[1], session_id="s", project_id=None, harness="claude", messages=[{"role": "user", "content": "x"}]
+    )
+    assert w.process(b) == "raw"
+    conn.close()

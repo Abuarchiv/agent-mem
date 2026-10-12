@@ -7,7 +7,7 @@
     {
       "name": "agent-mem",
       "source": "./plugins/claude",
-      "description": "Local, self-learning memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No LLM calls.",
+      "description": "Shared, local memory for Claude Code, Codex, Copilot CLI and OpenCode. Facts are extracted in the background through the harness you already use (no API key); no server, no telemetry.",
       "version": "1.0.0"
     }
   ]

@@ -34,6 +34,7 @@ def dispatch(ns: argparse.Namespace, config: Config) -> int:
         "lessons": cmd_lessons,
         "models": cmd_models,
         "setup": cmd_setup,
+        "uninstall": cmd_uninstall,
         "view": cmd_view,
     }[ns.command]
     return handler(ns, config)
@@ -468,16 +469,67 @@ SETUP = {
 }
 
 
-def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
-    folder = plugins_dir()
-    print(SETUP[ns.harness].format(plugins=folder))
-    if ns.harness == "opencode" and ns.write:
-        import shutil
+def _detect_table(found: dict[str, Any]) -> str:
+    rows = [f"  agent-mem binary: {found['binary']}"]
+    for name, path in found["harnesses"].items():
+        rows.append(f"  harness {name:9s} {'found ' + path if path else 'not on PATH'}")
+    for name, path in found["providers"].items():
+        if name == "ollama":
+            state = "found (opt-in: add 'ollama' to observe.providers)" if path else "not installed (optional)"
+        else:
+            state = "found, uses your existing login" if path else "not on PATH"
+        rows.append(f"  provider {name:8s} {state}")
+    extras = found["extras"]
+    rows.append(f"  extra semantic: {'installed' if extras['semantic'] else 'missing (lexical search only)'}")
+    rows.append(f"  extra observer: {'installed' if extras['observer'] else 'missing (turns are kept raw, no facts)'}")
+    return "\n".join(rows)
 
-        target_dir = Path.home() / ".config" / "opencode" / "plugins"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / "agent-mem.ts"
-        shutil.copyfile(folder / "opencode" / "agent-mem.ts", target)
-        print(f"\nPlugin written to {target}.")
-    print("\nThen run `agent-mem doctor` after your first session.")
+
+def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
+    from . import install
+
+    folder = plugins_dir()
+    found = install.detect()
+    if not ns.write:
+        print(SETUP[ns.harness].format(plugins=folder))
+        print("\nOr let agent-mem write the files with absolute paths: `agent-mem setup " + ns.harness + " --write`.")
+        print("\nDetected:\n" + _detect_table(found))
+        return 0
+    touched = install.write(ns.harness, folder)
+    print(f"{ns.harness}: hooks and MCP server registered with {found['binary']}.")
+    for path in touched:
+        print(f"  wrote {path}")
+    if ns.harness == "codex":
+        print("  Codex asks you to trust the hooks once: start codex and run /hooks.")
+    if found["extras"]["semantic"] and not ns.no_models:
+        from . import semantic
+
+        embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
+        print(
+            f"  embedding model {embedder.model} ready." if embedder else f"  embedding model not available: {reason}"
+        )
+    if found["extras"]["observer"]:
+        stage = {"claude": "claude", "codex": "codex", "copilot": "copilot"}.get(ns.harness)
+        if stage and found["providers"].get(stage):
+            print(f"  facts: extracted in the background through `{stage}` under your existing login (no API key).")
+        elif stage:
+            print(f"  facts: `{stage}` is not on PATH; turns of this harness are kept raw until it is.")
+        else:
+            print('  facts: OpenCode turns are kept raw unless you add "ollama" to observe.providers.')
+    print("\nDetected:\n" + _detect_table(found))
+    print("\nStart a session, then run `agent-mem doctor`.")
+    return 0
+
+
+def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
+    from . import install
+
+    touched = install.remove(ns.harness)
+    if touched:
+        print(f"{ns.harness}: removed agent-mem hooks and MCP entries from:")
+        for path in touched:
+            print(f"  {path}")
+    else:
+        print(f"{ns.harness}: nothing written by `setup --write` was found.")
+    print(f"Data stays in {config.data_dir}; `agent-mem purge --all` deletes it.")
     return 0

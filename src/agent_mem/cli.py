@@ -100,7 +100,10 @@ def _main(args: list[str]) -> int:
     p.add_argument("--subset", type=Path, help="JSON with question ids (tests/fixtures/longmemeval_subset.json)")
     p.add_argument("--fixture", type=Path, help="run tests/fixtures/memory_cases.json instead of a dataset")
     p.add_argument(
-        "--llm", choices=("ollama", "claude", "codex", "copilot"), default="ollama", help="mem0 backend only"
+        "--llm",
+        choices=("none", "ollama", "claude", "codex", "copilot"),
+        default="none",
+        help="mem0 backend only; none = store sessions as-is (infer=False), retrieval-only comparison (E3)",
     )
     p.add_argument("--llm-model")
     p.add_argument("--custom-prompt", type=Path, help="file with mem0 custom_instructions (E8)")
@@ -108,11 +111,16 @@ def _main(args: list[str]) -> int:
     p.add_argument("--embedder", help="fastembed model name (E2), default from config")
     p.add_argument("--vector-floor", type=float, help="override retrieval.min_vector_score (sqlite backend)")
     p.add_argument("--progress", type=Path, help="JSONL with one line per finished question; resumes on rerun")
-    p = sub.add_parser("setup", help="show how to connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
+    p = sub.add_parser("setup", help="connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p.add_argument(
-        "--write", action="store_true", help="OpenCode only: copy the plugin into ~/.config/opencode/plugins/"
+        "--write",
+        action="store_true",
+        help="register hooks and the MCP server with the absolute path of this binary (otherwise print the steps)",
     )
+    p.add_argument("--no-models", action="store_true", help="with --write: skip the embedding model download")
+    p = sub.add_parser("uninstall", help="remove hooks and MCP entries written by `setup --write`; data stays")
+    p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
     p = sub.add_parser("view", help="write a read-only HTML page of your memory and open it (no server)")
     p.add_argument("--project", help="only this project directory (default: all projects)")
     p.add_argument("--output", type=Path, help="write the page here instead of the private data directory")

@@ -54,8 +54,9 @@ class Retrieval:
     max_per_session: int = 3
     rrf_k: int = 60
     current_project_boost: float = 1.2
-    # Cosine similarity floor for vector candidates (E5 similarities are high; tuned for multilingual-e5-small).
-    min_vector_score: float = 0.78
+    # Cosine similarity floor for vector candidates, calibrated per embedder (docs/PLAN.md B.23):
+    # MiniLM-L12-v2 0.3 (fixture abstention 0.6, LongMemEval R@5 0.925); multilingual-e5-small needs 0.78.
+    min_vector_score: float = 0.3
 
 
 @dataclass
@@ -96,7 +97,8 @@ class Summarize:
 @dataclass
 class Semantic:
     enabled: bool = True
-    model: str = "intfloat/multilingual-e5-small"
+    # E2 (docs/PLAN.md B.19): same Recall@5 as embeddinggemma at a fifth of the size; e5-small needs a custom registration.
+    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     batch_size: int = 32
 
 

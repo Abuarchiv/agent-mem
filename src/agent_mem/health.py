@@ -229,13 +229,96 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
                 warn_only=True,
             )
         )
+        checks.extend(_observer_checks(conn, config))
     finally:
         conn.close()
+    checks.extend(_hook_checks())
     if fix:
         from . import indexer
 
         with contextlib.suppress(Exception):
             indexer.run(config, allow_download=False)
+    return checks
+
+
+def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
+    """docs/PLAN.md §14 I5: observer extra, queue, last worker run, providers, index size."""
+    from . import install
+
+    checks: list[Check] = []
+    if not install.extras()["observer"]:
+        checks.append(
+            Check(
+                "observer",
+                False,
+                "extra not installed; turns are stored raw, no facts",
+                "Install `agent-mem[observer]` for background fact extraction.",
+                warn_only=True,
+            )
+        )
+        return checks
+    if not config.observe.enabled:
+        checks.append(Check("observer", True, "disabled in config.json"))
+        return checks
+    states = dict(conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall())
+    pending, failed = int(states.get("pending", 0)), int(states.get("failed", 0))
+    last = conn.execute("SELECT ts, provider, ok FROM observe_calls ORDER BY id DESC LIMIT 1").fetchone()
+    detail = f"queue pending {pending}, done {states.get('done', 0)}, raw {states.get('raw', 0)}, failed {failed}"
+    detail += f"; last call {last['ts']} via {last['provider']}" if last else "; no model call yet"
+    checks.append(
+        Check(
+            "observer queue",
+            failed == 0 and pending < 200,
+            detail,
+            "Run `agent-mem observe --status`, then `agent-mem observe --retry-failed`.",
+            warn_only=True,
+        )
+    )
+    stages = [n for n in config.observe.providers if shutil.which(n)]
+    checks.append(
+        Check(
+            "observer providers",
+            bool(stages),
+            ", ".join(stages) if stages else f"none of {config.observe.providers} on PATH",
+            'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.',
+            warn_only=True,
+        )
+    )
+    qdrant = config.mem0_dir / "qdrant"
+    if qdrant.exists():
+        size_mb = sum(p.stat().st_size for p in qdrant.rglob("*") if p.is_file()) / 1_000_000
+        facts = int(
+            conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0]
+        )
+        checks.append(
+            Check(
+                "fact index",
+                facts < 50_000,
+                f"{facts} facts, qdrant {size_mb:.0f} MB (opens in under a second up to about 20k facts)",
+                "Run `agent-mem purge --before` to trim old facts.",
+                warn_only=True,
+            )
+        )
+    return checks
+
+
+def _hook_checks() -> list[Check]:
+    """docs/PLAN.md §14 I2/I5: hook commands point at an existing binary."""
+    from . import install
+
+    checks: list[Check] = []
+    for harness in install.HARNESSES:
+        for command in install.hook_commands(harness):
+            exe = command.split(" hook ", 1)[0]
+            resolved = Path(exe) if os.path.isabs(exe) else Path(shutil.which(exe) or "")
+            checks.append(
+                Check(
+                    f"{harness} hook command",
+                    resolved.exists() and resolved.is_file(),
+                    command if resolved.exists() else f"{command} (binary not found)",
+                    f"Run `agent-mem setup {harness} --write` to rewrite the hooks with the current binary path.",
+                )
+            )
     return checks
 
 

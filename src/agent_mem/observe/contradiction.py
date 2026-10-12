@@ -47,8 +47,10 @@ def candidates(
     exclude = frozenset(f.id for f in new_facts)
     pairs: list[Pair] = []
     for fact in new_facts:
-        for hit in adapter.search(fact.text, namespace, k=3, exclude=exclude):
-            if (hit.score or 0.0) >= min_score:
+        for rank, hit in enumerate(adapter.search(fact.text, namespace, k=3, exclude=exclude)):
+            # The nearest old fact is always judged: mem0 normalises scores against the result set, so in a
+            # young index the true pair can fall under any floor (B.16, B.22 x01). The judge sorts out noise.
+            if rank == 0 or (hit.score or 0.0) >= min_score:
                 pairs.append(Pair(len(pairs) + 1, fact, hit))
             if len(pairs) >= max_pairs:
                 return pairs

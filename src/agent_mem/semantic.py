@@ -1,4 +1,4 @@
-"""Heavier retrieval parts: E5 embeddings, vector search (numpy), Personalized PageRank
+"""Heavier retrieval parts: sentence embeddings (fastembed), vector search (numpy), Personalized PageRank
 and temporal query parsing (dateparser). Only used by the MCP server, the indexer and the CLI.
 """
 
@@ -34,8 +34,13 @@ CUSTOM_MODELS = {
 }
 
 
+def _prefixes(model: str) -> tuple[str, str]:
+    """E5 models were trained with ``query:``/``passage:`` prefixes; other models get none (B.19)."""
+    return ("query: ", "passage: ") if "e5" in model.lower() else ("", "")
+
+
 class FastEmbedEmbedder:
-    """multilingual-e5-small via fastembed (ONNX Runtime, no PyTorch)."""
+    """Sentence embeddings via fastembed (ONNX Runtime, no PyTorch). Default: MiniLM-L12-v2 (E2, B.19)."""
 
     def __init__(self, config: Config, *, allow_download: bool) -> None:
         from fastembed import TextEmbedding  # lazy: optional dependency
@@ -47,6 +52,7 @@ class FastEmbedEmbedder:
             kwargs["local_files_only"] = True
         self._impl = TextEmbedding(**kwargs)
         self.batch_size = config.semantic.batch_size
+        self._query_prefix, self._passage_prefix = _prefixes(self.model)
 
     def _register_if_needed(self, text_embedding: Any) -> None:
         if self.model not in CUSTOM_MODELS:
@@ -68,11 +74,11 @@ class FastEmbedEmbedder:
             )
 
     def passages(self, texts: list[str]) -> np.ndarray:
-        vectors = list(self._impl.embed([f"passage: {t}" for t in texts], batch_size=self.batch_size))
+        vectors = list(self._impl.embed([self._passage_prefix + t for t in texts], batch_size=self.batch_size))
         return _normalize(np.asarray(vectors, dtype=np.float32))
 
     def query(self, text: str) -> np.ndarray:
-        vector = next(iter(self._impl.embed([f"query: {text}"])))
+        vector = next(iter(self._impl.embed([self._query_prefix + text])))
         return _normalize(np.asarray([vector], dtype=np.float32))[0]
 
 
