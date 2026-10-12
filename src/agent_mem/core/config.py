@@ -254,13 +254,60 @@ def _read_json(path: Path, warnings: list[str]) -> dict[str, Any]:
     return value
 
 
+# A well-typed value can still break agent-mem silently: a deadline of 0 spools every event, stdin_bytes 0 records
+# nothing, backup_keep 0 deletes every backup, duplicate_min_cosine 0 retires every older fact. Range checked here.
+_BOUNDS: dict[str, tuple[float, float]] = {
+    "hook_deadline_ms": (100, 10_000),
+    "budgets.session_start": (0, 8_000),
+    "budgets.prompt": (0, 4_000),
+    "budgets.failure": (0, 2_000),
+    "budgets.warning": (0, 2_000),
+    "budgets.compact": (0, 8_000),
+    "retrieval.inject_min_score": (0, 1),
+    "retrieval.min_term_coverage": (0, 1),
+    "retrieval.max_per_session": (1, 1_000),
+    "retrieval.rrf_k": (1, 1_000),
+    "retrieval.min_vector_score": (0, 1),
+    "retention.payload_days": (1, 36_500),
+    "retention.access_days": (1, 36_500),
+    "retention.backup_keep": (1, 1_000),
+    "retention.backup_every_hours": (1, 8_760),
+    "retention.max_db_mb": (64, 1_048_576),
+    "retention.stale_turn_minutes": (1, 10_080),
+    "limits.prompt_chars": (200, 1_000_000),
+    "limits.answer_chars": (200, 1_000_000),
+    "limits.tool_output_chars": (200, 1_000_000),
+    "limits.tool_input_chars": (200, 1_000_000),
+    "limits.stdin_bytes": (65_536, 64 * 1_048_576),
+    "rules.min_corrections": (1, 100),
+    "rules.expire_days": (1, 36_500),
+    "semantic.batch_size": (1, 1_024),
+    "semantic.duplicate_min_cosine": (0.8, 1),
+    "observe.lease_seconds": (60, 86_400),
+    "observe.bundle_turns": (1, 50),
+    "observe.bundle_tokens": (500, 200_000),
+    "observe.tool_output_chars": (100, 100_000),
+    "viewer.port": (1024, 65535),
+    "viewer.refresh_seconds": (2, 3_600),
+}
+
+
+def _check_bounds(config: Config) -> None:
+    defaults = Config(data_dir=config.data_dir)
+    for path, (low, high) in _BOUNDS.items():
+        *parents, key = path.split(".")
+        target, default = config, defaults
+        for part in parents:
+            target, default = getattr(target, part), getattr(default, part)
+        if not low <= getattr(target, key) <= high:
+            config.warnings.append(f"config: '{path}' must be between {low:g} and {high:g}, default kept")
+            setattr(target, key, getattr(default, key))
+
+
 def load(data_dir: Path | None = None) -> Config:
     config = Config(data_dir=(data_dir or default_data_dir()).expanduser())
     _merge(config, _read_json(config.config_path, config.warnings), "", config.warnings)
-    if not 1024 <= config.viewer.port <= 65535:
-        config.warnings.append("config: 'viewer.port' must be between 1024 and 65535, default kept")
-        config.viewer.port = Viewer.port
-    config.viewer.refresh_seconds = max(2, config.viewer.refresh_seconds)
+    _check_bounds(config)
     return config
 
 

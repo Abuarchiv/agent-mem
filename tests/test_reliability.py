@@ -338,3 +338,22 @@ def test_the_wal_shrinks_back_after_a_vacuum(config) -> None:
     conn.execute("INSERT INTO big VALUES (1)")
     assert os.path.getsize(str(config.db_path) + "-wal") <= db.WAL_LIMIT_BYTES
     conn.close()
+
+
+def test_config_values_that_would_break_silently_fall_back_and_reach_the_terminal(tmp_path, monkeypatch) -> None:
+    import json
+
+    from agent_mem.core.config import load
+    from agent_mem.hooks import hook
+
+    settings = {"hook_deadline_ms": 0, "retention": {"backup_keep": 0}, "semantic": {"duplicate_min_cosine": 0.2}}
+    (tmp_path / "config.json").write_text(json.dumps(settings))
+    config = load(tmp_path)
+    assert config.hook_deadline_ms == 400 and config.retention.backup_keep == 7
+    assert config.semantic.duplicate_min_cosine == 0.9
+    assert config.viewer.port == 37778  # in-range values stay untouched
+    monkeypatch.setenv("AGENT_MEM_NO_SPAWN", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    start = {"hook_event_name": "SessionStart", "session_id": "s", "source": "startup", "cwd": str(tmp_path)}
+    shown = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
+    assert "'hook_deadline_ms' must be between 100 and 10000" in shown

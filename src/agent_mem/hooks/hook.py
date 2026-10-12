@@ -212,7 +212,7 @@ class _Worker(threading.Thread):
                 spawn_viewer(self.config)
                 if self.event.harness in TERMINAL:
                     session = f"{self.event.harness}:{self.event.session_id}"
-                    self.problems = problems(conn)
+                    self.problems = [*self.config.warnings[:2], *problems(conn)]
                     self.facts = inject.overview(conn, session, self.config)
                     self.recent = inject.recent_work(conn, session)
             elif self.event.kind == "session_end" and self.event.harness == "claude":
