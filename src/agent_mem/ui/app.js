@@ -56,6 +56,13 @@
     const line = String(text ?? "").split("\n").find((part) => part.trim() !== "") ?? "";
     return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
   };
+  // A background-task notice is the harness talking, not the user: show its one-line summary.
+  const request = (prompt) => {
+    const notice = /^\s*<task-notification>[\s\S]*?<summary>([\s\S]*?)<\/summary>/.exec(prompt ?? "");
+    return notice ? notice[1].trim() : String(prompt ?? "").trim();
+  };
+  // Previews read as sentences: markdown marks, table pipes and heading hashes are noise at a glance.
+  const plain = (text) => String(text ?? "").replace(/\*\*|__|^#+\s*|^\s*[-*]\s+/gm, "").replace(/\s*\|[\s|:-]*/g, " · ").replace(/\s+/g, " ").replace(/^ · | · $/g, "").trim();
   // Backtick spans in stored text (rules, memory titles) read as code; everything else stays escaped.
   const inline = (text) => h(text).replace(/`([^`]+)`/g, "<code>$1</code>");
   const tag = (text, className = "") => `<span class="tag ${className}">${h(text)}</span>`;
@@ -201,7 +208,7 @@
     return [...groups.entries()].map(([sessionId, items]) => {
       const session = data.sessions.find((item) => item.id === sessionId);
       return `<div class="session-head">${icon("session", 17)}<b>${h(harnessLabel(session?.harness))}</b>${projectTag(items[0].project_id)}${session?.branch ? tag(session.branch, "mono") : ""}<span class="muted">${h(sessionRange(session, items))}</span></div>` +
-        items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${h(firstLine(turn.prompt) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
+        items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${h(firstLine(request(turn.prompt)) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
     }).join("");
   }
 
@@ -281,7 +288,7 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
       ? empty(filtering ? "Nothing matches in this session" : "No loaded turns for this session", filtering ? "Clear the search or outcome filter." : `The page holds the latest ${num(data.limits.turns)} turns.`)
       : `<div class="feed">${feedTurns.map((turn) => {
         const actionCount = (data.actions[turn.id] ?? []).length;
-        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header><p>${h(turn.prompt || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(turn.answer)}</p>` : ""}</button></div>`;
+        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header><p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
       }).join("")}</div>`;
     return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Each turn is one request with the actions the agent took and its result, as captured by the hooks.</p></div>${outcomePills()}</div>
 <div class="timeline">
@@ -302,7 +309,7 @@ ${turnDetail(selected, session)}
 <div class="pill-group">${tag(projectName(turn.project_id))}${session ? tag(harnessLabel(session.harness)) : ""}${session?.branch ? tag(session.branch, "mono") : ""}${tag(`trust ${turn.trust}`)}</div>
 <dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still open")}</dd><dt>Importance</dt><dd>${h(Number(turn.importance).toFixed(2))}</dd></dl>
 <div class="copy-list">${copyable(`agent-mem show T${turn.id}`)}</div>
-<span class="section-label">Request</span><div class="text-box">${h(turn.prompt || "(no request text)")}</div>
+<span class="section-label">Request</span><div class="text-box">${h(request(turn.prompt) || "(no request text)")}</div>
 ${actionList}
 ${turn.answer ? `<span class="section-label">Result</span><div class="text-box">${h(turn.answer)}</div>` : ""}
 ${turn.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show T${turn.id}</code> prints more.</span></p>` : ""}

@@ -400,6 +400,15 @@ def decision_sentences(text: str) -> list[str]:
     return [s.strip()[:300] for s in sentences if _DECISION.search(s)][:3]
 
 
+_NOTICE = re.compile(r"^\s*<task-notification>.*?<summary>(.*?)</summary>", re.DOTALL)
+
+
+def request_text(prompt: str | None) -> str:
+    """The prompt as a reader sees it: a background-task notice is the harness talking, so show its summary."""
+    notice = _NOTICE.match(prompt or "")
+    return notice.group(1).strip() if notice else (prompt or "")
+
+
 def first_line(text: str, limit: int = 160) -> str:
     for line in text.splitlines():
         stripped = line.strip().lstrip("#>*- ").strip()

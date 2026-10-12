@@ -568,7 +568,9 @@ def _record_dead_end(
     if not targets:
         return
     turn = conn.execute("SELECT prompt FROM turns WHERE id = ?", (turn_id,)).fetchone()
-    context = signals.first_line(turn["prompt"], 160) if turn and turn["prompt"] else "earlier work"
+    context = (
+        signals.first_line(signals.request_text(turn["prompt"]), 160) if turn and turn["prompt"] else "earlier work"
+    )
     title = f"Changes to {', '.join(targets[:3])} were reverted (`{tool_signal.command_key}`) — context: {context}"
     ids = [store.entity_id(conn, project_id, "file", path) for path in targets[:10]]
     store.add_memory(

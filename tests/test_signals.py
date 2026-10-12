@@ -91,3 +91,13 @@ def test_decisions():
 def test_packages():
     assert signals.packages_of("npm install lodash@4 zod") == ["lodash", "zod"]
     assert signals.packages_of("pip install requests==2.31") == ["requests"]
+
+
+def test_task_notification_reads_as_its_summary():
+    notice = (
+        "<task-notification>\n<task-id>b1</task-id>\n<status>failed</status>\n"
+        '<summary>Background command "Run eval" failed with exit code 144</summary>\n</task-notification>'
+    )
+    assert signals.request_text(notice) == 'Background command "Run eval" failed with exit code 144'
+    assert signals.request_text("fix the parser") == "fix the parser"
+    assert signals.request_text(None) == ""

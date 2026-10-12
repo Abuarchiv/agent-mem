@@ -16,7 +16,7 @@ from datetime import datetime
 
 from agent_mem.core import timeutil
 from agent_mem.core.config import Config
-from agent_mem.core.signals import first_line
+from agent_mem.core.signals import first_line, request_text
 from agent_mem.memory import learn
 from agent_mem.memory.store import owner_label
 
@@ -378,7 +378,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
             hits[("t", row["id"])] = Hit(
                 owner=("t", row["id"]),
                 kind="turn",
-                title=first_line(row["prompt"] or "", 160) or first_line(row["answer"] or "", 160),
+                title=first_line(request_text(row["prompt"]), 160) or first_line(row["answer"] or "", 160),
                 text=text,
                 answer=row["answer"] or "",
                 ts=row["started_at"],

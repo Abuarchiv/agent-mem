@@ -6,7 +6,7 @@ import json
 import sqlite3
 
 from agent_mem.core import timeutil
-from agent_mem.core.signals import first_line
+from agent_mem.core.signals import first_line, request_text
 from agent_mem.memory import consolidate, learn, search
 from agent_mem.memory.store import owner_label, parse_owner
 
@@ -145,7 +145,7 @@ def timeline(conn: sqlite3.Connection, raw_id: str, before: int = 3, after: int 
     for row in rows:
         marker = "▶" if row["id"] == turn_id else " "
         lines.append(
-            f"{marker} T{row['id']} · {row['started_at'][:16]} · {row['outcome']}: {first_line(row['prompt'], 120)}"
+            f"{marker} T{row['id']} · {row['started_at'][:16]} · {row['outcome']}: {first_line(request_text(row['prompt']), 120)}"
             + (f"\n    → {first_line(row['answer'], 160)}" if row["answer"] else "")
         )
     return "\n".join(lines)

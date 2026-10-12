@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from agent_mem.core import spool, timeutil
 from agent_mem.core.config import Config
-from agent_mem.core.signals import first_line, looks_like_error
+from agent_mem.core.signals import first_line, looks_like_error, request_text
 from agent_mem.memory import learn, search
 from agent_mem.memory.store import owner_label
 
@@ -90,7 +90,7 @@ def render(lines: list[tuple[str, tuple[str, int] | None]], budget_tokens: int) 
 def hit_line(hit: search.Hit) -> str:
     day = timeutil.day(hit.ts) if hit.ts else ""
     origin = hit.harness or hit.kind
-    title = first_line(hit.title or hit.text, 140)
+    title = first_line(request_text(hit.title or hit.text), 140)
     line = f"- [{hit.label} · {day} · {origin}] {title}"
     if hit.kind == "turn" and hit.answer.strip():
         line += f" → {first_line(hit.answer, 120)}"
@@ -141,12 +141,12 @@ def _last_session_lines(
         return []
     turns = conn.execute(
         "SELECT id, started_at, prompt, answer FROM turns WHERE session_id = ? AND outcome != 'open' "
-        "AND prompt NOT LIKE '<task-notification>%' ORDER BY id DESC LIMIT 2",
+        "ORDER BY id DESC LIMIT 2",
         (session["id"],),
     ).fetchall()
     lines = []
     for turn in reversed(turns):
-        parts = [first_line(turn["prompt"], 120), first_line(turn["answer"] or "", 140)]
+        parts = [first_line(request_text(turn["prompt"]), 120), first_line(turn["answer"] or "", 140)]
         if not any(parts):
             continue
         # A turn opened by a tool call has no prompt; then the answer alone says what happened.
@@ -269,7 +269,12 @@ def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block 
     # Tool calls before the first prompt (resume, compaction) open a turn without one.
     first = next((t for t in turns if (t["prompt"] or "").strip()), None)
     if first is not None:
-        lines.append((f"- Session goal (T{first['id']}): {first_line(first['prompt'], 200)}", ("t", int(first["id"]))))
+        lines.append(
+            (
+                f"- Session goal (T{first['id']}): {first_line(request_text(first['prompt']), 200)}",
+                ("t", int(first["id"])),
+            )
+        )
     for row in conn.execute(
         "SELECT m.id, m.kind, m.title FROM memories m JOIN turns t ON t.id = m.turn_id "
         "WHERE t.session_id = ? AND m.kind IN ('decision', 'dead_end', 'correction') ORDER BY m.id DESC LIMIT 4",
