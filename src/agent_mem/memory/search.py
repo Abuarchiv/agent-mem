@@ -441,7 +441,8 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                 part
                 for part in (
                     row["prompt"],
-                    row["answer"],
+                    # The opening of the answer says what was done; a long report mentions almost any two words.
+                    (row["answer"] or "")[:TOPIC_ANSWER_CHARS],
                     " ".join(files),
                     " ".join(json.loads(row["errors_json"] or "[]")),
                 )
@@ -483,6 +484,9 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                 origin=row["origin"],
             )
     return hits
+
+
+TOPIC_ANSWER_CHARS = 600
 
 
 def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:

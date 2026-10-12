@@ -315,3 +315,12 @@ def test_viewer_cache_stays_bounded_whatever_the_address_says(config: Config, dr
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_graph_nodes_name_a_topic():
+    named = [
+        label
+        for label in ("Codex", "hook.py", "Claude Code", "Tokens", "src", "Commit", "LongMemEval")
+        if ui._names_a_topic(label)
+    ]
+    assert named == ["Codex", "hook.py", "Claude Code", "LongMemEval"]

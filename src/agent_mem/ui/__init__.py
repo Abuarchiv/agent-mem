@@ -302,6 +302,54 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
     }
 
 
+# Single words that connect many memories without naming a topic. ponytail: a fixed list for the software terms
+# seen in real memories; a word-frequency list would replace it if other domains show up.
+GENERIC_CONCEPTS = {
+    "turn",
+    "turns",
+    "token",
+    "tokens",
+    "commit",
+    "commits",
+    "modul",
+    "module",
+    "worker",
+    "cache",
+    "tool",
+    "tools",
+    "graph",
+    "port",
+    "prompt",
+    "prompts",
+    "bugfix",
+    "pipe",
+    "pipes",
+    "test",
+    "tests",
+    "datei",
+    "file",
+    "files",
+    "fehler",
+    "error",
+    "code",
+    "repo",
+    "session",
+    "sessions",
+    "plan",
+    "schritt",
+    "step",
+    "liste",
+    "list",
+}
+
+
+def _names_a_topic(label: str) -> bool:
+    """A graph node must name something: "Codex", "hook.py", "Claude Code", not "Tokens" or a bare "src"."""
+    if " " in label or not label.isalpha():
+        return True
+    return label[:1].isupper() and label.lower() not in GENERIC_CONCEPTS
+
+
 # mem0's entity types as the viewer names them.
 CONCEPT_KIND = {"proper": "name", "topic": "topic", "identifier": "code", "quoted": "quoted"}
 
@@ -318,8 +366,9 @@ def _concept_graph(
         "FROM concepts c JOIN concept_links l ON l.concept_id = c.id "
         f"JOIN memories m ON m.id = l.memory_id AND m.invalid_at IS NULL WHERE c.specific = 1 {scope} "
         "GROUP BY c.id HAVING n >= 2 ORDER BY n DESC, c.id LIMIT ?",
-        (*params, LIMITS["graph_nodes"]),
+        (*params, LIMITS["graph_nodes"] * 2),
     ).fetchall()
+    rows = [row for row in rows if _names_a_topic(row["label"])][: LIMITS["graph_nodes"]]
     nodes = [
         {
             "id": row["id"],

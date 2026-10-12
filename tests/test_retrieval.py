@@ -269,3 +269,12 @@ def test_graph_keeps_working_commands_and_merges_old_command_lines(driver: Drive
         conn.execute("SELECT COUNT(*) FROM links WHERE entity_id = ? AND owner_id = ?", (target, turn)).fetchone()[0]
         == 1
     )
+
+
+def test_a_long_report_does_not_match_every_question(driver: Driver, conn):
+    driver.prompt("s1", "Refactor the invoice exporter")
+    report = "Moved the exporter into its own module and renamed the helpers. " * 12
+    driver.stop("s1", report + "Next time start the tests before the release.")
+    other = Driver(conn, driver.config, driver.cwd)
+    assert not other.prompt("s2", "how do I start the tests").context  # only the end of a long report says so
+    assert other.prompt("s2", "how did we refactor the invoice exporter").context
