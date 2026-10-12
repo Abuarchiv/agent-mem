@@ -328,3 +328,29 @@ def test_the_model_gets_the_work_log_and_the_terminal_shows_it_from_there(driver
     lines = inject.terminal(block.text, "proj", color=False).splitlines()
     assert lines.index("Recent work") < lines.index("Last session · claude")
     assert any("● Parser-Absturz behoben" in line for line in lines)
+
+
+def test_work_log_budget_keeps_the_newest_turn(driver: Driver, conn):
+    session_id, (first, second) = _session(driver, conn)
+    summary.summarize(
+        conn,
+        Answer(
+            {
+                "turns": [
+                    {"id": first, "type": "change", "title": "Older work"},
+                    {"id": second, "type": "bugfix", "title": "Newest work"},
+                ],
+            }
+        ),
+        session_id,
+        [first, second],
+    )
+    project_id = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()[0]
+    lines = inject._work_lines(conn, project_id, "claude:s2", set(), limit=2)
+    assert lines
+
+    block = inject.render(lines, 55)
+
+    assert block is not None
+    assert f"[T{second} · " in block.text
+    assert f"[T{first} · " not in block.text
