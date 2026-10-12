@@ -431,7 +431,7 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
             f"spaCy model {model} present; concepts feed the viewer's graph"
             if mem0_adapter.spacy_model_available(model)
             else f"spaCy model {model} missing; facts and search work, the graph of concepts stays empty",
-            f"Install it into the tool: `uv tool install --with {model}@https://github.com/explosion/spacy-models/releases/download/{model}-3.8.0/{model}-3.8.0-py3-none-any.whl \"agent-mem[semantic,observer]\"`. Set `observe.entity_model` to the language of your facts (de_core_news_sm, en_core_web_sm, ...).",
+            f'Install it into the tool: `uv tool install --with {model}@https://github.com/explosion/spacy-models/releases/download/{model}-3.8.0/{model}-3.8.0-py3-none-any.whl "agent-mem[semantic,observer]"`. Set `observe.entity_model` to the language of your facts (de_core_news_sm, en_core_web_sm, ...).',
             warn_only=True,
         )
     )
