@@ -246,18 +246,22 @@ def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block 
     if not turns:
         return None
     lines: list[tuple[str, tuple[str, int] | None]] = []
-    first = turns[0]
-    lines.append((f"- Session goal (T{first['id']}): {first_line(first['prompt'], 200)}", ("t", int(first["id"]))))
+    # Tool calls before the first prompt (resume, compaction) open a turn without one.
+    first = next((t for t in turns if (t["prompt"] or "").strip()), None)
+    if first is not None:
+        lines.append((f"- Session goal (T{first['id']}): {first_line(first['prompt'], 200)}", ("t", int(first["id"]))))
     for row in conn.execute(
         "SELECT m.id, m.kind, m.title FROM memories m JOIN turns t ON t.id = m.turn_id "
         "WHERE t.session_id = ? AND m.kind IN ('decision', 'dead_end', 'correction') ORDER BY m.id DESC LIMIT 4",
         (session_id,),
     ):
         lines.append((f"- [M{row['id']} · {row['kind']}] {first_line(row['title'], 160)}", ("m", int(row["id"]))))
+    # Only the last three turns: an early failed command that was never retried is not "still failing".
     for row in conn.execute(
         "SELECT command_key, payload FROM events WHERE session_id = ? AND error_sig IS NOT NULL AND resolved = 0 "
-        "AND command_key IS NOT NULL AND trust != 'tool_external' ORDER BY id DESC LIMIT 2",
-        (session_id,),
+        "AND command_key IS NOT NULL AND trust != 'tool_external' AND turn_id IN "
+        "(SELECT id FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 3) ORDER BY id DESC LIMIT 2",
+        (session_id, session_id),
     ):
         try:
             error = json.loads(row["payload"]).get("error_line") or ""

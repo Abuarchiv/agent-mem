@@ -323,7 +323,11 @@ _CORRECTION = re.compile(
     r"nicht schon wieder|immer noch falsch|still wrong)\b"
     r"|\bagain\?"
 )
-_ALWAYS_NEVER = re.compile(r"(?i)\b(immer|nie(mals)?|always|never|stets|grundsätzlich)\b")
+# "immer noch", "wie immer", "noch nie", "never mind" are filler, not rules.
+_ALWAYS_NEVER = re.compile(
+    r"(?i)(?<!noch )(?<!wie )(?<!für )\b(immer\b(?!\s+(noch|wieder|mehr)\b)|nie(mals)?\b|always\b"
+    r"|never\b(?!\s+mind\b)|stets\b|grundsätzlich\b)"
+)
 _INSTEAD = [
     re.compile(
         r"(?i)\b(?:nutze|verwende|benutze|nimm|use)\s+`?([\w.@/+-]+)`?\s+(?:statt|anstatt|anstelle von|instead of|not)\s+`?([\w.@/+-]+)`?"

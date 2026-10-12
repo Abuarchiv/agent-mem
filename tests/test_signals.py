@@ -67,6 +67,9 @@ def test_corrections_and_preferences():
     assert signals.is_correction("No, that's wrong")
     assert signals.is_correction("Ich habe doch gesagt pnpm")
     assert not signals.is_correction("Please add a test for the parser")
+    assert signals.mentions_rule("nutze nie npm") and signals.mentions_rule("always use uv")
+    for filler in ("da sind immer noch die alten Sachen", "wie immer", "noch nie gesehen", "never mind"):
+        assert not signals.mentions_rule(filler), filler
     assert ("npm", "pnpm") in signals.preference_pairs("nutze pnpm statt npm")
     assert ("npm", "pnpm") in signals.preference_pairs("use pnpm instead of npm")
     assert ("yarn", "bun") in signals.preference_pairs("nicht yarn, sondern bun")

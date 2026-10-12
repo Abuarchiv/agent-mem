@@ -86,6 +86,15 @@ def test_compaction_context(driver: Driver, conn):
     assert response.context and "Refactor the auth module" in response.context and "auth.py" in response.context
 
 
+def test_compaction_skips_empty_goal_and_old_failures(driver: Driver, conn):
+    driver.bash("s1", "ls logs/", output="ls: logs/: No such file or directory", failed=True)  # turn without prompt
+    for n in range(4):
+        driver.prompt("s1", f"Step {n} of the auth refactor")
+    context = driver.start("s1", source="compact").context or ""
+    assert "Session goal" in context and "Step 0 of the auth refactor" in context
+    assert "Still failing" not in context
+
+
 def test_stale_turns_are_closed(driver: Driver, conn, config):
     driver.prompt("s1", "long running work")
     conn.execute("UPDATE sessions SET last_event_at = '2020-01-01T00:00:00.000Z'")

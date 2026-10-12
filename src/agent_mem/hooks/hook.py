@@ -45,7 +45,14 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
                 }
             }
         if response.context and event.kind in {"session_start", "prompt", "pre_tool", "tool"}:
-            return {"hookSpecificOutput": {"hookEventName": event.raw_kind, "additionalContext": response.context}}
+            out: dict[str, Any] = {
+                "hookSpecificOutput": {"hookEventName": event.raw_kind, "additionalContext": response.context}
+            }
+            if harness == "claude" and event.kind == "session_start":
+                # One line in the user's terminal; the context itself goes only to the model.
+                items = sum(1 for line in response.context.splitlines() if line.startswith("- "))
+                out["systemMessage"] = f"agent-mem: {items} items injected (~{len(response.context) // 4} tokens)"
+            return out
         return None
     if harness == "copilot":
         if response.deny and event.kind == "pre_tool":

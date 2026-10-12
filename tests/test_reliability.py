@@ -46,6 +46,11 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     )
     data = json.loads(output)
     assert "Parser" in data["hookSpecificOutput"]["additionalContext"]
+    assert "systemMessage" not in data  # only Claude Code shows it
+
+    start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "compact"}
+    data = json.loads(hook.run("claude", None, json.dumps(start), config))
+    assert data["systemMessage"].startswith("agent-mem: ") and "tokens" in data["systemMessage"]
 
 
 def test_invalid_payload_is_quarantined_and_silent(config: Config):
