@@ -57,11 +57,35 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
+def _load_for_update(path: Path) -> dict[str, Any]:
+    """A harness config we are about to rewrite. Unreadable or invalid JSON (a trailing comma, a comment) stops
+    setup: reading it as empty and writing it back would delete every setting of the user."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise SystemExit(
+            f"agent-mem: {path} cannot be read as JSON ({error}). Nothing was changed; fix the file and run this again."
+        ) from error
+    if not isinstance(data, dict):
+        raise SystemExit(f"agent-mem: {path} does not hold a JSON object. Nothing was changed.")
+    return data
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Atomic, with the previous version kept next to it and the file's permissions unchanged."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp = path.with_name(path.name + ".agent-mem-tmp")
+    tmp.write_text(text, encoding="utf-8")
+    if path.exists():
+        shutil.copy2(path, path.with_name(path.name + ".agent-mem-backup"))
+        shutil.copymode(path, tmp)
     os.replace(tmp, path)
+
+
+def _write_json(path: Path, data: dict[str, Any]) -> None:
+    _write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def _is_ours(hook: dict[str, Any]) -> bool:
@@ -102,28 +126,27 @@ def write(harness: str, plugins: Path, exe: str | None = None) -> list[Path]:
     exe = exe or binary()
     if harness == "claude":
         settings = claude_home() / "settings.json"
-        data = _read_json(settings)
+        data = _load_for_update(settings)
         data["hooks"] = _merge_hooks(data.get("hooks", {}), _plugin_hooks(plugins, "claude", exe)["hooks"])
         _write_json(settings, data)
         _claude_mcp(exe, add=True)
         return [settings]
     if harness == "codex":
         hooks = codex_home() / "hooks.json"
-        data = _read_json(hooks)
+        data = _load_for_update(hooks)
         data["hooks"] = _merge_hooks(data.get("hooks", {}), _plugin_hooks(plugins, "codex", exe)["hooks"])
         _write_json(hooks, data)
         toml = codex_home() / "config.toml"
         text = toml.read_text(encoding="utf-8") if toml.exists() else ""
         text = _strip_toml(text)
         text = text.rstrip("\n") + ("\n\n" if text.strip() else "") + _toml_block(exe)
-        toml.parent.mkdir(parents=True, exist_ok=True)
-        toml.write_text(text, encoding="utf-8")
+        _write_text(toml, text)
         return [hooks, toml]
     if harness == "copilot":
         hooks = copilot_home() / "hooks" / "agent-mem.json"
         _write_json(hooks, _plugin_hooks(plugins, "copilot", exe))
         mcp = copilot_home() / "mcp-config.json"
-        data = _read_json(mcp)
+        data = _load_for_update(mcp)
         servers = data.setdefault("mcpServers", {})
         servers[MARK] = {"type": "local", "command": exe, "args": ["mcp"], "tools": ["*"]}
         _write_json(mcp, data)
@@ -134,7 +157,7 @@ def write(harness: str, plugins: Path, exe: str | None = None) -> list[Path]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source.replace('spawn("agent-mem"', f"spawn({json.dumps(exe)}"), encoding="utf-8")
         cfg = opencode_home() / "opencode.json"
-        data = _read_json(cfg)
+        data = _load_for_update(cfg)
         data.setdefault("$schema", "https://opencode.ai/config.json")
         data.setdefault("mcp", {})[MARK] = {"type": "local", "command": [exe, "mcp"], "enabled": True}
         _write_json(cfg, data)
@@ -147,7 +170,7 @@ def remove(harness: str) -> list[Path]:
     touched: list[Path] = []
     if harness == "claude":
         settings = claude_home() / "settings.json"
-        data = _read_json(settings)
+        data = _load_for_update(settings)
         if "hooks" in data:
             data["hooks"] = _strip_hooks(data["hooks"])
             if not data["hooks"]:
@@ -157,14 +180,14 @@ def remove(harness: str) -> list[Path]:
         _claude_mcp(None, add=False)
     elif harness == "codex":
         hooks = codex_home() / "hooks.json"
-        data = _read_json(hooks)
+        data = _load_for_update(hooks)
         if "hooks" in data:
             data["hooks"] = _strip_hooks(data["hooks"])
             _write_json(hooks, data)
             touched.append(hooks)
         toml = codex_home() / "config.toml"
         if toml.exists():
-            toml.write_text(_strip_toml(toml.read_text(encoding="utf-8")), encoding="utf-8")
+            _write_text(toml, _strip_toml(toml.read_text(encoding="utf-8")))
             touched.append(toml)
     elif harness == "copilot":
         hooks = copilot_home() / "hooks" / "agent-mem.json"
@@ -172,7 +195,7 @@ def remove(harness: str) -> list[Path]:
             hooks.unlink()
             touched.append(hooks)
         mcp = copilot_home() / "mcp-config.json"
-        data = _read_json(mcp)
+        data = _load_for_update(mcp)
         if MARK in data.get("mcpServers", {}):
             del data["mcpServers"][MARK]
             _write_json(mcp, data)
@@ -183,7 +206,7 @@ def remove(harness: str) -> list[Path]:
             plugin.unlink()
             touched.append(plugin)
         cfg = opencode_home() / "opencode.json"
-        data = _read_json(cfg)
+        data = _load_for_update(cfg)
         if MARK in data.get("mcp", {}):
             del data["mcp"][MARK]
             _write_json(cfg, data)

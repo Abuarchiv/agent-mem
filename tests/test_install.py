@@ -115,3 +115,35 @@ def test_setup_all_writes_only_harnesses_on_path(homes: Path, config, monkeypatc
     monkeypatch.setattr(install.shutil, "which", lambda name: None)
     assert commands.cmd_setup(ns, config) == 1
     assert "No harness on PATH" in capsys.readouterr().out
+
+
+def test_setup_never_rewrites_a_config_it_cannot_parse(homes: Path) -> None:
+    settings = homes / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    broken = '{\n  "model": "opus",\n  "permissions": {"allow": ["Bash(git status)"]},\n}\n'  # trailing comma
+    settings.write_text(broken)
+    with pytest.raises(SystemExit, match="cannot be read as JSON"):
+        install.write("claude", PLUGINS, EXE)
+    with pytest.raises(SystemExit):
+        install.remove("claude")
+    assert settings.read_text() == broken
+
+
+def test_setup_keeps_permissions_and_a_backup(homes: Path) -> None:
+    import stat
+
+    settings = homes / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text('{"model": "opus"}')
+    settings.chmod(0o600)
+    install.write("claude", PLUGINS, EXE)
+    assert stat.S_IMODE(settings.stat().st_mode) == 0o600
+    assert json.loads(settings.read_text())["model"] == "opus"
+    backup = settings.with_name("settings.json.agent-mem-backup")
+    assert json.loads(backup.read_text()) == {"model": "opus"}
+    toml = homes / ".codex" / "config.toml"
+    toml.parent.mkdir(parents=True, exist_ok=True)
+    toml.write_text('model = "gpt"\n')
+    install.write("codex", PLUGINS, EXE)
+    assert toml.read_text().startswith('model = "gpt"') and "[mcp_servers.agent-mem]" in toml.read_text()
+    assert toml.with_name("config.toml.agent-mem-backup").read_text() == 'model = "gpt"\n'
