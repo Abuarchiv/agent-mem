@@ -25,6 +25,7 @@ def test_command_kinds():
     assert signals.command_kind('git commit -m "x"') == "commit"
     assert signals.command_kind("git checkout -- src/a.py") == "revert"
     assert signals.command_kind("git stash list") is None
+    assert signals.command_kind("git stash push -q src/a.py") is None  # shelved to test without it, then popped
 
 
 def test_reverted_files():

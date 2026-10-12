@@ -279,7 +279,8 @@ def command_kind(command: str) -> str | None:
     lowered = command.lower()
     if re.search(r"\bgit\s+commit\b", lowered):
         return "commit"
-    if re.search(r"\bgit\s+(checkout\s+--|restore\b|revert\b|reset\s+--hard|stash\b(?!\s+(list|show)))", lowered):
+    # Not `git stash`: it shelves work to come back to (agents stash, test, pop); it abandons nothing.
+    if re.search(r"\bgit\s+(checkout\s+--|restore\b|revert\b|reset\s+--hard)", lowered):
         return "revert"
     if _INSTALL.search(lowered.strip()):
         return "install"
@@ -301,7 +302,7 @@ def reverted_files(command: str) -> list[str]:
         return tokens[tokens.index("--") + 1 :]
     if sub == "restore":
         return [t for t in tokens[2:] if not t.startswith("-")]
-    if sub in {"revert", "reset", "stash"}:
+    if sub in {"revert", "reset"}:
         return ["*"]
     return []
 
