@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "description": "Retrieval fixture (docs/PLAN.md §8a). 25 cases: 20 answerable, 5 abstention. Each case has its own history (sessions of user/assistant messages, with distractor turns), a question, and either expect_any (one of these substrings must appear in the top-1 result, case-insensitive) or abstain=true (no result may be returned above the backend's threshold). Plus 10 contradiction pairs (§8d): after ingesting before and after, the top result for the question must contain a current substring and none of the obsolete ones.",
+  "version": 2,
+  "description": "Retrieval fixture (docs/PLAN.md §8a). 40 cases: 20 answerable, 20 abstention (c26-c40 share only generic words such as test, deploy, server or version with their history). Each case has its own history (sessions of user/assistant messages, with distractor turns), a question, and either expect_any (one of these substrings must appear in the top-1 result, case-insensitive) or abstain=true (no result may be returned above the backend's threshold). Plus 10 contradiction pairs (§8d): after ingesting before and after, the top result for the question must contain a current substring and none of the obsolete ones.",
   "cases": [
     {
       "id": "c01", "lang": "de",
@@ -403,6 +403,216 @@
         ]
       ],
       "question": "Wer hat das Unternehmen 2019 gegründet?"
+    },
+    {
+      "id": "c26", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Die Tests laufen mit pytest im Ordner tests/."},
+          {"role": "assistant", "content": "88 Tests grün."}
+        ],
+        [
+          {"role": "user", "content": "Füge einen Test für den Parser hinzu."},
+          {"role": "assistant", "content": "tests/test_parser.py angelegt."}
+        ]
+      ],
+      "question": "Welchen Test-Account nutzt das QA-Team im Staging-Shop?"
+    },
+    {
+      "id": "c27", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Deploy the frontend to Vercel."},
+          {"role": "assistant", "content": "Deployed, preview URL posted."}
+        ],
+        [
+          {"role": "user", "content": "Add a sitemap."},
+          {"role": "assistant", "content": "sitemap.xml generated at build time."}
+        ]
+      ],
+      "question": "Who approves deploys of the mobile app to the App Store?"
+    },
+    {
+      "id": "c28", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Der Server läuft auf Port 8080 hinter nginx."},
+          {"role": "assistant", "content": "nginx.conf leitet / an :8080 weiter."}
+        ],
+        [
+          {"role": "user", "content": "Aktiviere gzip."},
+          {"role": "assistant", "content": "gzip on in nginx.conf."}
+        ]
+      ],
+      "question": "Welcher Mailserver verschickt die Newsletter?"
+    },
+    {
+      "id": "c29", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Bump the version to 2.3.0."},
+          {"role": "assistant", "content": "pyproject.toml and CHANGELOG updated."}
+        ],
+        [
+          {"role": "user", "content": "Tag the release."},
+          {"role": "assistant", "content": "Tagged v2.3.0 locally."}
+        ]
+      ],
+      "question": "Which Node version does the legacy admin panel need?"
+    },
+    {
+      "id": "c30", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Die Nutzer-Tabelle heißt users und hat eine Spalte email."},
+          {"role": "assistant", "content": "Migration 004 legt users an."}
+        ],
+        [
+          {"role": "user", "content": "Index auf email."},
+          {"role": "assistant", "content": "UNIQUE INDEX users_email angelegt."}
+        ]
+      ],
+      "question": "Wie viele Nutzer hatte die App im letzten Quartal?"
+    },
+    {
+      "id": "c31", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Use black with line length 100."},
+          {"role": "assistant", "content": "pyproject.toml has [tool.black] line-length = 100."}
+        ],
+        [
+          {"role": "user", "content": "Format the repo."},
+          {"role": "assistant", "content": "black reformatted 41 files."}
+        ]
+      ],
+      "question": "What is the dress code for the office party?"
+    },
+    {
+      "id": "c32", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Die Datei config.yaml enthält die Feature-Flags."},
+          {"role": "assistant", "content": "config.yaml gelesen, 12 Flags."}
+        ],
+        [
+          {"role": "user", "content": "Schalte das Flag new_checkout ein."},
+          {"role": "assistant", "content": "new_checkout: true gesetzt."}
+        ]
+      ],
+      "question": "Welche Datei enthält den Arbeitsvertrag von Lisa?"
+    },
+    {
+      "id": "c33", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "The project uses React 19 with Vite."},
+          {"role": "assistant", "content": "vite.config.ts updated for React 19."}
+        ],
+        [
+          {"role": "user", "content": "Add dark mode."},
+          {"role": "assistant", "content": "Tailwind dark: classes added."}
+        ]
+      ],
+      "question": "Which project management tool did the previous agency use?"
+    },
+    {
+      "id": "c34", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Logs gehen nach Loki, Dashboards in Grafana."},
+          {"role": "assistant", "content": "Promtail konfiguriert."}
+        ],
+        [
+          {"role": "user", "content": "Alarm bei 5xx über 1 %."},
+          {"role": "assistant", "content": "Grafana-Alert angelegt."}
+        ]
+      ],
+      "question": "Wann ist der nächste Zahnarzttermin?"
+    },
+    {
+      "id": "c35", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Write the API docs in docs/api.md."},
+          {"role": "assistant", "content": "docs/api.md covers 14 endpoints."}
+        ],
+        [
+          {"role": "user", "content": "Add examples for /orders."},
+          {"role": "assistant", "content": "Three curl examples added."}
+        ]
+      ],
+      "question": "What did the customer say in the support call on Monday?"
+    },
+    {
+      "id": "c36", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Wir bauen das Docker-Image mit einem Multi-Stage-Build."},
+          {"role": "assistant", "content": "Dockerfile mit builder- und runtime-Stage."}
+        ],
+        [
+          {"role": "user", "content": "Image verkleinern."},
+          {"role": "assistant", "content": "Alpine als Basis, 84 MB."}
+        ]
+      ],
+      "question": "Welche Farbe hat das neue Firmenlogo?"
+    },
+    {
+      "id": "c37", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Cache the exchange rates in Redis for an hour."},
+          {"role": "assistant", "content": "SETEX rates 3600 in rates.py."}
+        ],
+        [
+          {"role": "user", "content": "Handle Redis being down."},
+          {"role": "assistant", "content": "Falls back to the API with a warning."}
+        ]
+      ],
+      "question": "How much did the company pay for the Redis Enterprise license last year?"
+    },
+    {
+      "id": "c38", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Die CI läuft auf GitHub Actions mit Matrix für 3.11 bis 3.13."},
+          {"role": "assistant", "content": "ci.yml angepasst."}
+        ],
+        [
+          {"role": "user", "content": "Cache für uv."},
+          {"role": "assistant", "content": "astral-sh/setup-uv mit cache."}
+        ]
+      ],
+      "question": "Wer ist im Team für die Urlaubsplanung zuständig?"
+    },
+    {
+      "id": "c39", "lang": "en", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Rename the module utils to helpers."},
+          {"role": "assistant", "content": "Renamed, 23 imports updated."}
+        ],
+        [
+          {"role": "user", "content": "Remove dead code in helpers."},
+          {"role": "assistant", "content": "Removed 4 unused functions."}
+        ]
+      ],
+      "question": "What is the WiFi password in the Berlin office?"
+    },
+    {
+      "id": "c40", "lang": "de", "abstain": true,
+      "history": [
+        [
+          {"role": "user", "content": "Der Cronjob räumt nachts um 3 Uhr alte Sessions auf."},
+          {"role": "assistant", "content": "cleanup_sessions in crontab eingetragen."}
+        ],
+        [
+          {"role": "user", "content": "Logge die Anzahl gelöschter Sessions."},
+          {"role": "assistant", "content": "Log-Zeile mit Anzahl ergänzt."}
+        ]
+      ],
+      "question": "Wann hat der Chef Geburtstag?"
     }
   ],
   "contradictions": [

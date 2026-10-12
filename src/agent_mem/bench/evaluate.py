@@ -6,9 +6,13 @@ Two data sets, two backends:
   ``answer_session_ids``, ``question_type``). Reports session-level Recall@k per question type.
   Abstention items (``*_abs``) are skipped because they have no gold session. ``subset`` restricts the
   run to the question ids listed in ``tests/fixtures/longmemeval_subset.json`` (§8: 40 questions).
+  ``tests/fixtures/coding_agent_life_v1.json`` (agentmemory's coding corpus) uses the same layout plus
+  ``session_dates``. ``R@k`` counts a question when any gold session is in the top k (LongMemEval),
+  ``All@k`` only when every gold session is (agentmemory's R@5).
 * ``fixture``: ``tests/fixtures/memory_cases.json``. hit@1 (top result contains an expected substring),
   abstention (no result for unanswerable questions) and contradiction resolution (top result shows the
-  current value and none of the obsolete ones).
+  current value and none of the obsolete ones). ``injected_*`` repeat hit@1 and abstention for what the
+  prompt hook would inject (lexical search plus ``search.confident``, no vectors), sqlite backend only.
 
 Backends: ``sqlite`` is the existing stack (capture + FTS5 + vectors + graph), ``mem0`` is the
 observer path (:mod:`agent_mem.observe.mem0_adapter`). Each item runs in a fresh data directory.
@@ -28,13 +32,13 @@ from agent_mem.core import db, timeutil
 from agent_mem.core.config import Config, load
 from agent_mem.core.events import Event
 from agent_mem.hooks import capture
-from agent_mem.memory import semantic
+from agent_mem.memory import search, semantic
 
 Session = list[dict[str, Any]]
 
 
 class Backend(Protocol):
-    def ingest(self, sessions: list[Session], ids: list[str]) -> None: ...
+    def ingest(self, sessions: list[Session], ids: list[str], dates: list[str] | None = None) -> None: ...
     def ranked(self, question: str, k: int) -> list[tuple[str, str, float]]:
         """(session_id, text, score) best first."""
         ...
@@ -56,26 +60,29 @@ class SqliteBackend:
         self.conn = db.connect(self.config)
         self.embedder = embedder
 
-    def ingest(self, sessions: list[Session], ids: list[str]) -> None:
+    def ingest(self, sessions: list[Session], ids: list[str], dates: list[str] | None = None) -> None:
         base = timeutil.now()
         for index, (session, session_id) in enumerate(zip(sessions, ids, strict=False)):
-            ts = timeutil.iso(base.replace(microsecond=0) - timedelta(days=len(sessions) - index))
+            parsed = timeutil.parse(dates[index]) if dates else None
+            ts = timeutil.iso(parsed or base.replace(microsecond=0) - timedelta(days=len(sessions) - index))
             answer: list[str] = []
             started = False
             for message in session:
                 role = message.get("role")
                 content = str(message.get("content") or "")
-                if role == "user":
+                if role == "user" or (role == "assistant" and not started):  # a session may open with the agent
                     if started:
                         self._stop(session_id, ts, answer)
                     capture.apply(
                         self.conn,
                         self.config,
-                        Event("claude", "prompt", session_id, ts, cwd=self.cwd, prompt=content),
+                        Event(
+                            "claude", "prompt", session_id, ts, cwd=self.cwd, prompt=content if role == "user" else ""
+                        ),
                         with_context=False,
                     )
                     started = True
-                    answer = []
+                    answer = [] if role == "user" else [content]
                 elif role == "assistant":
                     answer.append(content)
             if started:
@@ -101,6 +108,13 @@ class SqliteBackend:
             text = hit.text or semantic.owner_text(self.conn, hit.owner) or ""
             out.append((native, text, float(hit.score or 0.0)))
         return out
+
+    def injected(self, question: str) -> list[str]:
+        """What the prompt hook would inject: lexical search without vectors, behind the confidence gate."""
+        project = self.conn.execute("SELECT id FROM projects").fetchone()[0]
+        terms = search.query_terms(question)
+        hits = search.search(self.conn, self.config, search.Query(text=question, project_id=project, limit=5))
+        return [h.text for h in hits if search.confident(h, self.config, terms)][:3]
 
     def close(self) -> None:
         self.conn.close()
@@ -134,7 +148,7 @@ class Mem0Backend:
         )
         self.add_seconds: list[float] = []
 
-    def ingest(self, sessions: list[Session], ids: list[str]) -> None:
+    def ingest(self, sessions: list[Session], ids: list[str], dates: list[str] | None = None) -> None:
         for session, session_id in zip(sessions, ids, strict=False):
             messages = [
                 {"role": str(m.get("role")), "content": str(m.get("content") or "")}
@@ -216,13 +230,14 @@ class Runner:
         """``progress`` is a JSONL file with one line per finished question. Long runs (mem0 with a
         local model take hours) can crash or be interrupted; finished questions are skipped on rerun
         and their scores are taken from the file."""
-        items = json.loads(dataset.read_text(encoding="utf-8"))
+        data = json.loads(dataset.read_text(encoding="utf-8"))
+        items = data["items"] if isinstance(data, dict) else data
         if subset:
             wanted = {s["question_id"] for s in json.loads(subset.read_text(encoding="utf-8"))["items"]}
             items = [i for i in items if i["question_id"] in wanted]
         if limit:
             items = items[:limit]
-        per_type: dict[str, list[dict[int, float]]] = defaultdict(list)
+        per_type: dict[str, list[dict[str, float]]] = defaultdict(list)
         done: dict[str, dict[str, Any]] = {}
         if progress and progress.exists():
             for line in progress.read_text(encoding="utf-8").splitlines():
@@ -234,17 +249,23 @@ class Runner:
             if qid.endswith("_abs"):
                 continue
             if qid in done:
-                per_type[item.get("question_type", "all")].append({k: float(done[qid]["hits"][str(k)]) for k in ks})
+                old = done[qid]["hits"]  # files written before All@k used bare "5", "10"
+                per_type[item.get("question_type", "all")].append(
+                    {(f"R@{key}" if key.isdigit() else key): value for key, value in old.items()}
+                )
                 continue
             with tempfile.TemporaryDirectory() as tmp:
                 backend = self.open(Path(tmp))
-                backend.ingest(item["haystack_sessions"], [str(i) for i in item["haystack_session_ids"]])
+                backend.ingest(
+                    item["haystack_sessions"], [str(i) for i in item["haystack_session_ids"]], item.get("session_dates")
+                )
                 ranked_sessions: list[str] = []
                 for session_id, _text, _score in backend.ranked(item["question"], max(ks) * 3):
                     if session_id and session_id not in ranked_sessions:
                         ranked_sessions.append(session_id)
                 gold = {str(s) for s in item["answer_session_ids"]}
-                hits = {k: float(bool(gold & set(ranked_sessions[:k]))) for k in ks}
+                hits = {f"R@{k}": float(bool(gold & set(ranked_sessions[:k]))) for k in ks}
+                hits |= {f"All@{k}": float(gold <= set(ranked_sessions[:k])) for k in ks}
                 per_type[item.get("question_type", "all")].append(hits)
                 self._collect(backend)
                 backend.close()
@@ -252,7 +273,7 @@ class Runner:
                     row = {
                         "question_id": qid,
                         "question_type": item.get("question_type"),
-                        "hits": {str(k): v for k, v in hits.items()},
+                        "hits": hits,
                         "ranked": ranked_sessions[: max(ks)],
                         "gold": sorted(gold),
                         "add_seconds": getattr(backend, "add_seconds", []),
@@ -260,16 +281,19 @@ class Runner:
                     with progress.open("a", encoding="utf-8") as fh:
                         fh.write(json.dumps(row) + "\n")
         report: dict[str, Any] = {}
-        all_scores: list[dict[int, float]] = []
-        for kind, scores in sorted(per_type.items()):
-            all_scores.extend(scores)
-            report[kind] = {f"R@{k}": round(sum(s[k] for s in scores) / len(scores), 4) for k in ks} | {
+        all_scores: list[dict[str, float]] = []
+
+        def summary(scores: list[dict[str, float]]) -> dict[str, Any]:
+            keys = [key for key in scores[0] if key in {f"R@{k}" for k in ks} | {f"All@{k}" for k in ks}]
+            return {key: round(sum(s.get(key, 0.0) for s in scores) / len(scores), 4) for key in keys} | {
                 "n": len(scores)
             }
+
+        for kind, scores in sorted(per_type.items()):
+            all_scores.extend(scores)
+            report[kind] = summary(scores)
         if all_scores:
-            report["overall"] = {f"R@{k}": round(sum(s[k] for s in all_scores) / len(all_scores), 4) for k in ks} | {
-                "n": len(all_scores)
-            }
+            report["overall"] = summary(all_scores)
         report["meta"] = self._meta()
         return report
 
@@ -277,6 +301,8 @@ class Runner:
         data = json.loads(path.read_text(encoding="utf-8"))
         hits: list[int] = []
         abstains: list[int] = []
+        injected_hits: list[int] = []  # prompt hook path (sqlite backend only)
+        injected_abstains: list[int] = []
         resolved: list[int] = []
         details: list[dict[str, Any]] = []
         for case in data["cases"]:
@@ -286,14 +312,26 @@ class Runner:
                 backend.ingest(sessions, [f"{case['id']}-s{i}" for i in range(len(sessions))])
                 ranked = [r for r in backend.ranked(case["question"], 5) if r[2] >= self.min_score]
                 top = ranked[0][1].lower() if ranked else ""
+                injected = backend.injected(case["question"]) if isinstance(backend, SqliteBackend) else None
                 if case.get("abstain"):
                     ok = not ranked
                     abstains.append(int(ok))
+                    if injected is not None:
+                        injected_abstains.append(int(not injected))
                 else:
                     ok = any(e.lower() in top for e in case["expect_any"])
                     hits.append(int(ok))
+                    if injected is not None:
+                        first = injected[0].lower() if injected else ""
+                        injected_hits.append(int(any(e.lower() in first for e in case["expect_any"])))
                 details.append(
-                    {"id": case["id"], "ok": ok, "top": top[:160], "score": ranked[0][2] if ranked else None}
+                    {
+                        "id": case["id"],
+                        "ok": ok,
+                        "top": top[:160],
+                        "score": ranked[0][2] if ranked else None,
+                        "injected": [t[:160] for t in injected or []],
+                    }
                 )
                 self._collect(backend)
                 backend.close()
@@ -322,6 +360,10 @@ class Runner:
         return {
             "hit@1": round(sum(hits) / len(hits), 4) if hits else None,
             "abstention": round(sum(abstains) / len(abstains), 4) if abstains else None,
+            "injected_hit@1": round(sum(injected_hits) / len(injected_hits), 4) if injected_hits else None,
+            "injected_abstention": round(sum(injected_abstains) / len(injected_abstains), 4)
+            if injected_abstains
+            else None,
             "contradictions_resolved": f"{sum(resolved)}/{len(resolved)}",
             "n": {"answerable": len(hits), "abstain": len(abstains), "pairs": len(resolved)},
             "details": details,

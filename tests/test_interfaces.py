@@ -112,3 +112,21 @@ def test_eval_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     report = evaluate.longmemeval(dataset, semantic_search=False)
     assert report["overall"]["R@5"] == 1.0
+
+
+def test_eval_runner_coding_life_and_injection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """agentmemory's coding corpus runs as is; the fixture reports what the prompt hook would inject."""
+    from agent_mem.bench import evaluate
+
+    monkeypatch.setenv("AGENT_MEM_DATA_DIR", str(tmp_path / "evaldata"))
+    fixtures = Path(__file__).parent / "fixtures"
+    runner = evaluate.Runner("sqlite", semantic_search=False)
+    report = runner.longmemeval(fixtures / "coding_agent_life_v1.json", limit=3)
+    assert report["overall"]["n"] == 3 and "All@5" in report["overall"]
+
+    cases = json.loads((fixtures / "memory_cases.json").read_text(encoding="utf-8"))
+    small = tmp_path / "cases.json"
+    picked = [c for c in cases["cases"] if c["id"] in {"c02", "c26"}]
+    small.write_text(json.dumps({"cases": picked}), encoding="utf-8")
+    report = runner.fixture(small)
+    assert report["injected_hit@1"] is not None and report["injected_abstention"] == 1.0
