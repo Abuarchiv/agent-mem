@@ -91,8 +91,10 @@ def test_chain_is_vendor_faithful_by_default(config: Config, monkeypatch) -> Non
 
     monkeypatch.setattr(providers, "available", lambda name: True)
     conn = db.connect(config)
-    assert providers.chain(config, "claude", conn) == ["claude", "ollama"]
-    assert providers.chain(config, "codex", conn) == ["codex", "ollama"]
+    assert providers.chain(config, "claude", conn) == ["claude"]
+    assert providers.chain(config, "codex", conn) == ["codex"]
+    assert providers.chain(config, "opencode", conn) == []  # raw stage unless ollama is opted in (B.20)
+    config.observe.providers.append("ollama")
     assert providers.chain(config, "opencode", conn) == ["ollama"]
     config.observe.cross_vendor = True
     assert providers.chain(config, "claude", conn) == ["claude", "codex", "copilot", "ollama"]

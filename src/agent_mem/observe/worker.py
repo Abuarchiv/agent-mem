@@ -117,8 +117,9 @@ class Worker:
     def adapter(self) -> Mem0Adapter:
         if self._adapter is None:
             instructions = (Path(__file__).with_name("coding_instructions.md")).read_text(encoding="utf-8")  # E8
+            # The initial LLM is replaced per stage in process(); "claude" needs no client or server.
             self._adapter = Mem0Adapter(
-                self.config, llm="ollama", llm_model=self.config.observe.ollama_model, custom_instructions=instructions
+                self.config, llm="claude", llm_model=self.config.observe.claude_model, custom_instructions=instructions
             )
         return self._adapter
 

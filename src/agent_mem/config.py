@@ -112,8 +112,9 @@ class Observe:
 
     enabled: bool = True
     # Provider chain in order; a stage is skipped when its binary is missing, paused or over budget.
-    providers: list[str] = field(default_factory=lambda: ["claude", "codex", "copilot", "ollama"])
-    # Default: a turn only goes to the vendor that already saw it, then ollama, then raw (D12).
+    # "ollama" (local model) is opt-in: add it here to use it as a fallback stage (B.20).
+    providers: list[str] = field(default_factory=lambda: ["claude", "codex", "copilot"])
+    # Default: a turn only goes to the vendor that already saw it, then raw (D12).
     cross_vendor: bool = False
     claude_model: str = "haiku"
     codex_model: str = ""
