@@ -43,13 +43,39 @@ def _meta_key(project_id: str) -> str:
     return f"reviewed_at:{project_id}"
 
 
+RECENT = 100  # every review sees the newest facts ...
+OLDER = MAX_FACTS - RECENT  # ... plus the next slice of older ones, so each old fact meets the new ones in turn
+
+
 def _facts(conn: sqlite3.Connection, project_id: str) -> list[sqlite3.Row]:
+    """The newest facts and a rotating slice of the rest. Only the newest 150 used to be read: in a project with
+    more, the oldest facts, the ones a later decision makes wrong, were never checked again."""
     marks = ",".join("?" for _ in KINDS)
-    return conn.execute(
-        f"SELECT id, kind, title, body, created_at FROM memories WHERE project_id = ? AND invalid_at IS NULL "
-        f"AND trust IN ('observer', 'agent') AND kind IN ({marks}) ORDER BY created_at DESC, id DESC LIMIT ?",
-        (project_id, *KINDS, MAX_FACTS),
+    where = f"project_id = ? AND invalid_at IS NULL AND trust IN ('observer', 'agent') AND kind IN ({marks})"
+    columns = "id, kind, title, body, created_at"
+    recent = conn.execute(
+        f"SELECT {columns} FROM memories WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ?",
+        (project_id, *KINDS, RECENT),
     ).fetchall()
+    if len(recent) < RECENT:
+        return recent
+    taken = tuple(int(r["id"]) for r in recent)
+    skip = f"AND id NOT IN ({','.join('?' for _ in taken)})"
+    cursor = int(db.get_meta(conn, f"review_cursor:{project_id}") or 0)
+    older = conn.execute(
+        f"SELECT {columns} FROM memories WHERE {where} {skip} AND id > ? ORDER BY id LIMIT ?",
+        (project_id, *KINDS, *taken, cursor, OLDER),
+    ).fetchall()
+    if len(older) < OLDER:  # the end of the old facts: wrap around
+        seen = tuple(int(r["id"]) for r in older)
+        older += conn.execute(
+            f"SELECT {columns} FROM memories WHERE {where} {skip} AND id <= ? "
+            f"AND id NOT IN ({','.join('?' for _ in seen) or 'NULL'}) ORDER BY id LIMIT ?",
+            (project_id, *KINDS, *taken, cursor, *seen, OLDER - len(older)),
+        ).fetchall()
+    if older:
+        db.set_meta(conn, f"review_cursor:{project_id}", str(int(older[-1]["id"]) if len(older) == OLDER else 0))
+    return [*recent, *older]
 
 
 def due_projects(conn: sqlite3.Connection) -> list[str]:
@@ -69,7 +95,7 @@ def due_projects(conn: sqlite3.Connection) -> list[str]:
 
 def render(facts: list[sqlite3.Row]) -> str:
     lines = []
-    for fact in reversed(facts):  # oldest first, so "newer" reads top to bottom
+    for fact in sorted(facts, key=lambda f: (str(f["created_at"]), int(f["id"]))):  # oldest first: "newer" reads down
         text = fact["body"] if len(fact["body"] or "") <= 240 else fact["title"]
         lines.append(f"M{fact['id']} ({str(fact['created_at'])[:10]}, {fact['kind']}): {' '.join(str(text).split())}")
     return PROMPT + "\n".join(lines)

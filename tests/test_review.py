@@ -98,3 +98,18 @@ def test_a_replacing_fact_is_never_retired_itself(conn):
     review.review(conn, llm, "p1")
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE invalid_at IS NOT NULL").fetchone()[0] == 1
     assert timeutil.parse(db.get_meta(conn, "reviewed_at:p1")) is not None
+
+
+def test_old_facts_beyond_the_window_are_reviewed_in_turn(conn):
+    _project(conn)
+    texts = [f"Fact number {n} about the build" for n in range(260)]
+    ids = _facts(conn, texts)
+    seen: set[int] = set()
+    for _ in range(6):
+        llm = Answer({})
+        review.review(conn, llm, "p1")
+        seen |= {int(token[1:]) for token in llm.prompts[0].split() if token.startswith("M") and token[1:].isdigit()}
+        lines = [line for line in llm.prompts[0].splitlines() if line.startswith("M")]
+        dates = [line.split("(")[1][:10] for line in lines]
+        assert dates == sorted(dates) and len(lines) <= review.MAX_FACTS  # oldest first, bounded
+    assert set(ids) <= seen  # every fact came up at least once, the oldest included
