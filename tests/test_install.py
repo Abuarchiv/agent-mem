@@ -147,3 +147,16 @@ def test_setup_keeps_permissions_and_a_backup(homes: Path) -> None:
     install.write("codex", PLUGINS, EXE)
     assert toml.read_text().startswith('model = "gpt"') and "[mcp_servers.agent-mem]" in toml.read_text()
     assert toml.with_name("config.toml.agent-mem-backup").read_text() == 'model = "gpt"\n'
+
+
+def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, monkeypatch, capsys) -> None:
+    log = homes / "claude.log"
+    fake = homes / "claude"
+    fake.write_text(f'#!/bin/sh\necho "$@" >> {log}\n[ "$2" = add ] && {{ echo "boom" >&2; exit 1; }}\nexit 0\n')
+    fake.chmod(0o755)
+    monkeypatch.setattr(install.shutil, "which", lambda name: str(fake) if name == "claude" else None)
+    install.write("claude", PLUGINS, EXE)
+    calls = log.read_text().splitlines()
+    assert calls[0].startswith("mcp remove --scope user agent-mem") and calls[1].startswith("mcp add --scope user")
+    err = capsys.readouterr().err
+    assert "MCP server not registered (boom)" in err and "claude mcp add --scope user agent-mem" in err

@@ -232,13 +232,25 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
     claude = shutil.which("claude")
     if claude is None:
         return
-    cmd = (
-        [claude, "mcp", "add", "--scope", "user", MARK, "--", str(exe), "mcp"]
-        if add
-        else [claude, "mcp", "remove", "--scope", "user", MARK]
-    )
-    with open(os.devnull, "w") as sink:
-        subprocess.run(cmd, stdout=sink, stderr=sink, check=False, timeout=30)
+
+    def run(*args: str) -> str | None:
+        """None when it worked, else the reason."""
+        try:
+            result = subprocess.run([claude, "mcp", *args], capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError) as error:
+            return f"{type(error).__name__}: {error}"
+        return None if result.returncode == 0 else (result.stderr or result.stdout).strip()[-200:]
+
+    # Remove first: `mcp add` refuses an existing name, which left an entry with an old binary path in place.
+    run("remove", "--scope", "user", MARK)
+    if not add:
+        return
+    failure = run("add", "--scope", "user", MARK, "--", str(exe), "mcp")
+    if failure:
+        print(
+            f"  MCP server not registered ({failure}). Run: claude mcp add --scope user {MARK} -- {exe} mcp",
+            file=sys.stderr,
+        )
 
 
 # --- detection (I4) --------------------------------------------------------------------------------
