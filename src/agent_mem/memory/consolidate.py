@@ -6,19 +6,23 @@
 4. Memories anchored to deleted files are invalidated; anchors are recorded.
 5. Rules that never fire expire.
 6. A-MEM-style linking: new memories add their key to their nearest neighbours.
+7. Recorded test/build/lint/install commands keep only the part that does the job; scripts are dropped.
 """
 
 from __future__ import annotations
 
 import re
+import shlex
 import sqlite3
 from pathlib import Path
 
-from agent_mem.core import db, identity, timeutil
+from agent_mem.core import db, identity, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import learn, store
 
 _NORMALIZE = re.compile(r"[\W_]+")  # Unicode-aware: Cyrillic, CJK etc. keep their letters
+_SEGMENTS = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+_REDIRECT = re.compile(r"\s+(?:\d?>>?|&>)\s*(?:&\d|\S+)")
 
 
 def _norm(text: str) -> str:
@@ -39,6 +43,7 @@ def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[
         stats["global_preferences"] = _promote_preferences(conn)
         stats["superseded"] = _supersede_duplicates(conn)
         stats["rules_expired"] = _expire_rules(conn, config)
+        stats["commands_cleaned"] = _clean_commands(conn)
     stats["anchors"] = record_anchors(conn)
     stats["invalidated"] = _invalidate_deleted(conn)
     if embedder_matrix is not None:
@@ -46,6 +51,51 @@ def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[
     with db.transaction(conn):
         db.set_meta(conn, "consolidated_at", timeutil.iso())
     return stats
+
+
+def reusable_command(command: str, kind: str) -> str | None:
+    """The part of a shell line worth suggesting again as the project's ``kind`` command, or None.
+
+    ``cd app && npm test 2>&1 | tail`` gives ``npm test``; heredocs, shortened text and ``grep … tests/`` give None.
+    """
+    line = command.strip()
+    if "\n" in line or "[truncated]" in line:
+        return None
+    for segment in _SEGMENTS.split(line):
+        segment = _REDIRECT.sub("", segment).strip()
+        try:
+            shlex.split(segment)
+        except ValueError:
+            return None  # a quoted |, ; or && was cut apart
+        key = signals.command_key(segment)
+        if key is not None and signals.command_kind(key) == kind:
+            return segment if len(segment) <= 100 else None
+    return None
+
+
+def _clean_commands(conn: sqlite3.Connection) -> int:
+    """Rewrite recorded commands to their reusable part, merging variants; drop what is not a command."""
+    changed = 0
+    rows = conn.execute(
+        "SELECT project_id, key, value, count, updated_at FROM profile WHERE key LIKE 'cmd:%'"
+    ).fetchall()
+    for row in rows:
+        value = reusable_command(row["value"], row["key"][4:])
+        if value == row["value"]:
+            continue
+        conn.execute(
+            "DELETE FROM profile WHERE project_id = ? AND key = ? AND value = ?",
+            (row["project_id"], row["key"], row["value"]),
+        )
+        if value is not None:
+            conn.execute(
+                "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(project_id, key, value) DO UPDATE SET count = count + excluded.count, "
+                "updated_at = max(updated_at, excluded.updated_at)",
+                (row["project_id"], row["key"], value, row["count"], row["updated_at"]),
+            )
+        changed += 1
+    return changed
 
 
 def _promote_preferences(conn: sqlite3.Connection) -> int:

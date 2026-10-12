@@ -158,6 +158,47 @@ def test_non_latin_titles_are_not_superseded(conn, config: Config, project: Path
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE invalid_at IS NULL").fetchone()[0] == 2
 
 
+@pytest.mark.parametrize(
+    ("command", "kind", "expected"),
+    [
+        ("uv run pytest -q", "test", "uv run pytest -q"),
+        ("cd app && npm test 2>&1 | tail -5", "test", "npm test"),
+        ("uv run pytest -q -p no:warnings > /tmp/out.txt 2>&1; echo $?", "test", "uv run pytest -q -p no:warnings"),
+        ("python3 - <<'EOF'\nimport pytest\nEOF", "test", None),
+        ("grep -rn test src | head", "test", None),
+        ("sed -n 1,5p tests/test_ui.py && uv run ruff check src", "lint", "uv run ruff check src"),
+        ('uv run pytest -k "a|b"', "test", None),  # a quoted pipe must not be cut apart
+        ("uv run pytest -q\n…[truncated]…\n tail", "test", None),
+        ("uv run pytest " + "x" * 120, "test", None),
+    ],
+)
+def test_reusable_command_keeps_only_the_command_that_does_the_job(command: str, kind: str, expected: str | None):
+    assert consolidate.reusable_command(command, kind) == expected
+
+
+def test_consolidation_cleans_and_merges_recorded_commands(conn, config: Config, project: Path):
+    project_id = identity.resolve(conn, project).id  # type: ignore[union-attr]
+    rows = [
+        ("cmd:test", "uv run pytest -q", 3, "2026-10-01T10:00:00.000Z"),
+        ("cmd:test", "uv run pytest -q 2>&1 | tail -3", 2, "2026-10-02T10:00:00.000Z"),
+        ("cmd:test", "python3 - <<'EOF'\n…[truncated]…\nEOF", 4, "2026-10-03T10:00:00.000Z"),
+        ("cmd:build", "sed -n 1,5p x.py; grep -n build y.py", 1, "2026-10-03T10:00:00.000Z"),
+        ("cmd:lint", "uv run ruff check src", 1, "2026-10-03T10:00:00.000Z"),
+    ]
+    conn.executemany(
+        "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, ?, ?, ?, ?)",
+        [(project_id, *row) for row in rows],
+    )
+    consolidate.run(conn, config)
+    left = conn.execute("SELECT key, value, count, updated_at FROM profile ORDER BY key").fetchall()
+    assert [tuple(row) for row in left] == [
+        ("cmd:lint", "uv run ruff check src", 1, "2026-10-03T10:00:00.000Z"),
+        ("cmd:test", "uv run pytest -q", 5, "2026-10-02T10:00:00.000Z"),
+    ]
+    consolidate.run(conn, config)  # idempotent
+    assert conn.execute("SELECT SUM(count) FROM profile").fetchone()[0] == 6
+
+
 def test_agent_preferences_are_not_promoted(conn, config: Config, tmp_path: Path):
     for name in ("a", "b"):
         root = tmp_path / name
