@@ -278,3 +278,26 @@ def test_a_long_report_does_not_match_every_question(driver: Driver, conn):
     other = Driver(conn, driver.config, driver.cwd)
     assert not other.prompt("s2", "how do I start the tests").context  # only the end of a long report says so
     assert other.prompt("s2", "how did we refactor the invoice exporter").context
+
+
+def test_facts_from_one_long_session_are_not_capped(driver: Driver, conn, config: Config):
+    from agent_mem.memory import search, store
+
+    driver.start("s1")
+    driver.prompt("s1", "Set up the parser project")
+    driver.stop("s1", "done")
+    project, turn = conn.execute("SELECT project_id, id FROM turns").fetchone()
+    for i in range(6):
+        store.add_memory(
+            conn,
+            project_id=project,
+            kind="fact",
+            title="",
+            body=f"Parser rule {i}: tokens are split on spaces.",
+            source="agent",
+            trust="observer",
+            turn_id=turn,
+        )
+    query = search.Query(text="parser tokens", project_id=project, limit=10)
+    facts = [h for h in search.search(conn, config, query) if h.owner[0] == "m"]
+    assert len(facts) == 6  # the per-session cap is for turns; six facts of one session are six things

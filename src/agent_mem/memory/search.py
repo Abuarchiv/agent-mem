@@ -595,7 +595,9 @@ def search(
     per_session: dict[str | None, int] = {}
     results: list[Hit] = []
     for hit in candidates:
-        if hit.session_id is not None:
+        # The cap keeps one long session's turns from filling the list; facts from that session are separate
+        # things (a day of work leaves dozens), so they are not capped.
+        if hit.session_id is not None and hit.owner[0] == "t":
             per_session[hit.session_id] = per_session.get(hit.session_id, 0) + 1
             if per_session[hit.session_id] > config.retrieval.max_per_session:
                 continue
