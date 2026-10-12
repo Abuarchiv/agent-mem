@@ -108,13 +108,18 @@ def test_hybrid_search_with_vectors_and_graph(driver: Driver, conn, config: Conf
     assert by_file[0].label == "T1" and "graph" in by_file[0].sources
 
 
-def test_time_filtered_search(driver: Driver, conn, config: Config):
+def test_named_time_ranks_first_and_excludes_nothing(driver: Driver, conn, config: Config):
     driver.prompt("s1", "rotate the signing keys")
-    driver.stop("s1", "done")
+    driver.stop("s1", "rotated the old signing keys")
     conn.execute("UPDATE turns SET started_at = ?", (timeutil.iso(timeutil.now() - timedelta(days=1)),))
+    driver.prompt("s2", "rotate the signing keys again")
+    driver.stop("s2", "rotated the new signing keys")
     retriever = semantic.Retriever(conn, config)
-    assert retriever.search("gestern signing keys", _pid(conn), record_shown=False)
-    assert not retriever.search("heute signing keys", _pid(conn), record_shown=False)
+    yesterday = retriever.search("gestern signing keys", _pid(conn), record_shown=False)
+    today = retriever.search("heute signing keys", _pid(conn), record_shown=False)
+    assert yesterday[0].session_id == "claude:s1" and today[0].session_id == "claude:s2"
+    # A future or misread time ("tips for this weekend") must not hide every memory.
+    assert len(retriever.search("signing keys tips for next weekend", _pid(conn), record_shown=False)) >= 2
 
 
 def test_superseded_memories_are_hidden(conn, config: Config, driver: Driver):

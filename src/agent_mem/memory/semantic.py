@@ -275,16 +275,17 @@ class Retriever:
         include_other_projects: bool = False,
         exclude_session: str | None = None,
         record_shown: bool = True,
+        now: datetime | None = None,
     ) -> list[search.Hit]:
-        window = time_window(text)
+        """``now`` anchors relative times ("last week") and recency; the clock by default."""
+        window = time_window(text, now)
         query = search.Query(
             text=strip_time_words(text) if window else text,
             project_id=project_id,
             exclude_session=exclude_session,
             limit=limit,
             include_other_projects=include_other_projects,
-            since=window[0] if window else None,
-            until=window[1] if window else None,
+            window=window,
         )
         return search.search(
             self.conn,
@@ -293,6 +294,7 @@ class Retriever:
             vector_source=self.vector_source(project_id) if self.embedder else None,
             graph_source=self.graph_source,
             record_shown=record_shown,
+            now=now,
         )
 
 

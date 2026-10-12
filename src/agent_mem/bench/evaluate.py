@@ -7,7 +7,8 @@ Two data sets, two backends:
   Abstention items (``*_abs``) are skipped because they have no gold session. ``subset`` restricts the
   run to the question ids listed in ``tests/fixtures/longmemeval_subset.json`` (§8: 40 questions).
   ``tests/fixtures/coding_agent_life_v1.json`` (agentmemory's coding corpus) uses the same layout plus
-  ``session_dates``. ``R@k`` counts a question when any gold session is in the top k (LongMemEval),
+  ``session_dates``. Session dates (``haystack_dates`` in LongMemEval) are used as turn times and the
+  ``question_date`` as "now", so "last week" means the week before the question. ``R@k`` counts a question when any gold session is in the top k (LongMemEval),
   ``All@k`` only when every gold session is (agentmemory's R@5).
 * ``fixture``: ``tests/fixtures/memory_cases.json``. hit@1 (top result contains an expected substring),
   abstention (no result for unanswerable questions) and contradiction resolution (top result shows the
@@ -24,7 +25,7 @@ import json
 import tempfile
 import time
 from collections import defaultdict
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -37,10 +38,23 @@ from agent_mem.memory import search, semantic
 Session = list[dict[str, Any]]
 
 
+def parse_date(value: object) -> datetime | None:
+    """ISO, or LongMemEval's "2023/05/20 (Sat) 02:21"."""
+    if not isinstance(value, str):
+        return None
+    parsed = timeutil.parse(value)
+    if parsed is None:
+        try:
+            parsed = datetime.strptime(value, "%Y/%m/%d (%a) %H:%M").replace(tzinfo=UTC)
+        except ValueError:
+            return None
+    return parsed
+
+
 class Backend(Protocol):
     def ingest(self, sessions: list[Session], ids: list[str], dates: list[str] | None = None) -> None: ...
-    def ranked(self, question: str, k: int) -> list[tuple[str, str, float]]:
-        """(session_id, text, score) best first."""
+    def ranked(self, question: str, k: int, now: datetime | None = None) -> list[tuple[str, str, float]]:
+        """(session_id, text, score) best first; ``now`` is the time the question is asked."""
         ...
 
     def close(self) -> None: ...
@@ -63,7 +77,7 @@ class SqliteBackend:
     def ingest(self, sessions: list[Session], ids: list[str], dates: list[str] | None = None) -> None:
         base = timeutil.now()
         for index, (session, session_id) in enumerate(zip(sessions, ids, strict=False)):
-            parsed = timeutil.parse(dates[index]) if dates else None
+            parsed = parse_date(dates[index]) if dates else None
             ts = timeutil.iso(parsed or base.replace(microsecond=0) - timedelta(days=len(sessions) - index))
             answer: list[str] = []
             started = False
@@ -98,10 +112,10 @@ class SqliteBackend:
             with_context=False,
         )
 
-    def ranked(self, question: str, k: int) -> list[tuple[str, str, float]]:
+    def ranked(self, question: str, k: int, now: datetime | None = None) -> list[tuple[str, str, float]]:
         project = self.conn.execute("SELECT id FROM projects").fetchone()[0]
         retriever = semantic.Retriever(self.conn, self.config, self.embedder)
-        hits = retriever.search(question, project, limit=k, record_shown=False)
+        hits = retriever.search(question, project, limit=k, record_shown=False, now=now)
         out = []
         for hit in hits:
             native = str(getattr(hit, "session_id", "") or "").split(":", 1)[-1]
@@ -170,7 +184,7 @@ class Mem0Backend:
                 self.adapter.extract(messages, self.NAMESPACE, metadata={"session_id": session_id})
             self.add_seconds.append(time.perf_counter() - started)
 
-    def ranked(self, question: str, k: int) -> list[tuple[str, str, float]]:
+    def ranked(self, question: str, k: int, now: datetime | None = None) -> list[tuple[str, str, float]]:
         facts = self.adapter.search(question, self.NAMESPACE, k=k)
         return [(str(f.metadata.get("session_id", "")), f.text, float(f.score or 0.0)) for f in facts]
 
@@ -257,10 +271,13 @@ class Runner:
             with tempfile.TemporaryDirectory() as tmp:
                 backend = self.open(Path(tmp))
                 backend.ingest(
-                    item["haystack_sessions"], [str(i) for i in item["haystack_session_ids"]], item.get("session_dates")
+                    item["haystack_sessions"],
+                    [str(i) for i in item["haystack_session_ids"]],
+                    item.get("session_dates") or item.get("haystack_dates"),
                 )
+                asked = parse_date(item.get("question_date"))
                 ranked_sessions: list[str] = []
-                for session_id, _text, _score in backend.ranked(item["question"], max(ks) * 3):
+                for session_id, _text, _score in backend.ranked(item["question"], max(ks) * 3, asked):
                     if session_id and session_id not in ranked_sessions:
                         ranked_sessions.append(session_id)
                 gold = {str(s) for s in item["answer_session_ids"]}

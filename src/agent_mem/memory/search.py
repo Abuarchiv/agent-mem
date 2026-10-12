@@ -422,8 +422,9 @@ class Query:
     exclude_session: str | None = None
     limit: int = 8
     include_other_projects: bool = False
-    since: datetime | None = None
-    until: datetime | None = None
+    # A time named in the question ("last week", "8. April"). It adds candidates and never excludes:
+    # a misread or future time ("tips for this weekend") must not hide every memory (B.29).
+    window: tuple[datetime, datetime] | None = None
     kinds: set[str] | None = None
     exclude_origins: set[str] = field(default_factory=set)
 
@@ -443,18 +444,14 @@ def search(
     lists["graph"] = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, 40)
     if vector_source is not None:
         lists["vector"] = vector_source(query.text, 60)
-    if query.since or query.until:
+    if query.window:
         # "What did we do on 8 April?" names a time, not a topic: every turn in the window is a candidate.
         lists["time"] = [
             ("t", int(row[0]))
             for row in conn.execute(
                 "SELECT id FROM turns WHERE project_id IS ? AND started_at >= ? AND started_at < ? "
                 "ORDER BY started_at DESC LIMIT 40",
-                (
-                    query.project_id,
-                    timeutil.iso(query.since) if query.since else "",
-                    timeutil.iso(query.until) if query.until else "9999",
-                ),
+                (query.project_id, timeutil.iso(query.window[0]), timeutil.iso(query.window[1])),
             )
         ]
     fused = rrf(lists, config.retrieval.rrf_k)
@@ -476,11 +473,6 @@ def search(
         if query.kinds and hit.kind not in query.kinds:
             continue
         if hit.origin and hit.origin in query.exclude_origins:
-            continue
-        stamp = timeutil.parse(hit.ts)
-        if query.since and stamp and stamp < query.since:
-            continue
-        if query.until and stamp and stamp >= query.until:
             continue
         hit.rrf = score / max_rrf if max_rrf else 0.0
         hit.sources = sources
