@@ -86,11 +86,13 @@ def parse(text: str, turn_ids: list[int]) -> tuple[dict[int, tuple[str, str]], d
     return turns, summary
 
 
-def summarize(conn: sqlite3.Connection, llm: Any, session_id: str, turn_ids: list[int]) -> int:
-    """Ask the model once and store the result. Returns the number of titled turns."""
-    text = llm.generate_response(
-        [{"role": "user", "content": render(conn, session_id, turn_ids)}], response_format={"type": "json_object"}
-    )
+def summarize(
+    conn: sqlite3.Connection, llm: Any, session_id: str, turn_ids: list[int], extra: str = ""
+) -> tuple[int, str, int]:
+    """Ask the model once and store the work log. ``extra`` adds a task to the same call (the contradiction pairs).
+    Returns (titled turns, the raw answer for the extra task, prompt size)."""
+    prompt = render(conn, session_id, turn_ids) + (f"\n{extra}" if extra else "")
+    text = llm.generate_response([{"role": "user", "content": prompt}], response_format={"type": "json_object"})
     turns, summary = parse(text, turn_ids)
     for turn_id, (kind, title) in turns.items():
         conn.execute(
@@ -102,4 +104,4 @@ def summarize(conn: sqlite3.Connection, llm: Any, session_id: str, turn_ids: lis
             "UPDATE sessions SET title = ?, summary_json = ?, summarized_at = ? WHERE id = ?",
             (summary["title"], json.dumps(body, ensure_ascii=False), timeutil.iso(), session_id),
         )
-    return len(turns)
+    return len(turns), text, len(prompt)

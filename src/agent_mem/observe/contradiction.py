@@ -1,7 +1,7 @@
 """Contradiction and duplicate layer on top of mem0 (docs/PLAN.md §4.6, D7).
 
-mem0 only adds. For every new fact we look up similar existing facts in the same namespace and ask
-the model once per bundle which pairs are a KEEP, a SUPERSEDE (new replaces old) or a DUPLICATE
+mem0 only adds. For every new fact we look up similar existing facts in the same namespace; the work-log call of the
+bundle (``observe/summary.py``) also decides which pairs are a KEEP, a SUPERSEDE (new replaces old) or a DUPLICATE
 (new repeats old). Verdicts are applied in SQLite (``store.supersede`` / ``invalid_at``) and in
 mem0 (``forget``), so neither search nor the next extraction sees the stale fact again.
 """
@@ -16,15 +16,6 @@ from dataclasses import dataclass
 from agent_mem.core import timeutil
 from agent_mem.memory import store
 from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
-
-PROMPT = """You check a coding project's memory for contradictions and duplicates.
-Each line below pairs a NEW fact with an OLD fact that is similar to it. For every pair decide:
-- SUPERSEDE: the new fact replaces the old one (a correction, an upgrade, a changed decision, a changed value).
-- DUPLICATE: the new fact repeats the old one without adding information.
-- KEEP: both are true at the same time (different subjects, compatible details, or unrelated).
-Answer with JSON only: {"verdicts": [{"pair": <number>, "verdict": "SUPERSEDE"|"DUPLICATE"|"KEEP"}]}.
-
-"""
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -58,9 +49,17 @@ def candidates(
     return pairs
 
 
-def render(pairs: list[Pair]) -> str:
-    lines = [f"{p.number}. NEW: {p.new.text}\n   OLD: {p.old.text}" for p in pairs]
-    return PROMPT + "\n".join(lines)
+SECTION = """Also check the memory for contradictions and duplicates. Each pair below joins a NEW fact with a similar OLD
+fact. Decide per pair: SUPERSEDE (the new one replaces the old one: a correction, an upgrade, a changed decision or
+value), DUPLICATE (the new one repeats the old one) or KEEP (both are true at once). Put the answers into the same JSON
+as "verdicts": [{"pair": <number>, "verdict": "SUPERSEDE"|"DUPLICATE"|"KEEP"}].
+
+"""
+
+
+def section(pairs: list[Pair]) -> str:
+    """The pairs as a part of the work-log prompt (``observe/summary.py``): one model call for both."""
+    return SECTION + "\n".join(f"{p.number}. NEW: {p.new.text}\n   OLD: {p.old.text}" for p in pairs)
 
 
 def parse(text: str, pairs: list[Pair]) -> list[Verdict]:
@@ -73,14 +72,6 @@ def parse(text: str, pairs: list[Pair]) -> list[Verdict]:
         if pair is not None and verdict in {"SUPERSEDE", "DUPLICATE", "KEEP"}:
             verdicts.append(Verdict(pair, verdict))
     return verdicts
-
-
-def judge(llm, pairs: list[Pair]) -> list[Verdict]:
-    """One model call for all pairs of a bundle."""
-    if not pairs:
-        return []
-    text = llm.generate_response([{"role": "user", "content": render(pairs)}], response_format={"type": "json_object"})
-    return parse(text, pairs)
 
 
 def memory_id_for(conn: sqlite3.Connection, mem0_id: str) -> int | None:

@@ -52,7 +52,7 @@ def test_summary_titles_turns_and_keeps_a_running_session_summary(driver: Driver
             },
         }
     )
-    assert summary.summarize(conn, llm, session_id, [first, second]) == 2
+    assert summary.summarize(conn, llm, session_id, [first, second])[0] == 2
     prompt = llm.prompts[0]
     assert "harness notice: Background build finished" in prompt and "Previous summary: none" in prompt
     rows = conn.execute("SELECT id, type, title FROM turns ORDER BY id").fetchall()
@@ -74,7 +74,7 @@ def test_garbage_answers_change_nothing(driver: Driver, conn):
     session_id, turn_ids = _session(driver, conn)
     with pytest.raises(ValueError):
         summary.summarize(conn, Answer("not json"), session_id, turn_ids)
-    assert summary.summarize(conn, Answer({"memory": []}), session_id, turn_ids) == 0
+    assert summary.summarize(conn, Answer({"memory": []}), session_id, turn_ids)[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM turns WHERE title IS NOT NULL").fetchone()[0] == 0
 
 
@@ -274,3 +274,19 @@ def test_briefing_pulls_in_memories_about_the_open_next_steps(driver: Driver, co
     block = inject.session_start(conn, config, project_id, "claude:s9", "claude")
     assert block is not None and ("m", target) in block.owners
     assert f"[M{target} · " in block.text and "· fact] The import validation" in block.text
+
+
+def test_contradiction_pairs_ride_along_in_the_work_log_call(driver: Driver, conn):
+    from agent_mem.observe import contradiction
+    from agent_mem.observe.mem0_adapter import Fact
+
+    session_id, turn_ids = _session(driver, conn)
+    pair = contradiction.Pair(
+        1, Fact(id="new", text="Tests run with nox"), Fact(id="old", text="Tests run with pytest")
+    )
+    llm = Answer({"turns": [], "verdicts": [{"pair": 1, "verdict": "SUPERSEDE"}]})
+    _, text, chars = summary.summarize(conn, llm, session_id, turn_ids, contradiction.section([pair]))
+    assert "1. NEW: Tests run with nox\n   OLD: Tests run with pytest" in llm.prompts[0] and chars == len(
+        llm.prompts[0]
+    )
+    assert [v.verdict for v in contradiction.parse(text, [pair])] == ["SUPERSEDE"]

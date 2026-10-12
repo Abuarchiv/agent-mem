@@ -106,8 +106,9 @@ def test_contradiction_supersedes_old_fact(observe_config: Config, project: Path
     assert len(rows) == 2
     assert rows[0]["invalid_at"] is not None and rows[0]["superseded_by"] == 2
     assert rows[1]["invalid_at"] is None
-    judge = conn.execute("SELECT COUNT(*) FROM observe_calls WHERE purpose = 'judge' AND ok = 1").fetchone()[0]
-    assert judge == 1
+    # Verdicts come with the work-log call: one model call after each extraction, no separate judge call.
+    purposes = [r[0] for r in conn.execute("SELECT purpose FROM observe_calls WHERE ok = 1 ORDER BY id")]
+    assert purposes == ["extract", "summary", "extract", "summary"]
     conn.close()
 
 

@@ -204,18 +204,31 @@ class Worker:
             _record_call(self.conn, name, "extract", time.perf_counter() - started, True, b.chars, b.turn_ids, None)
             mirror(self.conn, self.config, b, facts)
             self.stats["facts"] += len(facts)
-            self._contradictions(b, facts, llm, name, namespace)
-            self._summarize(b, llm, name)
+            self._after_facts(b, facts, llm, name, namespace)
             return name
         if last_error:
             raise providers.ProviderError(last_error)
         return "raw"
 
-    def _summarize(self, b: bundling.Bundle, llm: Any, provider: str) -> None:
-        """Turn titles and the session summary. Facts are stored already; a failure here loses nothing."""
+    def _after_facts(self, b: bundling.Bundle, facts: list[Fact], llm: Any, provider: str, namespace: str) -> None:
+        """One model call for the work log and the contradiction check (two calls before: about 7 s and one CLI start
+        saved per bundle). Facts are stored already; a failure here loses none, stale ones wait for the next bundle."""
+        pairs = (
+            contradiction.candidates(
+                self.adapter,
+                facts,
+                namespace,
+                min_score=self.config.observe.contradiction_min_score,
+                max_pairs=self.config.observe.contradiction_max_pairs,
+            )
+            if facts
+            else []
+        )
         started = time.perf_counter()
         try:
-            titled = summary.summarize(self.conn, llm, b.session_id, b.turn_ids)
+            titled, text, chars = summary.summarize(
+                self.conn, llm, b.session_id, b.turn_ids, contradiction.section(pairs) if pairs else ""
+            )
         except Exception as error:
             _record_call(
                 self.conn,
@@ -228,46 +241,12 @@ class Worker:
                 f"{type(error).__name__}: {error}"[:300],
             )
             return
-        _record_call(self.conn, provider, "summary", time.perf_counter() - started, True, 0, b.turn_ids, None)
+        _record_call(self.conn, provider, "summary", time.perf_counter() - started, True, chars, b.turn_ids, None)
         self.stats["titled"] += titled
-
-    def _contradictions(self, b: bundling.Bundle, facts: list[Fact], llm: Any, provider: str, namespace: str) -> None:
-        pairs = contradiction.candidates(
-            self.adapter,
-            facts,
-            namespace,
-            min_score=self.config.observe.contradiction_min_score,
-            max_pairs=self.config.observe.contradiction_max_pairs,
-        )
         if not pairs:
             return
-        started = time.perf_counter()
         try:
-            verdicts = contradiction.judge(llm, pairs)
-        except Exception as error:  # a failed judgement never loses facts; stale ones stay until the next bundle
-            _record_call(
-                self.conn,
-                provider,
-                "judge",
-                time.perf_counter() - started,
-                False,
-                len(contradiction.render(pairs)),
-                b.turn_ids,
-                f"{type(error).__name__}: {error}"[:300],
-            )
-            return
-        _record_call(
-            self.conn,
-            provider,
-            "judge",
-            time.perf_counter() - started,
-            True,
-            len(contradiction.render(pairs)),
-            b.turn_ids,
-            None,
-        )
-        try:
-            counts = contradiction.apply(self.conn, self.adapter, verdicts)
+            counts = contradiction.apply(self.conn, self.adapter, contradiction.parse(text, pairs))
         except Exception as error:  # facts are mirrored already; a broken verdict must not lose the bundle
             logutil.write(self.config.log_dir, "observe", error=f"apply: {type(error).__name__}: {error}"[:200])
             return
