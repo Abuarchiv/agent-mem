@@ -22,8 +22,8 @@ from typing import Any
 
 from agent_mem import __version__
 from agent_mem.core import timeutil
-from agent_mem.core.signals import first_line
 from agent_mem.core.config import Config
+from agent_mem.core.signals import first_line
 from agent_mem.memory import learn
 
 LIMITS = {

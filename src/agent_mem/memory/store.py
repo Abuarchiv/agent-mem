@@ -23,7 +23,8 @@ def _json_list(value: str | None) -> list[str]:
     return [item for item in parsed if isinstance(item, str)] if isinstance(parsed, list) else []
 
 
-_SCRATCH = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
+# Only compared against, never written to.
+_SCRATCH = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")  # noqa: S108
 
 
 def scratch_path(path: str) -> bool:
