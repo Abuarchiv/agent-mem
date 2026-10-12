@@ -26,6 +26,9 @@ from agent_mem.hooks import capture, inject
 from agent_mem.hooks.normalize import normalize
 
 INDEXER_THROTTLE_SECONDS = 60
+# The indexer holds a file lock, so a quick second start just exits; a queued session needs it soon.
+REPLAY_THROTTLE_SECONDS = 5
+SPOOL_STUCK_SECONDS = 30
 
 
 def _read_stdin(limit: int, preread: bytes | None = None) -> str:
@@ -171,11 +174,12 @@ def _spawn(argv: list[str], config: Config) -> bool:
     return True
 
 
-def _spawn_for_migration(config: Config) -> None:
-    # The database cannot be written yet, so the throttle lives in a marker file instead of ``meta``.
+def _spawn_for_migration(config: Config, every: float = INDEXER_THROTTLE_SECONDS) -> None:
+    """Start the indexer (migration, spool replay), at most once per ``every`` seconds. The database may be
+    unusable, so the throttle lives in a marker file instead of ``meta``."""
     marker = config.data_dir / ".migration-requested"
     with contextlib.suppress(OSError):
-        if marker.exists() and time.time() - marker.stat().st_mtime < INDEXER_THROTTLE_SECONDS:
+        if marker.exists() and time.time() - marker.stat().st_mtime < every:
             return
         marker.touch()
         if not env_flag("AGENT_MEM_NO_SPAWN"):
@@ -243,7 +247,8 @@ class _Worker(threading.Thread):
             if self.spooled:
                 return
             try:
-                spool.write(self.config.spool_dir, {"type": "event", "event": self.event.to_dict()})
+                tag = spool.session_tag(self.event.harness, self.event.session_id)
+                spool.write(self.config.spool_dir, {"type": "event", "event": self.event.to_dict()}, tag)
                 self.spooled = True
             except OSError as error:
                 self.error = f"{self.error}; spool failed: {error}"
@@ -277,6 +282,22 @@ def run(
         return ""
     if event is None:
         return ""
+    if spool.holds_session(config.spool_dir, spool.session_tag(event.harness, event.session_id)):
+        # An earlier event of this session waits in the spool (the database was locked): this one queues behind it.
+        # Processed now, it would overtake that one; a Stop would answer the wrong turn, a prompt close a running
+        # one. The indexer replays the spool in order.
+        worker = _Worker(config, event)
+        worker._spool()
+        _spawn_for_migration(config, every=REPLAY_THROTTLE_SECONDS)  # the session waits until the replay ran
+        logutil.write(config.log_dir, "hook", harness=harness, kind=event.kind, error="queued behind spool")
+        # A lock of a few seconds passes unnoticed. Events waiting longer mean the database is unusable: say so,
+        # or a broken database would go silent after its first error.
+        if harness not in TERMINAL or spool.oldest_age(config.spool_dir) < SPOOL_STUCK_SECONDS:
+            return ""
+        text = "agent-mem cannot save events: they wait in the spool. Run `agent-mem doctor`."
+        if event.kind != "session_start" and not _notice_due(config, text):
+            return ""
+        return json.dumps({"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
     worker = _Worker(config, event)
     worker.start()
     worker.join(config.hook_deadline_ms / 1000)

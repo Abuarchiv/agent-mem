@@ -24,7 +24,7 @@ from agent_mem.memory.search import STOPWORDS
 BATCH = 200
 _META = "concepts.last_memory_id"
 # Raised when the key changes; the next run then links every memory again (a few seconds for a few hundred).
-VERSION = "2"
+VERSION = "3"
 # A concept needs a letter and three characters; numbers, ports and single symbols connect nothing.
 _USEFUL = re.compile(r"(?=.*[^\W\d_]).{3,}")
 
@@ -88,8 +88,21 @@ def download_model(config: Config) -> Path:
 def normalize(text: str) -> str:
     """mem0's own normalisation (``Memory._normalize_entity_text``), plus code quotes removed; "agent_mem",
     "agent-mem" and "Agent Mem" are one concept."""
-    key = " ".join(text.strip().strip("`'\"").lower().split())
+    key = " ".join(path_form(text).lower().split())
     return key if "/" in key or "." in key else re.sub(r"[\s_-]+", "-", key)
+
+
+_SPLIT_PATH = re.compile(r"(?:[a-z_][\w.-]* ){1,4}[\w.-]+")  # directory names start lowercase
+
+
+def path_form(text: str) -> str:
+    """spaCy hands ``docs/PLAN.md`` back as "docs PLAN.md"; words ending in a file name are a path again."""
+    text = text.strip().strip("`'\"")
+    parts = text.split()
+    linking = {"in", "im", "on", "at", "to", "of", "for", "and", "und", "the", "der", "die", "das", "mit", "von"}
+    if _SPLIT_PATH.fullmatch(text) and re.search(r"\.[A-Za-z]{1,5}$", text) and not linking & set(parts[:-1]):
+        return "/".join(parts)
+    return text
 
 
 def link_new(
@@ -133,7 +146,7 @@ def link_new(
         text_of_memory = f"{row['title'] or ''}\n{row['body'] or ''}".strip()
         proper = names(text_of_memory)
         for kind, text in extract(text_of_memory):
-            surface = text.strip().strip("`'\"")
+            surface = path_form(text)
             # Only a single plain word gets its base form; the lemmatizer splits paths ("src -- agent_mem")
             # and cuts compounds ("SQLite-Such").
             label = (base(surface) or surface) if surface.isalpha() else surface

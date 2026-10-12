@@ -246,11 +246,15 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             f"SELECT COUNT(*) FROM rules WHERE enabled = 0 {'AND (project_id = ? OR project_id IS NULL)' if scoped else ''}",
             params,
         ),
-        "concepts": _count(
-            conn,
-            "SELECT COUNT(*) FROM (SELECT l.concept_id FROM concept_links l JOIN concepts c ON c.id = l.concept_id "
-            f"WHERE c.specific = 1 {'AND c.project_id = ?' if scoped else ''} GROUP BY l.concept_id HAVING COUNT(*) >= 2)",
-            params,
+        # The same concepts the graph can draw: current memories, a topic, at least two memories.
+        "concepts": sum(
+            _names_a_topic(row[0])
+            for row in conn.execute(
+                "SELECT c.label FROM concept_links l JOIN concepts c ON c.id = l.concept_id "
+                "JOIN memories m ON m.id = l.memory_id AND m.invalid_at IS NULL "
+                f"WHERE c.specific = 1 {'AND c.project_id = ?' if scoped else ''} GROUP BY c.id HAVING COUNT(*) >= 2",
+                params,
+            )
         ),
     }
     health = status(conn, config)

@@ -351,3 +351,49 @@ def test_forgetting_a_memory_removes_concepts_no_other_memory_names(config: Conf
         store.delete_owner(conn, "m", int(secret or 0))
     assert [r[0] for r in conn.execute("SELECT label FROM concepts")] == ["Codex"]  # still named by the other one
     conn.close()
+
+
+def test_events_of_a_session_with_spooled_events_queue_behind_them(config: Config, project: Path):
+    from agent_mem.core import spool
+    from agent_mem.core.events import Event
+    from agent_mem.memory import indexer
+
+    first = Event(
+        harness="claude",
+        kind="prompt",
+        session_id="s1",
+        ts="2026-10-12T10:00:00.000Z",
+        cwd=str(project),
+        prompt="first, spooled while the database was locked",
+        raw_kind="UserPromptSubmit",
+    )
+    spool.write(config.spool_dir, {"type": "event", "event": first.to_dict()}, spool.session_tag("claude", "s1"))
+    base = {"session_id": "s1", "cwd": str(project)}
+    stop = json.dumps({**base, "hook_event_name": "Stop", "last_assistant_message": "answer to the first"})
+    assert hook.run("claude", None, stop, config) == ""  # queued, not processed ahead of the prompt
+    other = {"session_id": "s2", "cwd": str(project), "hook_event_name": "UserPromptSubmit", "prompt": "other session"}
+    hook.run("claude", None, json.dumps(other), config)  # another session is not held up
+    conn = db.connect(config)
+    assert [r[0] for r in conn.execute("SELECT prompt FROM turns")] == ["other session"]
+    assert spool.count(config.spool_dir) == 2
+    indexer.run(config, allow_download=False)
+    turns = {r["prompt"]: (r["answer"], r["outcome"]) for r in conn.execute("SELECT * FROM turns")}
+    assert turns["first, spooled while the database was locked"] == ("answer to the first", "ok")
+    conn.close()
+
+
+def test_a_busy_database_is_no_indexer_failure(config: Config, monkeypatch):
+    import sqlite3
+
+    from agent_mem.memory import indexer
+
+    db.connect(config).close()
+
+    def busy(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(indexer, "_work", busy)
+    assert indexer.run(config, allow_download=False)["skipped"] == "database busy"
+    conn = db.connect(config)
+    assert conn.execute("SELECT COUNT(*) FROM health WHERE component = 'indexer'").fetchone()[0] == 0
+    conn.close()

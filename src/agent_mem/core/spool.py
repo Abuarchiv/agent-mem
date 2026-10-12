@@ -8,6 +8,7 @@ unique dedupe key. Standard library only.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import secrets
@@ -23,9 +24,14 @@ class PermanentError(Exception):
     """The record can never be applied (e.g. a bug or an unsupported shape): quarantine it."""
 
 
-def write(spool_dir: Path, record: dict[str, Any]) -> Path:
+def session_tag(harness: str, session_id: str) -> str:
+    return hashlib.sha256(f"{harness}:{session_id}".encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def write(spool_dir: Path, record: dict[str, Any], session: str = "") -> Path:
+    """``session`` (``session_tag``) goes into the name, so a hook can see that its session waits in the spool."""
     ensure_private_dir(spool_dir)
-    name = f"{time.time_ns():020d}-{os.getpid()}-{secrets.token_hex(4)}.json"
+    name = f"{time.time_ns():020d}-{os.getpid()}-{session or 'x'}-{secrets.token_hex(4)}.json"
     target = spool_dir / name
     temp = spool_dir / f".{name}.tmp"
     with open(temp, "w", encoding="utf-8") as handle:
@@ -35,6 +41,28 @@ def write(spool_dir: Path, record: dict[str, Any]) -> Path:
             os.fsync(handle.fileno())
     os.replace(temp, target)
     return target
+
+
+def holds_session(spool_dir: Path, session: str) -> bool:
+    """True while an earlier event of this session waits in the spool. Usually the directory is empty."""
+    try:
+        return any(f"-{session}-" in name for name in os.listdir(spool_dir) if name.endswith(".json"))
+    except OSError:
+        return False
+
+
+def oldest_age(spool_dir: Path) -> float:
+    """Seconds since the oldest waiting event was spooled (its name starts with time_ns), 0 when none waits."""
+    try:
+        names = [name for name in os.listdir(spool_dir) if name.endswith(".json") and not name.startswith(".")]
+    except OSError:
+        return 0.0
+    if not names:
+        return 0.0
+    try:
+        return max(0.0, time.time() - int(min(names).split("-", 1)[0]) / 1e9)
+    except ValueError:
+        return 0.0
 
 
 def pending(spool_dir: Path) -> list[Path]:

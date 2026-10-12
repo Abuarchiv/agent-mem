@@ -370,6 +370,10 @@ class Worker:
             self._adapter.close()
 
 
+# A background process may wait for the write lock; the hooks' 150 ms made the worker abort on any longer write.
+BUSY_TIMEOUT_MS = 10_000
+
+
 def run(
     config: Config, *, drain: bool = True, retry_failed: bool = False, reprocess_raw: bool = False
 ) -> dict[str, Any]:
@@ -380,7 +384,7 @@ def run(
     except Timeout:
         return {"skipped": "locked"}
     _lower_priority()
-    conn = db.connect(config)
+    conn = db.connect(config, busy_timeout_ms=BUSY_TIMEOUT_MS)
     try:
         if retry_failed:
             queue.retry_failed(conn)
@@ -439,7 +443,7 @@ def reindex(config: Config) -> dict[str, int]:
     """
     lock = FileLock(str(config.observe_lock_path))
     lock.acquire(timeout=30)
-    conn = db.connect(config)
+    conn = db.connect(config, busy_timeout_ms=BUSY_TIMEOUT_MS)
     try:
         total = int(
             conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0]

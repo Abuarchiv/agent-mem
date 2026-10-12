@@ -125,3 +125,11 @@ def test_concept_model_downloads_into_the_model_dir_and_checks_its_checksum(conf
     config.observe.entity_model = "../../etc"
     with pytest.raises(ValueError, match="not a spaCy model name"):
         concepts.download_model(config)
+
+
+def test_a_path_split_by_spacy_is_one_concept() -> None:
+    from agent_mem.observe import concepts
+
+    assert concepts.normalize("docs PLAN.md") == concepts.normalize("docs/PLAN.md") == "docs/plan.md"
+    assert concepts.path_form("tests in test_ui.py") == "tests in test_ui.py"  # a phrase, not a path
+    assert concepts.path_form("Viewer test_ui.py") == "Viewer test_ui.py"

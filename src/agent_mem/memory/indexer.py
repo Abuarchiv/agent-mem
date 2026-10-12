@@ -137,6 +137,13 @@ def run(config: Config, *, force_consolidate: bool = False, allow_download: bool
             stats.update(_work(conn, config, force_consolidate, allow_download))
             with db.transaction(conn):
                 db.record_health(conn, "indexer")
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error) and "busy" not in str(error):
+                raise
+            # Another process held the database longer than the busy timeout: not a failure to report; the spool
+            # stays and the next run replays it.
+            logutil.write(config.log_dir, "indexer", error="busy", detail=str(error)[:200])
+            stats["skipped"] = "database busy"
         except Exception as error:
             with contextlib.suppress(sqlite3.Error), db.transaction(conn):
                 db.record_health(conn, "indexer", f"{type(error).__name__}: {error}")
@@ -220,6 +227,17 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         with db.transaction(conn):
             db.set_meta(conn, "last_backup_at", timeutil.iso())
         stats["backup"] = True
+
+    # Events spooled while this run worked (embeddings, consolidation, a backup) would wait for the next run, and
+    # every later event of their session queues behind them (hooks.hook): replay them before leaving.
+    for _ in range(5):
+        if not spool.count(config.spool_dir):
+            break
+        applied, quarantined = spool.drain(
+            config.spool_dir, config.quarantine_dir, lambda record: _apply_record(conn, config, record)
+        )
+        stats["spool_applied"] += applied
+        stats["spool_quarantined"] += quarantined
 
     conn.execute("PRAGMA optimize")
     with contextlib.suppress(sqlite3.OperationalError):

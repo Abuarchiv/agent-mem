@@ -85,7 +85,7 @@ def test_prompt_injection_stays_out_of_the_terminal(config: Config, project: Pat
         assert "systemMessage" not in (json.loads(output) if output else {})
 
 
-def test_session_end_and_failures_reach_the_terminal(config: Config, project: Path):
+def test_session_end_and_failures_reach_the_terminal(config: Config, project: Path, monkeypatch):
     start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"}
     hook.run("claude", None, json.dumps(start), config)
     hook.run("claude", None, _prompt_payload(project, "s", "Build the parser"), config)
@@ -97,8 +97,10 @@ def test_session_end_and_failures_reach_the_terminal(config: Config, project: Pa
     first = json.loads(hook.run("claude", None, _prompt_payload(project, "s", "again"), config))
     assert "cannot use its database" in first["systemMessage"] and "agent-mem doctor" in first["systemMessage"]
     assert hook.run("claude", None, _prompt_payload(project, "s", "and again"), config) == ""  # once per 10 min
+    # Later events of the session queue behind the spooled ones; once they wait long, the start says so.
+    monkeypatch.setattr(hook, "SPOOL_STUCK_SECONDS", 0)
     panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
-    assert "! agent-mem cannot use its database" in panel
+    assert "cannot save events" in panel and "agent-mem doctor" in panel
 
 
 def test_invalid_payload_is_quarantined_and_silent(config: Config):
