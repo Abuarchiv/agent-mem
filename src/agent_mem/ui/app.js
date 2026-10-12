@@ -30,7 +30,7 @@
     { id: "overview", label: "Overview", icon: "overview", group: "Memory", search: "Search requests, memories and files…" },
     { id: "timeline", label: "Timeline", icon: "timeline", group: "Memory", search: "Search requests, results, files and commands…" },
     { id: "memory", label: "Memories", icon: "memory", group: "Memory", search: "Search memories…" },
-    { id: "learned", label: "Learned", icon: "learned", group: "Memory", search: "Search rules, recipes and preferences…" },
+    { id: "learned", label: "Learned", icon: "learned", group: "Memory", search: "Search lessons, rules, fixes and preferences…" },
     { id: "graph", label: "Connections", short: "Links", icon: "graph", group: "Memory", search: "Search files, commands and errors…" },
     { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search running parts…" },
   ];
@@ -163,7 +163,7 @@
 
   function renderChrome() {
     const failing = attention().filter((item) => item.tone === "bad").length;
-    const counts = { timeline: turns().length, memory: memories().filter((m) => !m.invalid_at).length, learned: data.rules.length + data.recipes.length };
+    const counts = { timeline: turns().length, memory: memories().filter((m) => !m.invalid_at).length, learned: data.rules.length + data.recipes.length + memories().filter((m) => m.kind === "lesson" && !m.invalid_at).length };
     const count = (id) => {
       if (id === "health") return failing > 0 ? `<span class="nav-count is-alert">${failing}</span>` : "";
       const value = counts[id];
@@ -415,6 +415,9 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 
   function learnedView() {
     const rules = data.rules.filter((rule) => inProjectOrGlobal(rule.project_id) && matches([rule.pattern, rule.message]));
+    const lessons = memories().filter((memory) => memory.kind === "lesson" && !memory.invalid_at && matches([memory.title, memory.body, `M${memory.id}`]));
+    // Same row as "Recently learned" on the overview; the turn link is the evidence the lesson was drawn from.
+    const lessonRows = lessons.map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><div class="grow"><b>${inline(firstLine(memoryText(memory), 200))}</b><span>M${memory.id}${memory.turn_id ? ` · from T${memory.turn_id}` : ""} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}${memory.used ? ` · used ${num(memory.used)}×` : ""}</span></div></a>`).join("");
     const recipes = data.recipes.filter((recipe) => inProject(recipe.project_id) && matches([recipe.error_text, recipe.command_key, ...recipe.files]));
     const profile = data.profile.filter((item) => inProject(item.project_id) && matches([item.key, item.value]));
     const ruleRows = rules.map((rule) => `<tr><td><b>R${rule.id}</b></td><td>${inline(rule.message)}<br><span class="muted">pattern</span> <code>${h(rule.pattern)}</code></td><td>${rule.enabled ? tag("enabled", "good") : tag("proposed", "info")}</td><td class="num">${num(rule.evidence)}</td><td class="num">${num(rule.hits)}</td><td class="num">${num(rule.overrides)}</td><td>${projectTag(rule.project_id)}</td><td>${copyable(`agent-mem rules ${rule.enabled ? "disable" : "enable"} ${rule.id}`)}</td></tr>`).join("");
@@ -426,7 +429,8 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
       const more = items.length > 5 ? `<p class="muted more">${plural(items.length - 5, "more variant")}, used less often</p>` : "";
       return `<div class="pref-group"><span class="section-label">${h(PROFILE_LABEL[key] ?? readable(key))}</span>${rows}${more}</div>`;
     }).join("");
-    return `<div class="page-head"><div><h1>Learned</h1><p class="lede">What agent-mem worked out by watching: rules from your corrections, fixes for errors, and the commands you use most. No AI model is involved.</p></div></div>
+    return `<div class="page-head"><div><h1>Learned</h1><p class="lede">What agent-mem worked out by watching: lessons from mistakes, fixes and your corrections, rules, fixes for errors, and the commands you use most.</p></div></div>
+<section class="panel"><div class="panel-head"><h2>Lessons</h2><small>written in the background when a turn shows a mistake and its fix, a correction of yours or a failed approach; the best ones start every session</small></div>${lessonRows || empty("No lessons yet", "They appear after a turn in which something went wrong and was fixed, or you corrected the agent.")}</section>
 <section class="panel"><div class="panel-head"><h2>Rules</h2><small>Proposed rules only warn. Enabled rules can block a command.</small></div>${ruleRows ? `<div class="table-wrap"><table><thead><tr><th>Id</th><th>Rule</th><th>State</th><th>Evidence</th><th>Hits</th><th>Overrides</th><th>Project</th><th>Change with</th></tr></thead><tbody>${ruleRows}</tbody></table></div>` : empty("No rules yet", "Say “pnpm instead of npm” a few times and a rule is proposed.")}</section>
 <div class="halves">
 <section class="panel"><div class="panel-head"><h2>Error fixes</h2><small>a command failed, files were changed, then it passed</small></div>${recipeRows || empty("No fixes learned yet", "They appear after a failing command passes again in the same session.")}</section>
