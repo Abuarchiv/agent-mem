@@ -1,7 +1,8 @@
 """Build the message bundle for one extraction call (docs/PLAN.md §4.3 point 4).
 
 Content per turn: the user's prompt, the agent's answer, and one compact line with the commands,
-files and error lines the turn touched (from the ``turns`` columns, already cleaned by capture).
+files and error lines the turn touched (from the ``turns`` columns, already cleaned by capture), plus
+the final answers of subagents that ran in the turn (``SubagentStop``).
 Events with ``trust = 'tool_external'`` never contribute text (§6 point 2). The whole bundle is
 capped at ``observe.bundle_tokens`` (4 characters per token); a bundle that would exceed it is split
 at turn boundaries, a single oversized turn is truncated.
@@ -9,6 +10,7 @@ at turn boundaries, a single oversized turn is truncated.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -32,7 +34,7 @@ class Bundle:
         return sum(len(m["content"]) for m in self.messages)
 
 
-def _turn_messages(row: sqlite3.Row, config: Config) -> list[dict[str, str]]:
+def _turn_messages(row: sqlite3.Row, config: Config, subagents: list[str]) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     prompt = privacy.clean_text(str(row["prompt"] or ""), config.limits.prompt_chars)
     if prompt.strip():
@@ -48,6 +50,8 @@ def _turn_messages(row: sqlite3.Row, config: Config) -> list[dict[str, str]]:
         extras.append("files: " + ", ".join(str(f) for f in files[:20]))
     if errors:
         extras.append("errors: " + " | ".join(str(e)[: config.observe.tool_output_chars] for e in errors[:5]))
+    for answer_of_subagent in subagents[:3]:
+        extras.append("subagent: " + answer_of_subagent[: config.observe.tool_output_chars])
     if extras:
         answer = (answer + "\n\n[tools] " + "\n[tools] ".join(extras)).strip()
     if answer.strip():
@@ -65,11 +69,21 @@ def build(conn: sqlite3.Connection, config: Config, turn_ids: list[int]) -> list
         f"WHERE t.id IN ({placeholders}) ORDER BY t.id",
         tuple(turn_ids),
     ).fetchall()
+    subagents: dict[int, list[str]] = {}
+    for event in conn.execute(
+        f"SELECT turn_id, payload FROM events WHERE kind = 'subagent_stop' AND trust != 'tool_external' "
+        f"AND turn_id IN ({placeholders}) ORDER BY id",
+        tuple(turn_ids),
+    ):
+        with contextlib.suppress(ValueError):
+            answer = str(json.loads(event["payload"]).get("answer") or "").strip()
+            if answer:
+                subagents.setdefault(int(event["turn_id"]), []).append(" ".join(answer.split()))
     cap = config.observe.bundle_tokens * CHARS_PER_TOKEN
     bundles: list[Bundle] = []
     current: Bundle | None = None
     for row in rows:
-        messages = _turn_messages(row, config)
+        messages = _turn_messages(row, config, subagents.get(int(row["id"]), []))
         if not messages:
             continue
         size = sum(len(m["content"]) for m in messages)

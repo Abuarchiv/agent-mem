@@ -348,21 +348,26 @@ def is_correction(prompt: str) -> bool:
     return bool(_CORRECTION.search(prompt[:600]))
 
 
+def _name(token: str) -> str:
+    # "nutze uv statt pip." ends a sentence; the rule is about `pip`, not `pip.`.
+    return token.lower().rstrip(".,:;!?")
+
+
 def preference_pairs(text: str) -> list[tuple[str, str | None]]:
     """Extract (avoid, prefer) pairs such as "pnpm statt npm" -> ("npm", "pnpm")."""
     pairs: list[tuple[str, str | None]] = []
     sample = text[:1000]
     for index, pattern in enumerate(_INSTEAD):
         for match in pattern.finditer(sample):
-            first, second = match.group(1), match.group(2)
+            first, second = _name(match.group(1)), _name(match.group(2))
             prefer, avoid = (second, first) if index == 2 else (first, second)
-            pair = (avoid.lower(), prefer.lower())
-            if pair not in pairs and avoid.lower() != prefer.lower():
+            pair = (avoid, prefer)
+            if pair not in pairs and avoid and prefer and avoid != prefer:
                 pairs.append(pair)
     if not pairs:
         for match in _AVOID.finditer(sample):
-            token = match.group(1).lower()
-            if token not in {"so", "das", "the", "that", "this", "mehr", "more", "wieder", "again"}:
+            token = _name(match.group(1))
+            if token and token not in {"so", "das", "the", "that", "this", "mehr", "more", "wieder", "again"}:
                 pairs.append((token, None))
     return pairs[:5]
 

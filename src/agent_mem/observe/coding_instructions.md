@@ -17,6 +17,12 @@ Do not record:
 - File contents, code snippets, stack traces or tool output. Name the file or command instead.
 - Secrets, tokens, passwords or keys, even if they appear in the text.
 
+Start every memory with exactly one tag: [decision] for a choice and its reason, [rule] for how the
+agent must or must not work (corrections, preferences, "never force-push to main"), [dead_end] for
+an approach that failed and what worked instead, [fact] for everything else. When a rule replaces
+one tool or command with another, write it as "Use X instead of Y" (German: "Nutze X statt Y"),
+with the exact names, even if the developer said it differently ("stop using npm, we are on pnpm").
+
 Write each memory in the developer's language (German input: German memory). Use the exact
 identifiers from the text: commands, flags, versions, ports, names. Prefer "Project uses X" or
 "Tests run with X" over "User mentioned X". Never add dates or "the user asked" framing.

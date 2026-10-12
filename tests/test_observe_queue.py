@@ -165,3 +165,39 @@ def test_doctor_and_capture_survive_a_database_without_observer_tables(config: C
     checks = health.doctor(config)
     bad = [c for c in checks if c.name == "observer queue"]
     assert bad and not bad[0].ok and "observer tables" in bad[0].detail
+
+
+def test_subagent_answer_enters_the_bundle(config: Config, project: Path) -> None:
+    from agent_mem.observe import bundle, queue
+
+    hook.run(
+        "claude",
+        None,
+        _payload(project, "s1", hook_event_name="UserPromptSubmit", prompt="Wo liegt die Retry-Logik?"),
+        config,
+    )
+    stop = {"hook_event_name": "SubagentStop", "last_assistant_message": "Retries live in http/retry.py, max 5."}
+    hook.run("claude", None, _payload(project, "s1", **stop), config)
+    hook.run(
+        "claude", None, _payload(project, "s1", hook_event_name="Stop", last_assistant_message="Gefunden."), config
+    )
+    conn = db.connect(config)
+    rows = queue.lease_bundle(conn, max_turns=5, lease_seconds=60)
+    text = bundle.build(conn, config, [int(r["turn_id"]) for r in rows])[0].messages[-1]["content"]
+    assert "subagent: Retries live in http/retry.py, max 5." in text
+    conn.close()
+
+
+def test_observer_writes_corrections_the_hook_only_marks_them(config: Config, project: Path) -> None:
+    conn = db.connect(config)
+    _turn(config, project, "s1", "nein, falsch: nutze pnpm statt npm", "ok")
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'correction'").fetchone()[0] == 1
+    conn.execute(
+        "INSERT INTO observe_calls(ts, provider, purpose, seconds, ok, prompt_chars, turn_ids) "
+        "VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'claude', 'extract', 1.0, 1, 10, '[]')"
+    )
+    conn.commit()
+    _turn(config, project, "s1", "nein, immer noch falsch: nutze uv statt pip. Wir verwenden ab jetzt ruff.", "ok")
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind IN ('correction', 'decision')").fetchone()[0] == 1
+    assert {r[0] for r in conn.execute("SELECT pattern FROM rules")} == {"npm", "pip"}
+    conn.close()

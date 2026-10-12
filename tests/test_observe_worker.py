@@ -139,3 +139,30 @@ def test_forget_reaches_mem0(observe_config: Config, project: Path) -> None:
     assert worker.stats["forgotten"] == 1
     worker.close()
     conn.close()
+
+
+def test_tags_become_kinds_and_rules(observe_config: Config, project: Path, tmp_path: Path, monkeypatch) -> None:
+    answers = tmp_path / "fake.json"
+    facts = [
+        {"text": "[rule] Use pnpm instead of npm."},
+        {"text": "[decision] SQLite instead of Postgres because the tool is single-user."},
+        {"text": "[dead_end] pytest-xdist broke the fixtures; tests run serially."},
+        {"text": "The API runs on Fly.io in fra."},
+    ]
+    answers.write_text(json.dumps([{"memory": facts}]))
+    monkeypatch.setenv("AGENT_MEM_FAKE_LLM", str(answers))
+    _turn(observe_config, project, "s1", "hör auf mit npm, wir sind auf pnpm", "ok")
+    conn = db.connect(observe_config)
+    worker = _worker(observe_config, conn)
+    worker.run(drain=False)
+    worker.close()
+    kinds = dict(conn.execute("SELECT body, kind FROM memories WHERE source = 'agent'").fetchall())
+    assert kinds == {
+        "Use pnpm instead of npm.": "preference",
+        "SQLite instead of Postgres because the tool is single-user.": "decision",
+        "pytest-xdist broke the fixtures; tests run serially.": "dead_end",
+        "The API runs on Fly.io in fra.": "fact",
+    }
+    rule = conn.execute("SELECT pattern, message FROM rules").fetchone()
+    assert (rule["pattern"], rule["message"]) == ("npm", "Use `pnpm` instead of `npm`")
+    conn.close()

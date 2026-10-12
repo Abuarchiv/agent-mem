@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import PurePosixPath
 
 from agent_mem.core import privacy, timeutil
+from agent_mem.core.config import Config
 from agent_mem.memory import learn
 
 MAX_KEY_CHARS = 12_000
@@ -201,3 +202,55 @@ def parse_owner(text: str) -> tuple[str, int] | None:
 
 def owner_label(owner_type: str, owner_id: int) -> str:
     return f"{owner_type.upper()}{owner_id}"
+
+
+def learn_rule(
+    conn: sqlite3.Connection, config: Config, project_id: str | None, avoid: str, prefer: str | None, turn_id: int
+) -> None:
+    """Record one statement "use X instead of Y" (or "avoid X"); a preference memory follows from
+    ``rules.min_corrections`` statements. Called by the prompt hook and by the observer."""
+    message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
+    # UPDATE first with ``IS``: a UNIQUE constraint never matches NULL project ids, so an upsert would
+    # insert a new row for every correction made outside a project.
+    updated = conn.execute(
+        "UPDATE rules SET evidence = evidence + 1, message = ? "
+        "WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
+        (message, project_id, avoid),
+    )
+    if updated.rowcount == 0:
+        conn.execute(
+            "INSERT INTO rules(project_id, kind, pattern, message, evidence, enabled, created_at) "
+            "VALUES (?, 'avoid_command', ?, ?, 1, 0, ?)",
+            (project_id, avoid, message, timeutil.iso()),
+        )
+    row = conn.execute(
+        "SELECT id, evidence FROM rules WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
+        (project_id, avoid),
+    ).fetchone()
+    if row is None:
+        return
+    if row["evidence"] >= config.rules.min_corrections:
+        if config.rules.auto_enable:
+            conn.execute("UPDATE rules SET enabled = 1 WHERE id = ?", (row["id"],))
+        prefix = f"pref|{project_id}|{avoid}|"
+        new_id = add_memory(
+            conn,
+            project_id=project_id,
+            kind="preference",
+            title=message + f" (corrected {row['evidence']}x)",
+            body=message,
+            source="hook",
+            trust="user",
+            importance=0.85,
+            turn_id=turn_id,
+            dedupe=f"{prefix}{row['evidence']}",
+        )
+        if new_id is not None:
+            # One valid preference per correction: the new count supersedes the earlier ones.
+            for old in conn.execute(
+                "SELECT id, dedupe_key FROM memories WHERE kind = 'preference' AND project_id IS ? "
+                "AND invalid_at IS NULL AND id != ?",
+                (project_id, new_id),
+            ).fetchall():
+                if str(old["dedupe_key"] or "").startswith(prefix):
+                    supersede(conn, int(old["id"]), new_id)

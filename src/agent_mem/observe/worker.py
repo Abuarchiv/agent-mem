@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -19,7 +20,7 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
-from agent_mem.core import db, logutil, timeutil
+from agent_mem.core import db, logutil, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store
 from agent_mem.observe import bundle as bundling
@@ -85,25 +86,42 @@ def store_raw(conn: sqlite3.Connection, b: bundling.Bundle) -> int:
     return memory_id or 0
 
 
-def mirror(conn: sqlite3.Connection, b: bundling.Bundle, facts: list[Fact]) -> list[int]:
+_TAG = re.compile(r"^\s*\[(decision|rule|dead_end|fact)\]\s*", re.IGNORECASE)
+_KINDS = {"decision": "decision", "rule": "preference", "dead_end": "dead_end", "fact": "fact"}
+
+
+def split_tag(text: str) -> tuple[str, str]:
+    """(kind, text without tag) for a memory written with the tags of ``coding_instructions.md``."""
+    match = _TAG.match(text)
+    if match is None:
+        return "fact", text.strip()
+    return _KINDS[match.group(1).lower()], text[match.end() :].strip()
+
+
+def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: list[Fact]) -> list[int]:
     ids = []
     for fact in facts:
-        title = fact.text.strip().splitlines()[0][:120] if fact.text.strip() else "fact"
+        kind, text = split_tag(fact.text)
+        title = text.splitlines()[0][:120] if text else "fact"
         memory_id = store.add_memory(
             conn,
             project_id=b.project_id,
-            kind="fact",
+            kind=kind,
             title=title,
-            body=fact.text,
+            body=text,
             source="agent",
             trust="observer",
-            importance=0.5,
+            importance=signals.IMPORTANCE.get(kind, 0.5) if kind != "preference" else 0.85,
             turn_id=b.turn_ids[-1],
             origin=b.harness,
             dedupe=f"mem0:{fact.id}",
         )
         if memory_id:
             ids.append(memory_id)
+        if kind == "preference":
+            # "Use pnpm instead of npm" becomes the same rule a typed "pnpm statt npm" creates.
+            for avoid, prefer in signals.preference_pairs(text):
+                store.learn_rule(conn, config, b.project_id, avoid, prefer, b.turn_ids[-1])
     return ids
 
 
@@ -173,7 +191,7 @@ class Worker:
                 last_error = f"{name}: {type(error).__name__}: {error}"
                 continue
             _record_call(self.conn, name, "extract", time.perf_counter() - started, True, b.chars, b.turn_ids, None)
-            mirror(self.conn, b, facts)
+            mirror(self.conn, self.config, b, facts)
             self.stats["facts"] += len(facts)
             self._contradictions(b, facts, llm, name, namespace)
             return name

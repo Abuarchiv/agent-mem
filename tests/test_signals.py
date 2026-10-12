@@ -72,6 +72,7 @@ def test_corrections_and_preferences():
         assert not signals.mentions_rule(filler), filler
     assert ("npm", "pnpm") in signals.preference_pairs("nutze pnpm statt npm")
     assert ("npm", "pnpm") in signals.preference_pairs("use pnpm instead of npm")
+    assert signals.preference_pairs("Use pnpm instead of npm.") == [("npm", "pnpm")]  # sentence end
     assert ("yarn", "bun") in signals.preference_pairs("nicht yarn, sondern bun")
     assert ("requests", None) in signals.preference_pairs("never use requests here")
 

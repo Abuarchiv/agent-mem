@@ -308,8 +308,11 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
         # "X statt Y" / "use X instead of Y" is an explicit preference even without a correction.
         for avoid, prefer in signals.preference_pairs(prompt):
             if prefer is not None:
-                _learn_rule(conn, config, project_id, avoid, prefer, turn_id)
-    if corrective:
+                store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
+    # With a working observer the model reads the turn and writes corrections and decisions as facts;
+    # the patterns then only raise the turn's importance (B.24: regex corrections caught complaints too).
+    observed = _observer_active(conn, config)
+    if corrective and not observed:
         context = ""
         if last is not None:
             commands = json.loads(last["commands_json"] or "[]")
@@ -327,10 +330,11 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
             importance=signals.IMPORTANCE["correction"],
             turn_id=int(last["id"]) if last is not None else turn_id,
         )
+    if corrective:
         _raise_importance(conn, turn_id, signals.IMPORTANCE["correction"])
         for avoid, prefer in signals.preference_pairs(prompt):
-            _learn_rule(conn, config, project_id, avoid, prefer, turn_id)
-    for sentence in signals.decision_sentences(prompt):
+            store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
+    for sentence in [] if observed else signals.decision_sentences(prompt):
         store.add_memory(
             conn,
             project_id=project_id,
@@ -356,54 +360,17 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
             learn.record_access(conn, block.owners, "injected", session_id)
 
 
-def _learn_rule(
-    conn: sqlite3.Connection, config: Config, project_id: str | None, avoid: str, prefer: str | None, turn_id: int
-) -> None:
-    message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
-    # UPDATE first with ``IS``: a UNIQUE constraint never matches NULL project ids, so an upsert would
-    # insert a new row for every correction made outside a project.
-    updated = conn.execute(
-        "UPDATE rules SET evidence = evidence + 1, message = ? "
-        "WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
-        (message, project_id, avoid),
-    )
-    if updated.rowcount == 0:
-        conn.execute(
-            "INSERT INTO rules(project_id, kind, pattern, message, evidence, enabled, created_at) "
-            "VALUES (?, 'avoid_command', ?, ?, 1, 0, ?)",
-            (project_id, avoid, message, timeutil.iso()),
-        )
-    row = conn.execute(
-        "SELECT id, evidence FROM rules WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
-        (project_id, avoid),
-    ).fetchone()
-    if row is None:
-        return
-    if row["evidence"] >= config.rules.min_corrections:
-        if config.rules.auto_enable:
-            conn.execute("UPDATE rules SET enabled = 1 WHERE id = ?", (row["id"],))
-        prefix = f"pref|{project_id}|{avoid}|"
-        new_id = store.add_memory(
-            conn,
-            project_id=project_id,
-            kind="preference",
-            title=message + f" (corrected {row['evidence']}x)",
-            body=message,
-            source="hook",
-            trust="user",
-            importance=0.85,
-            turn_id=turn_id,
-            dedupe=f"{prefix}{row['evidence']}",
-        )
-        if new_id is not None:
-            # One valid preference per correction: the new count supersedes the earlier ones.
-            for old in conn.execute(
-                "SELECT id, dedupe_key FROM memories WHERE kind = 'preference' AND project_id IS ? "
-                "AND invalid_at IS NULL AND id != ?",
-                (project_id, new_id),
-            ).fetchall():
-                if str(old["dedupe_key"] or "").startswith(prefix):
-                    store.supersede(conn, int(old["id"]), new_id)
+def _observer_active(conn: sqlite3.Connection, config: Config) -> bool:
+    """True when the observer extracted facts in the last seven days."""
+    if not config.observe.enabled:
+        return False
+    since = timeutil.iso(timeutil.now() - timedelta(days=7))
+    with contextlib.suppress(sqlite3.OperationalError):  # database from before migration 002
+        row = conn.execute(
+            "SELECT 1 FROM observe_calls WHERE purpose = 'extract' AND ok = 1 AND ts >= ? LIMIT 1", (since,)
+        ).fetchone()
+        return row is not None
+    return False
 
 
 def _matching_rules(conn: sqlite3.Connection, project_id: str | None, command: str) -> list[sqlite3.Row]:
