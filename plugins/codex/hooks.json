@@ -102,7 +102,7 @@
           {
             "type": "command",
             "command": "agent-mem hook codex",
-            "timeout": 10,
+            "timeout": 3,
             "statusMessage": "Agent Mem"
           }
         ]
