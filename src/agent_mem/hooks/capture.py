@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -64,6 +65,16 @@ def dedupe_key(event: Event) -> str:
     return f"{event.harness}|{event.session_id}|{event.kind}|{suffix}"
 
 
+CORRECTION_CHARS = 400
+# The harnesses run their own background agents (Codex memory consolidation, for one) inside these folders.
+HARNESS_HOMES = (".codex", ".claude", ".copilot", ".config/opencode")
+
+
+def _harness_home(root: str) -> bool:
+    home = os.path.expanduser("~")
+    return any(identity.is_within(root, os.path.join(home, folder)) for folder in HARNESS_HOMES)
+
+
 def capture_allowed(conn: sqlite3.Connection, config: Config, project: identity.Project | None) -> bool:
     if not config.capture or env_flag("AGENT_MEM_DISABLE"):
         return False
@@ -71,6 +82,8 @@ def capture_allowed(conn: sqlite3.Connection, config: Config, project: identity.
     if paused and (paused == "forever" or (timeutil.parse(paused) or timeutil.now()) > timeutil.now()):
         return False
     if project is not None:
+        if _harness_home(str(project.root)):
+            return False
         for excluded in config.excluded_projects:
             if identity.is_within(project.root, excluded):
                 return False
@@ -312,8 +325,9 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
     turn_id = _new_turn(conn, session_id, project_id, event.ts, prompt)
     conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn_id, event_id))
 
-    corrective = signals.is_correction(prompt) or signals.mentions_rule(prompt)
-    if not corrective:
+    typed = not signals.from_harness(prompt)
+    corrective = typed and (signals.is_correction(prompt) or signals.mentions_rule(prompt))
+    if typed and not corrective:
         # "X statt Y" / "use X instead of Y" is an explicit preference even without a correction.
         for avoid, prefer in signals.preference_pairs(prompt):
             if prefer is not None:
@@ -321,7 +335,8 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
     # With a working observer the model reads the turn and writes corrections and decisions as facts;
     # the patterns then only raise the turn's importance (B.24: regex corrections caught complaints too).
     observed = _observer_active(conn, config)
-    if corrective and not observed:
+    # A long spoken prompt is not a correction one can apply later; the turn itself stays searchable.
+    if corrective and not observed and len(prompt) <= CORRECTION_CHARS:
         context = ""
         if last is not None:
             commands = json.loads(last["commands_json"] or "[]")
@@ -345,7 +360,7 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
             # A bare "nicht X" is too loose to become a rule when the observer can write the rule itself.
             if prefer is not None or not observed:
                 store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
-    for sentence in [] if observed else signals.decision_sentences(prompt):
+    for sentence in [] if observed or not typed else signals.decision_sentences(prompt):
         store.add_memory(
             conn,
             project_id=project_id,

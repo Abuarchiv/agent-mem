@@ -15,7 +15,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-from agent_mem.core import privacy
+from agent_mem.core import privacy, signals
 from agent_mem.core.config import Config
 
 CHARS_PER_TOKEN = 4
@@ -38,6 +38,9 @@ def _turn_messages(row: sqlite3.Row, config: Config, subagents: list[str]) -> li
     messages: list[dict[str, str]] = []
     prompt = privacy.clean_text(str(row["prompt"] or ""), config.limits.prompt_chars)
     if prompt.strip():
+        if signals.from_harness(prompt):
+            # Not the user's words: the extractor must not turn a task notice into a preference.
+            prompt = f"[harness notice, not written by the user] {signals.request_text(prompt)}"
         messages.append({"role": "user", "content": prompt})
     answer = privacy.clean_text(str(row["answer"] or ""), config.limits.answer_chars)
     extras = []

@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from agent_mem.core import spool, timeutil
 from agent_mem.core.config import Config
-from agent_mem.core.signals import first_line, looks_like_error, request_text
+from agent_mem.core.signals import command_kind, first_line, looks_like_error, request_text
 from agent_mem.memory import learn, search
 from agent_mem.memory.store import owner_label
 
@@ -170,6 +170,9 @@ def _open_errors(
     seen: set[str] = set()
     for row in rows:
         if timeutil.hours_between(row["ts"]) > 72 or not row["command_key"] or row["command_key"] in seen:
+            continue
+        # Only a failing test, lint, build or install is work left open; a failed `ls` while looking around is not.
+        if command_kind(row["command_key"]) not in {"test", "lint", "build", "install"}:
             continue
         try:
             error = json.loads(row["payload"]).get("error_line") or ""

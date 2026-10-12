@@ -403,6 +403,17 @@ def decision_sentences(text: str) -> list[str]:
 _NOTICE = re.compile(r"^\s*<task-notification>.*?<summary>(.*?)</summary>", re.DOTALL)
 
 
+# Text the harness puts into the prompt slot itself: background-task notices, slash-command wrappers, hook feedback.
+_HARNESS_PROMPT = re.compile(
+    r"^\s*(?:<task-notification>|<command-(?:name|message)>|<local-command-stdout>|Stop hook feedback:|\[Request interrupted)"
+)
+
+
+def from_harness(prompt: str | None) -> bool:
+    """True when the user did not type this prompt; it then never teaches rules, corrections or preferences."""
+    return bool(_HARNESS_PROMPT.match(prompt or ""))
+
+
 def request_text(prompt: str | None) -> str:
     """The prompt as a reader sees it: a background-task notice is the harness talking, so show its summary."""
     notice = _NOTICE.match(prompt or "")

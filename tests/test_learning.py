@@ -129,3 +129,43 @@ def test_cited_ids_count_as_use(driver: Driver, conn):
 
 def _project_id(conn):
     return conn.execute("SELECT id FROM projects").fetchone()[0]
+
+
+def test_harness_text_and_long_prompts_teach_nothing(driver: Driver, conn):
+    notice = (
+        "<task-notification>\n<task-id>b1</task-id>\n<summary>Background command failed</summary>\n"
+        "nein, nutze pnpm statt npm\n</task-notification>"
+    )
+    driver.prompt("s1", notice)
+    driver.prompt("s1", "Stop hook feedback: nein, nutze pnpm statt npm. Wir verwenden ab jetzt yarn.")
+    assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 0
+    # Spoken, rambling prompts: still a searchable turn, never a stored correction.
+    driver.prompt("s1", "nein, das ist falsch, äh " + "und dann halt noch die andere Sache " * 20)
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'correction'").fetchone()[0] == 0
+    driver.prompt("s1", "nein, das ist falsch: die Tests laufen mit nox")
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'correction'").fetchone()[0] == 1
+
+
+def test_harness_own_folders_are_not_captured(conn, config, tmp_path, monkeypatch):
+    from tests.conftest import Driver as Fresh
+
+    home = tmp_path / "home"
+    folder = home / ".codex" / "memories"
+    folder.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    codex = Fresh(conn, config, folder, harness="codex")
+    codex.prompt("c1", "## Memory Writing Agent: Phase 2 (Consolidation)")
+    codex.stop("c1", "Updated MEMORY.md")
+    assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
+
+
+def test_only_failing_project_commands_count_as_open_errors(driver: Driver, conn, config):
+    from agent_mem.hooks import inject
+
+    driver.bash("s1", "ls /missing/logs", "ls: /missing/logs: No such file or directory", failed=True)
+    driver.bash("s1", "pytest tests/test_api.py", "FAILED tests/test_api.py::test_get - AssertionError", failed=True)
+    driver.stop("s1", "stuck")
+    project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
+    lines = [line for line, _ in inject._open_errors(conn, project_id, "claude:other")]
+    assert len(lines) == 1 and "pytest" in lines[0]
