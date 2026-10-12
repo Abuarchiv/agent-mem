@@ -66,10 +66,9 @@ def build(config: Config | None = None) -> MCPServer:
         """Search memory. Returns ids with one-line titles; says so when nothing matches confidently.
         Time words like 'gestern' or 'last week' rank that time first."""
         limit = max(1, min(limit, 20))
-        with db.transaction(state.conn):
-            hits = state.retriever.search(
-                query[:2000], state.project_id, limit=limit, include_other_projects=all_projects
-            )
+        # No write transaction: embedding the query and rebuilding the vector matrix would hold the write lock that
+        # every hook of every session waits for (400 ms deadline, then the event goes to the spool).
+        hits = state.retriever.search(query[:2000], state.project_id, limit=limit, include_other_projects=all_projects)
         sure = semantic.confident_hits(hits, state.config, query[:2000])
         views.prime_anchor_states(state.conn, hits)
         return views.search_lines(sure, weak=hits[:3])

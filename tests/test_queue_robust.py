@@ -74,3 +74,32 @@ def test_a_forget_request_survives_a_failed_delete_in_mem0(config: Config):
     w.drain_forget()
     assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["m1"]  # retried next run
     conn.close()
+
+
+def test_mem_search_does_not_hold_the_write_lock_hooks_wait_for(config: Config, project: Path, monkeypatch):
+    import asyncio
+    import sqlite3
+
+    from agent_mem.mcp import server as mcp_server
+
+    _turn(config, project, "s1", "configure the viewer launch agent")
+    monkeypatch.chdir(project)
+    server = mcp_server.build(config)
+    real = mcp_server.semantic.Retriever.search
+    writes: list[bool] = []
+
+    def search(self, *args, **kwargs):
+        other = sqlite3.connect(config.db_path, timeout=0, isolation_level=None)  # a hook in another session
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+            writes.append(True)
+        except sqlite3.OperationalError:
+            writes.append(False)
+        finally:
+            other.close()
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(mcp_server.semantic.Retriever, "search", search)
+    asyncio.run(server.call_tool("mem_search", {"query": "viewer launch agent"}))
+    assert writes == [True]
