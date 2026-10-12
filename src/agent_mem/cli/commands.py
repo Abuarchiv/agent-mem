@@ -195,6 +195,7 @@ def cmd_export(ns: argparse.Namespace, config: Config) -> int:
         }
     text = json.dumps(data, indent=2, ensure_ascii=False)
     if ns.output:
+        ns.output.parent.mkdir(parents=True, exist_ok=True)
         ns.output.write_text(text, encoding="utf-8")
         if sys.platform != "win32":
             os.chmod(ns.output, 0o600)
@@ -405,31 +406,46 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
         # Look the project up only; viewing must not register a directory as a new project.
         project = identity.find(conn, os.path.abspath(ns.project)) if ns.project else None
         if ns.project and project is None:
-            print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
-            return 2
+            return _unknown_project(ns.project)
         project_id = project.id if project else None
-        snapshot = ui.build_snapshot(conn, config, project_id)
-    watch = max(2, ns.watch) if ns.watch else None
-    target = ui.write(config, ui.render({**snapshot, "refresh": watch}), ns.output)
+        snapshot = ui.build_snapshot(conn, config, project_id) if ns.output or ns.no_open else None
+    if snapshot is None:
+        address = _served_url(config, project_id)
+        if address is not None:
+            import webbrowser
+
+            print(f"Viewer at {address.split('?')[0]} (always on; reload the tab for the latest state).")
+            if not webbrowser.open(address):
+                print(f"No browser found. Open this address once to unlock it in a browser:\n  {address}")
+            return 0
+        with _conn(config) as conn:
+            snapshot = ui.build_snapshot(conn, config, project_id)
+        print("The viewer did not start (see `agent-mem serve`); writing an offline snapshot instead.")
+    target = ui.write(config, ui.render({**snapshot, "refresh": None}), ns.output)
     print(f"Wrote {target}. It is a local file with a copy of your memory; it makes no network requests.")
     if not ns.no_open:
         import webbrowser
 
         if not webbrowser.open(target.as_uri()):
             print("Open it in a browser to view it.")
-    if watch is None:
-        return 0
-    # A foreground loop, not a server: it only rewrites the file; the page reloads it (R1).
-    print(f"Rewriting every {watch} s. Stop with Ctrl+C.")
-    try:
-        while True:
-            time.sleep(watch)
-            with _conn(config) as conn:
-                snapshot = ui.build_snapshot(conn, config, project_id)
-            ui.write(config, ui.render({**snapshot, "refresh": watch}), ns.output)
-    except KeyboardInterrupt:
-        print("Stopped. The page keeps the last snapshot.")
     return 0
+
+
+def _served_url(config: Config, project_id: str | None) -> str | None:
+    """Address of the running viewer with the access key, starting it first if needed."""
+    from agent_mem.hooks.hook import spawn_viewer
+    from agent_mem.ui import server
+
+    if not config.viewer.enabled:
+        return None
+    if not server.running(config):
+        spawn_viewer(config, force=True)
+        deadline = time.monotonic() + 8
+        while not server.running(config, timeout=0.5):
+            if time.monotonic() > deadline:
+                return None
+            time.sleep(0.2)
+    return server.open_url(config, project_id)
 
 
 def plugins_dir() -> Path:
@@ -516,8 +532,12 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
             print(f"  facts: `{stage}` is not on PATH; turns of this harness are kept raw until it is.")
         else:
             print('  facts: OpenCode turns are kept raw unless you add "ollama" to observe.providers.')
+    if config.viewer.enabled:
+        from agent_mem.ui import server
+
+        print("  " + server.install_autostart(config))
     print("\nDetected:\n" + _detect_table(found))
-    print("\nStart a session, then run `agent-mem doctor`.")
+    print("\nStart a session, then run `agent-mem doctor`. `agent-mem view` opens the viewer.")
     return 0
 
 
@@ -531,5 +551,12 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
             print(f"  {path}")
     else:
         print(f"{ns.harness}: nothing written by `setup --write` was found.")
+    from agent_mem.cli.health import harness_installed
+    from agent_mem.ui import server
+
+    if not any(harness_installed(name) for name in ("claude", "codex", "copilot", "opencode")):
+        removed = server.remove_autostart()
+        if removed:
+            print(f"  removed the viewer login item {removed} (no harness left)")
     print(f"Data stays in {config.data_dir}; `agent-mem purge --all` deletes it.")
     return 0

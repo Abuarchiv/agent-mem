@@ -20,6 +20,10 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("AGENT_MEM_DISABLE", raising=False)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    # Viewer login items land here, never in the real home directory.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home" / ".config"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "home" / "AppData"))
 
 
 @pytest.fixture

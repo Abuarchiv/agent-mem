@@ -5,6 +5,7 @@ Injected text is framed as data, never as instructions. Standard library only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -354,10 +355,62 @@ def _clip(text: str, limit: int) -> str:
     return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
 
 
-def terminal(context: str, heading: str, color: bool = True) -> str:
+def overview(conn: sqlite3.Connection, session_id: str) -> list[str]:
+    """Where this project's memory stands, for the terminal panel at session start (never sent to the model)."""
+    row = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    project_id = row[0] if row else None
+    if project_id is None:
+        return []
+    today = timeutil.iso()[:10]
+    memories, new = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(created_at >= ?), 0) FROM memories WHERE project_id = ? AND invalid_at IS NULL",
+        (today, project_id),
+    ).fetchone()
+    sessions = conn.execute("SELECT COUNT(*) FROM sessions WHERE project_id = ?", (project_id,)).fetchone()[0]
+    turns = conn.execute("SELECT COUNT(*) FROM turns WHERE project_id = ?", (project_id,)).fetchone()[0]
+    lines = [f"{memories} memories ({new} new today) · {sessions} sessions · {turns} turns in this project"]
+    with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
+        waiting = conn.execute("SELECT COUNT(*) FROM observe_queue WHERE state = 'pending'").fetchone()[0]
+        if waiting:
+            lines.append(f"{waiting} turn{'s' * (waiting != 1)} waiting for fact extraction in the background")
+    paused = conn.execute("SELECT value FROM meta WHERE key = 'paused_until'").fetchone()
+    if paused:
+        lines.append(f"capture paused until {paused[0]} (`agent-mem resume` turns it back on)")
+    return lines
+
+
+def session_summary(conn: sqlite3.Connection, session_id: str, color: bool = True) -> str | None:
+    """What this session left behind, shown when it ends."""
+    rows = conn.execute(
+        "SELECT outcome, files_json, errors_json FROM turns WHERE session_id = ?", (session_id,)
+    ).fetchall()
+    if not rows:
+        return None
+    files: set[str] = set()
+    for row in rows:
+        with contextlib.suppress(ValueError, TypeError):
+            files.update(item for item in json.loads(row["files_json"] or "[]") if isinstance(item, str))
+    failed = sum(row["outcome"] == "error" for row in rows)
+    summary = (
+        f"session saved · {len(rows)} turn{'s' * (len(rows) != 1)} · {len(files)} file{'s' * (len(files) != 1)}"
+        f"{f' · {failed} ended with an error' if failed else ''} · facts follow in the background"
+    )
+    return f"\x1b[1;36magent-mem\x1b[0m \x1b[2m{summary}\x1b[0m" if color else f"agent-mem {summary}"
+
+
+def terminal(
+    context: str,
+    heading: str,
+    color: bool = True,
+    *,
+    facts: list[str] | None = None,
+    notices: list[str] | None = None,
+    viewer: str | None = None,
+) -> str:
     """The injected block as the user sees it in the terminal: grouped by day, one row per memory.
 
     Built from the context lines themselves, so the terminal never shows something the model did not get.
+    ``facts`` (project state), ``notices`` (failures to act on) and ``viewer`` are for the user only.
     """
 
     def paint(code: str, text: str) -> str:
@@ -402,15 +455,20 @@ def terminal(context: str, heading: str, color: bool = True) -> str:
     summary = f"· {heading} · {count} item{'s' * (count != 1)} · ~{tokens(context)} tokens"
     out = [
         f"{paint('1;36', 'agent-mem')} {paint('2', summary)}",
+        *(paint("2", f"  {line}") for line in facts or []),
         paint("2", _RULE),
         *warnings,
+        *(paint("31", f"! {line}") for line in notices or []),
     ]
     for group, rows in groups.items():
         out += [paint("1", group), *rows]
+    if not groups:
+        out.append(paint("2", "Nothing to recall here yet; this session is being recorded."))
     if commands:
         out.append(f"{paint('1', 'Commands')}  {_clip(commands, 100)}")
     if files:
         out.append(f"{paint('1', 'Files')}  {_clip(files, 100)}")
     hint = f"agent-mem show {ids[-1]}" if ids else "agent-mem search <words>"
-    out += [paint("2", _RULE), paint("2", f"Details: {hint} · all memories: agent-mem view")]
+    browse = f"viewer {viewer}" if viewer else "all memories: agent-mem view"
+    out += [paint("2", _RULE), paint("2", f"Details: {hint} · {browse}")]
     return "\n".join(out)

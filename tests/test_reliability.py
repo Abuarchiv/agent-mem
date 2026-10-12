@@ -11,7 +11,6 @@ import pytest
 
 from agent_mem.core import db, spool
 from agent_mem.core.config import Config
-from agent_mem.core.events import Event
 from agent_mem.hooks import capture, hook, inject
 from agent_mem.memory import indexer
 
@@ -24,7 +23,9 @@ def _prompt_payload(project: Path, session: str, text: str) -> str:
 
 def test_hook_run_end_to_end(config: Config, project: Path, conn):
     start = json.dumps({"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"})
-    assert hook.run("claude", None, start, config) == ""  # nothing to inject yet
+    data = json.loads(hook.run("claude", None, start, config))
+    assert "hookSpecificOutput" not in data  # nothing to inject yet, but the user sees the panel
+    assert "Nothing to recall here yet" in data["systemMessage"] and "1 sessions" in data["systemMessage"]
     hook.run("claude", None, _prompt_payload(project, "s", "Build the parser for invoices"), config)
     hook.run(
         "claude",
@@ -54,14 +55,29 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     assert data["systemMessage"].startswith("\x1b[1;36magent-mem") and "This session" in data["systemMessage"]
 
 
-def test_prompt_injection_shows_terminal_line_with_ids():
-    event = Event(harness="claude", kind="prompt", session_id="s", ts="t", raw_kind="UserPromptSubmit")
-    context = (
-        "<agent-mem>\nMemory:\n- [M3 · 2026-10-12 · fact] uses uv\n- [T7 · 2026-10-11 · turn] parser done\n</agent-mem>"
-    )
-    out = hook.render("claude", event, capture.Response(context=context))
-    assert "matches for this prompt · 2 items" in out["systemMessage"] and "uses uv" in out["systemMessage"]
-    assert "systemMessage" not in hook.render("codex", event, capture.Response(context=context))
+def test_prompt_injection_stays_out_of_the_terminal(config: Config, project: Path):
+    # The terminal shows a panel at session start, compaction and session end; ordinary prompts stay quiet.
+    for harness in ("claude", "codex"):
+        start = {"hook_event_name": "SessionStart", "session_id": harness, "cwd": str(project), "source": "startup"}
+        hook.run(harness, None, json.dumps(start), config)
+        output = hook.run(harness, None, _prompt_payload(project, harness, "Build the parser"), config)
+        assert "systemMessage" not in (json.loads(output) if output else {})
+
+
+def test_session_end_and_failures_reach_the_terminal(config: Config, project: Path):
+    start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"}
+    hook.run("claude", None, json.dumps(start), config)
+    hook.run("claude", None, _prompt_payload(project, "s", "Build the parser"), config)
+    end = {"hook_event_name": "SessionEnd", "session_id": "s", "cwd": str(project), "reason": "exit"}
+    message = json.loads(hook.run("claude", None, json.dumps(end), config))["systemMessage"]
+    assert "session saved · 1 turn · 0 files" in message
+
+    config.db_path.write_bytes(b"not a database" * 100)
+    first = json.loads(hook.run("claude", None, _prompt_payload(project, "s", "again"), config))
+    assert "cannot use its database" in first["systemMessage"] and "agent-mem doctor" in first["systemMessage"]
+    assert hook.run("claude", None, _prompt_payload(project, "s", "and again"), config) == ""  # once per 10 min
+    panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
+    assert "! agent-mem cannot use its database" in panel
 
 
 def test_invalid_payload_is_quarantined_and_silent(config: Config):

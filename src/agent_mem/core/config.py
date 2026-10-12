@@ -119,6 +119,15 @@ class Observe:
 
 
 @dataclass
+class Viewer:
+    """``agent-mem serve``: the read-only page on 127.0.0.1, started by the SessionStart hook."""
+
+    enabled: bool = True
+    port: int = 37778
+    refresh_seconds: int = 10
+
+
+@dataclass
 class Config:
     data_dir: Path
     capture: bool = True
@@ -132,6 +141,7 @@ class Config:
     rules: Rules = field(default_factory=Rules)
     semantic: Semantic = field(default_factory=Semantic)
     observe: Observe = field(default_factory=Observe)
+    viewer: Viewer = field(default_factory=Viewer)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -244,6 +254,10 @@ def _read_json(path: Path, warnings: list[str]) -> dict[str, Any]:
 def load(data_dir: Path | None = None) -> Config:
     config = Config(data_dir=(data_dir or default_data_dir()).expanduser())
     _merge(config, _read_json(config.config_path, config.warnings), "", config.warnings)
+    if not 1024 <= config.viewer.port <= 65535:
+        config.warnings.append("config: 'viewer.port' must be between 1024 and 65535, default kept")
+        config.viewer.port = Viewer.port
+    config.viewer.refresh_seconds = max(2, config.viewer.refresh_seconds)
     return config
 
 

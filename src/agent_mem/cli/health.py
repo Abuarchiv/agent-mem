@@ -257,11 +257,43 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     finally:
         conn.close()
     checks.extend(_hook_checks())
+    checks.extend(_viewer_checks(config, fix))
     if fix:
         from agent_mem.memory import indexer
 
         with contextlib.suppress(Exception):
             indexer.run(config, allow_download=False)
+    return checks
+
+
+def _viewer_checks(config: Config, fix: bool) -> list[Check]:
+    from agent_mem.ui import server
+
+    if not config.viewer.enabled:
+        return [Check("viewer", True, "disabled in config.json")]
+    login = server.autostart_path()
+    if fix and (login is None or not login.exists()):
+        server.install_autostart(config)
+    up = server.running(config)
+    checks = [
+        Check(
+            "viewer",
+            up,
+            server.url(config) if up else f"nothing answers on {server.url(config)}",
+            "Run `agent-mem view` (starts it); `agent-mem serve` shows why it cannot start.",
+            warn_only=True,
+        )
+    ]
+    if login is not None:
+        checks.append(
+            Check(
+                "viewer autostart",
+                login.exists(),
+                str(login) if login.exists() else "not registered; the viewer starts with the first agent session",
+                "Run `agent-mem serve --autostart` or `agent-mem doctor --fix`.",
+                warn_only=True,
+            )
+        )
     return checks
 
 

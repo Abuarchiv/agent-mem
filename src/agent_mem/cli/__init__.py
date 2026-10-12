@@ -20,7 +20,51 @@ def main(argv: list[str] | None = None) -> int:
         from agent_mem.hooks.hook import main as hook_main
 
         return hook_main(args[1:])
-    return _main(args)
+    try:
+        return _main(args)
+    except KeyboardInterrupt:
+        return 130
+    except Exception as error:
+        import os
+
+        if os.environ.get("AGENT_MEM_DEBUG"):
+            raise
+        print(f"agent-mem: {_explain(error)}", file=sys.stderr)
+        return 1
+
+
+def _explain(error: Exception) -> str:
+    """One line with the cause and the next step instead of a traceback (AGENT_MEM_DEBUG=1 shows it)."""
+    import sqlite3
+
+    from agent_mem.core import db
+
+    if isinstance(error, db.SchemaTooNewError):
+        return f"{error}. A newer agent-mem wrote this database; upgrade agent-mem."
+    if isinstance(error, db.MigrationInProgressError):
+        return f"{error}. Another agent-mem process is upgrading the database; try again in a minute."
+    if isinstance(error, sqlite3.DatabaseError) and not isinstance(error, sqlite3.OperationalError):
+        return f"the database is damaged ({error}). Run `agent-mem doctor`, then `agent-mem restore --latest`."
+    if isinstance(error, sqlite3.OperationalError):
+        if "locked" in str(error) or "busy" in str(error):
+            return f"the database is busy ({error}). Another agent-mem process holds it; try again shortly."
+        return f"database error: {error}. Run `agent-mem doctor`."
+    if isinstance(error, FileNotFoundError):
+        return f"file not found: {error.filename}"
+    if isinstance(error, IsADirectoryError):
+        return f"{error.filename} is a folder; give a file path"
+    if isinstance(error, NotADirectoryError | FileExistsError):
+        return f"{error.filename} is a file where agent-mem needs a folder. Check --data-dir or AGENT_MEM_DATA_DIR."
+    if isinstance(error, PermissionError):
+        return f"no permission to access {error.filename}. Check --data-dir or AGENT_MEM_DATA_DIR and file permissions."
+    if isinstance(error, OSError):
+        return f"{error.strerror or error}{f': {error.filename}' if error.filename else ''}"
+    if isinstance(error, ModuleNotFoundError):
+        return (
+            f"missing module {error.name}. Reinstall with the extras you need, e.g. "
+            "`uv tool install --reinstall 'agent-mem[semantic,observer]'`."
+        )
+    return f"unexpected {type(error).__name__}: {error}. Run again with AGENT_MEM_DEBUG=1 for details and report it."
 
 
 def _main(args: list[str]) -> int:
@@ -117,18 +161,17 @@ def _main(args: list[str]) -> int:
     p.add_argument("--no-models", action="store_true", help="with --write: skip the embedding model download")
     p = sub.add_parser("uninstall", help="remove hooks and MCP entries written by `setup --write`; data stays")
     p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
-    p = sub.add_parser("view", help="write a read-only HTML page of your memory and open it (no server)")
+    p = sub.add_parser("view", help="open the viewer in the browser (starts it if needed)")
     p.add_argument("--project", help="only this project directory (default: all projects)")
-    p.add_argument("--output", type=Path, help="write the page here instead of the private data directory")
-    p.add_argument("--no-open", action="store_true", help="only write the page and print its path")
     p.add_argument(
-        "--watch",
-        type=int,
-        nargs="?",
-        const=10,
-        metavar="SECONDS",
-        help="keep rewriting the page every SECONDS (default 10) until Ctrl+C; the open page reloads itself",
+        "--output", type=Path, help="write an offline snapshot page here (a file, or a folder for agent-mem.html)"
     )
+    p.add_argument("--no-open", action="store_true", help="write the snapshot page and print its path, open nothing")
+    p = sub.add_parser("serve", help="run the viewer on 127.0.0.1 (the hooks and `view` start it for you)")
+    p.add_argument("--quiet", action="store_true")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--autostart", action="store_true", help="start the viewer at every login, and now")
+    group.add_argument("--no-autostart", action="store_true", help="remove the login item")
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")
 
@@ -210,15 +253,42 @@ def _main(args: list[str]) -> int:
             )
         )
         return 0
+    if ns.command == "serve":
+        from agent_mem.ui import server
+
+        if ns.autostart:
+            print(server.install_autostart(config))
+            return 0
+        if ns.no_autostart:
+            removed = server.remove_autostart()
+            print(
+                f"Removed {removed}. The viewer still starts with each agent session."
+                if removed
+                else "No login item found."
+            )
+            return 0
+        return server.serve(config, quiet=ns.quiet)
     if ns.command == "restore":
+        import sqlite3
+
         from agent_mem.core import db
 
-        source = ns.file or (db.latest_backup(config) if ns.latest else None)
-        if source is None:
-            print("No backup given (use a path or --latest).", file=sys.stderr)
+        if ns.file is None and not ns.latest:
+            print("No backup given: pass a file or --latest.", file=sys.stderr)
             return 2
-        db.restore(config, source)
-        print(f"Restored {source}.")
+        source = ns.file or db.latest_backup(config)
+        if source is None:
+            print(f"No backups in {config.backup_dir} yet; `agent-mem backup` writes one.", file=sys.stderr)
+            return 2
+        if not source.is_file():
+            print(f"Not a backup file: {source}", file=sys.stderr)
+            return 2
+        try:
+            db.restore(config, source)
+        except (ValueError, sqlite3.DatabaseError) as error:
+            print(f"Not restored, the live database is unchanged: {error}", file=sys.stderr)
+            return 1
+        print(f"Restored {source}. The previous database is kept as {config.db_path}.replaced.")
         return 0
 
     from agent_mem.cli import commands

@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "agent-mem",
-      "description": "Shared, local memory for Claude Code, Codex, Copilot CLI and OpenCode. Facts are extracted in the background through the harness you already use (no API key); no server, no telemetry.",
+      "description": "Shared, local memory for Claude Code, Codex, Copilot CLI and OpenCode. Facts are extracted in the background through the harness you already use (no API key); no cloud, no telemetry.",
       "version": "1.0.0",
       "source": {
         "source": "local",

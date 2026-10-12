@@ -2,7 +2,7 @@
 
 One local memory for **Claude Code, Codex, GitHub Copilot CLI and OpenCode**.
 
-Agent Mem records what your coding agents do through their native hooks, turns it into facts in the background, and gives every agent the relevant part of that history at the right moment. No telemetry, no server, no open ports, no API key: one SQLite file plus a small vector index on your machine. Model calls for fact extraction go through the harness CLI you are already logged into.
+Agent Mem records what your coding agents do through their native hooks, turns it into facts in the background, and gives every agent the relevant part of that history at the right moment. No telemetry, no cloud, no API key: one SQLite file plus a small vector index on your machine, and a read-only viewer on `127.0.0.1` only. Model calls for fact extraction go through the harness CLI you are already logged into.
 
 ## Install
 
@@ -30,12 +30,14 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 
 | Moment | What happens |
 | --- | --- |
-| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, the last session, oldest first so an update reads as one. Claude Code shows one line in your terminal: `agent-mem: 5 items injected (~310 tokens)`. |
-| You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). Claude Code shows which ones: `agent-mem: 2 items injected (M3, T7; ~80 tokens)`. |
+| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, the last session, oldest first so an update reads as one. Claude Code shows a panel in your terminal: the project's memory size, what was injected (grouped by day, with ids), anything that needs your attention, and the viewer address. |
+| You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). The terminal stays quiet. |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
 | Turn ends | The turn is stored. A detached worker extracts facts from it in the background and exits when the queue is empty. |
-| Context compaction | Session goal, decisions and open problems are re-injected (Claude Code, Codex) or added to the compaction prompt (OpenCode). |
+| Context compaction | Session goal, decisions and open problems are re-injected (Claude Code, Codex) or added to the compaction prompt (OpenCode). Claude Code shows the panel again. |
+| Session ends | Claude Code shows what was saved: turns, files, errors. |
+| Something breaks | Claude Code shows it in the terminal right away (at most every ten minutes per failure) with the command that helps, usually `agent-mem doctor`. |
 
 All harnesses write into the same memory. What Claude Code learned is available to Codex and vice versa.
 
@@ -73,7 +75,8 @@ agent-mem status [--json] | doctor [--fix] [--json] | paths
 agent-mem setup <harness> [--write] [--no-models] | uninstall <harness>
 agent-mem observe [--drain] [--once] [--status] [--retry-failed] [--reprocess-raw] [--reindex]
 agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
-agent-mem show T12 M3 | view [--project DIR] [--output FILE] [--no-open] [--watch [SECONDS]]
+agent-mem show T12 M3 | view [--project DIR] [--output FILE|FOLDER] [--no-open]
+agent-mem serve [--quiet] [--autostart | --no-autostart]
 agent-mem rules [list|enable|disable|delete] [ID] | lessons
 agent-mem pause [--for 2h] | resume
 agent-mem export [--project DIR] [--output FILE]
@@ -84,6 +87,23 @@ agent-mem eval <longmemeval.json> [--subset FILE] [--backend sqlite|mem0] | eval
 ```
 
 MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget`. `mem_forget` removes a fact from SQLite and from the vector index.
+
+## Viewer
+
+`agent-mem view` opens the viewer at `http://127.0.0.1:37778/`. It runs in the background, starts with every agent session, and `setup --write` also registers it as a login item (macOS LaunchAgent, systemd user service, Windows Startup folder), so it is reachable after a restart. The page is built fresh on every reload; an open tab reloads itself every ten seconds.
+
+It listens on the loopback interface only. The first visit needs a key so other users of the same machine cannot read your memory: `agent-mem view` opens the address with the key, and the browser keeps it as a cookie. `agent-mem view --output FILE` writes an offline snapshot instead. Change the port with `"viewer": {"port": 37778}`, turn it off with `"viewer": {"enabled": false}`, remove the login item with `agent-mem serve --no-autostart`.
+
+## When something is missing
+
+| You see | Do |
+| --- | --- |
+| `agent-mem: the database is damaged` | `agent-mem doctor`, then `agent-mem restore --latest` (the old file is kept as `memory.db.replaced`) |
+| `semantic: unavailable` in `status` | `uv tool install --reinstall 'agent-mem[semantic,observer]'`, then `agent-mem models install` |
+| facts never appear | `agent-mem observe --status`; the harness CLI (`claude`, `codex`, `copilot`) must be on PATH and logged in |
+| Codex captures nothing | start `codex`, run `/hooks` and trust the agent-mem hooks once |
+| `Cannot start the viewer on 127.0.0.1:37778` | another program uses the port; set `"viewer": {"port": <free port>}` |
+| any other error | `agent-mem doctor`; `AGENT_MEM_DEBUG=1 agent-mem <command>` prints the full traceback |
 
 ## Configuration
 
@@ -104,7 +124,8 @@ MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `
     "daily_limit": 300,
     "bundle_turns": 5,
     "bundle_tokens": 6000
-  }
+  },
+  "viewer": {"enabled": true, "port": 37778, "refresh_seconds": 10}
 }
 ```
 

@@ -116,8 +116,8 @@
   const outcomeBadge = (outcome) => `<span class="badge ${h(outcome)}" title="${h(outcomeLabel(outcome))}">${icon(outcome === "ok" ? "check" : outcome === "error" ? "cross" : "dots", 15, 2.2)}</span>`;
   const limitReached = (list, key) => list.length >= (data.limits[key] ?? Infinity);
 
-  // `agent-mem view --watch` rewrites the page every `refresh` seconds; an old page means the watch ended.
-  const live = () => Boolean(data.refresh) && date(data.generated_at) !== null && Date.now() - date(data.generated_at).getTime() < data.refresh * 3000;
+  // `agent-mem serve` builds the page fresh on every request; the page reloads itself every `refresh` seconds.
+  const live = () => Boolean(data.served);
   const turns = () => data.turns.filter((turn) => inProject(turn.project_id));
   const sessions = () => data.sessions.filter((session) => inProject(session.project_id));
   const memories = () => data.memories.filter((memory) => inProjectOrGlobal(memory.project_id));
@@ -164,7 +164,7 @@
 <aside class="sidebar" aria-label="Viewer navigation">
 <a class="brand" href="${hashFor("overview")}">agent-mem<span class="brand-badge">v${h(String(data.agent_mem).split(".")[0])}</span></a>
 <nav aria-label="Sections">${groups}</nav>
-<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Capture paused" : "Capture active"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.<br>Stop with Ctrl+C in the terminal.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}${data.refresh ? ". The watch has stopped" : ""}<br>Run <code>agent-mem view --watch</code> to keep it current</span>`}</div>
+<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Capture paused" : "Capture active"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.<br>Always on at this address.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}<br>Run <code>agent-mem view</code> for the live viewer</span>`}</div>
 </aside>
 <div class="main">
 <header class="topbar">
@@ -705,7 +705,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     readRoute();
     renderView();
     if (scroll) window.scrollTo({ top: scroll });
-    // Keep reloading even when the file looks old: a sleeping tab or a restarted watch catches up on its own.
+    // A sleeping tab catches up on its own; the server builds a fresh page on every reload.
     if (data.refresh) setInterval(reloadWhenIdle, data.refresh * 1000);
   } catch (error) {
     root.innerHTML = `<div class="app"><div class="main"><div class="empty"><b>The page could not read its snapshot.</b><span class="mono">${h(error && error.message ? error.message : "unknown error")}</span></div></div></div>`;

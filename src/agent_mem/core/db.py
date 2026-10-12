@@ -198,10 +198,13 @@ def latest_backup(config: Config) -> Path | None:
 
 def restore(config: Config, source: Path) -> None:
     """Replace the live database with ``source``. The current file is kept as ``memory.db.replaced``."""
-    probe = sqlite3.connect(source)
+    # Read-only URI: a missing path must fail instead of creating an empty database that then replaces the live one.
+    probe = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
     try:
         if probe.execute("PRAGMA quick_check").fetchone()[0] != "ok":  # raises DatabaseError if unreadable
             raise ValueError(f"backup {source} failed its integrity check")
+        if user_version(probe) == 0:
+            raise ValueError(f"{source} is not an agent-mem database")
     finally:
         probe.close()
     for suffix in ("-wal", "-shm"):

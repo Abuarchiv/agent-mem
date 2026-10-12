@@ -19,6 +19,7 @@ Report vulnerabilities privately through GitHub security advisories on this repo
 | Cross-project leakage | Facts live in one mem0 namespace per project; SQLite memories stay in their project. `mem_search` looks into other projects only when asked. |
 | Other local users | Data directory and `mem0/` are `0700` on macOS and Linux; on Windows the per-user `%LOCALAPPDATA%`. |
 | Command injection via hooks | Hook commands are fixed strings written by `setup --write` with the absolute binary path; payloads are passed on stdin and never interpolated into shell commands. |
+| Viewer | `agent-mem serve` binds `127.0.0.1` only, answers GET only, rejects foreign `Host` headers (DNS rebinding) and requires a random key from the private data directory (`viewer.key`, `0600`), kept as an `HttpOnly`, `SameSite=Strict` cookie. Pages are not cached and cannot be framed. |
 | Telemetry | None. mem0's telemetry is disabled before import and verified by `tests/test_observe.py`; no `~/.mem0` is created. |
 | Supply chain | Lockfile, pinned `mem0ai`, upgrades only with a green adapter test; the release workflow builds in CI and publishes with PyPI trusted publishing. |
 | Resource exhaustion | Size limits for stdin, prompts, outputs, bundles; hook deadline; one worker at a time at low priority; daily cap on model calls (`observe.daily_limit`). |

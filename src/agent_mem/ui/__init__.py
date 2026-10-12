@@ -1,8 +1,8 @@
-"""``agent-mem view``: a read-only HTML page of the local memory.
+"""The read-only HTML page of the local memory, served by ``ui.server`` or written as an offline file.
 
-The page is one self-contained file in the private data directory. There is no server and no open port; the file
-embeds a bounded snapshot, its stylesheet, script and fonts, and a Content Security Policy that allows only its own
-script (by hash) and blocks every network request. Loaded by the CLI only, never on the hook path.
+The page is self-contained: it embeds a bounded snapshot, its stylesheet, script and fonts, and a Content Security
+Policy that allows only its own script (by hash) and blocks every network request. Loaded by the CLI only, never on
+the hook path.
 """
 
 from __future__ import annotations
@@ -353,6 +353,8 @@ def write(config: Config, html: str, output: Path | None = None) -> Path:
         target = folder / PAGE_NAME
     else:
         target = output.expanduser().resolve()
+        if target.is_dir():
+            target = target / PAGE_NAME
         target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)

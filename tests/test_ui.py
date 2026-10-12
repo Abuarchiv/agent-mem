@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -110,30 +111,95 @@ def test_view_command_writes_a_private_page_and_purge_removes_it(
     assert not ui.view_dir(config).exists()
 
 
-def test_view_watch_rewrites_the_page_until_interrupted(config: Config, driver: Driver, monkeypatch, capsys):
-    from agent_mem.cli import commands
+def _serve(config: Config):
+    import socket
+    import threading
+
+    from agent_mem.ui import server
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        config.viewer.port = probe.getsockname()[1]
+    httpd = server._Server(config)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def _get(config: Config, path: str, headers: dict[str, str] | None = None):
+    import http.client
+
+    client = http.client.HTTPConnection("127.0.0.1", config.viewer.port, timeout=10)
+    client.request("GET", path, headers={"Host": f"127.0.0.1:{config.viewer.port}", **(headers or {})})
+    response = client.getresponse()
+    return response.status, dict(response.getheaders()), response.read().decode("utf-8")
+
+
+def test_served_viewer_needs_the_key_and_builds_a_fresh_page(config: Config, driver: Driver, monkeypatch):
+    from agent_mem.ui import server
 
     _teach(driver)
-    page = ui.view_dir(config) / ui.PAGE_NAME
-    sleeps: list[float] = []
+    httpd = _serve(config)
+    try:
+        assert server.running(config)
+        assert _get(config, "/")[0] == 401
+        assert _get(config, "/?key=wrong")[0] == 403
+        assert _get(config, "/", {"Host": "evil.example:80"})[0] == 403  # DNS rebinding
+        status, headers, _ = _get(config, "/?key=" + server.key(config))
+        assert status == 303 and headers["Location"] == "/" and "HttpOnly" in headers["Set-Cookie"]
+        cookie = {"Cookie": headers["Set-Cookie"].split(";")[0]}
+        status, headers, page = _get(config, "/", cookie)
+        assert status == 200 and headers["Cache-Control"] == "no-store"
+        payload = _payload(page)
+        assert payload["served"] is True and payload["refresh"] == config.viewer.refresh_seconds
+        driver.prompt("s1", "Asked after the page was first served")
+        assert any(
+            t["prompt"] == "Asked after the page was first served"
+            for t in _payload(_get(config, "/", cookie)[2])["turns"]
+        )
 
-    def sleep(seconds: float) -> None:
-        sleeps.append(seconds)
-        if len(sleeps) == 1:
-            driver.prompt("s1", "Second prompt after the first write")
-        else:
-            raise KeyboardInterrupt
+        def broken(*args, **kwargs):
+            raise sqlite3.DatabaseError("file is not a database")
 
-    monkeypatch.setattr(commands.time, "sleep", sleep)
-    assert cli.main(["--data-dir", str(config.data_dir), "view", "--no-open", "--watch", "1"]) == 0
-    assert sleeps == [2, 2]  # never faster than every 2 s
-    payload = _payload(page.read_text(encoding="utf-8"))
-    assert payload["refresh"] == 2
-    assert any(turn["prompt"] == "Second prompt after the first write" for turn in payload["turns"])
-    assert "Stopped" in capsys.readouterr().out
+        monkeypatch.setattr(ui, "build_snapshot", broken)
+        status, _, page = _get(config, "/", cookie)
+        assert status == 503 and "agent-mem doctor" in page
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert stat.S_IMODE((config.data_dir / server.KEY_FILE).stat().st_mode) == 0o600 or sys.platform == "win32"
 
-    assert cli.main(["--data-dir", str(config.data_dir), "view", "--no-open"]) == 0
-    assert _payload(page.read_text(encoding="utf-8"))["refresh"] is None
+
+def test_second_viewer_on_the_same_port_exits_cleanly(config: Config, capsys):
+    from agent_mem.ui import server
+
+    httpd = _serve(config)
+    try:
+        assert server.serve(config) == 0
+        assert "already runs" in capsys.readouterr().out
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_autostart_writes_and_removes_a_login_item(config: Config):
+    from agent_mem.ui import server
+
+    target = server.autostart_path()
+    if target is None:
+        return  # Linux without systemd: nothing to register
+    assert "login item written" in server.install_autostart(config)
+    assert target.exists() and str(config.data_dir) in target.read_text(encoding="utf-8")
+    assert server.remove_autostart() == target and not target.exists()
+
+
+def test_view_output_into_a_folder_and_export_into_a_new_folder(config: Config, driver: Driver, tmp_path: Path):
+    _teach(driver)
+    base = ["--data-dir", str(config.data_dir)]
+    folder = tmp_path / "pages"
+    folder.mkdir()
+    assert cli.main([*base, "view", "--no-open", "--output", str(folder)]) == 0
+    assert _payload((folder / ui.PAGE_NAME).read_text(encoding="utf-8"))["refresh"] is None
+    assert cli.main([*base, "export", "--output", str(tmp_path / "new" / "dir" / "export.json")]) == 0
 
 
 def test_view_assets_ship_with_the_package():

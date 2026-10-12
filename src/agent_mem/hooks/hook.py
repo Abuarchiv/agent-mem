@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -45,17 +46,7 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
                 }
             }
         if response.context and event.kind in {"session_start", "prompt", "pre_tool", "tool"}:
-            out: dict[str, Any] = {
-                "hookSpecificOutput": {"hookEventName": event.raw_kind, "additionalContext": response.context}
-            }
-            if harness == "claude" and event.kind in {"session_start", "prompt"}:
-                # The user's terminal gets a readable view of exactly what the model got (claude-mem does the same).
-                if event.kind == "session_start":
-                    heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
-                else:
-                    heading = "matches for this prompt"
-                out["systemMessage"] = inject.terminal(response.context, heading, color="NO_COLOR" not in os.environ)
-            return out
+            return {"hookSpecificOutput": {"hookEventName": event.raw_kind, "additionalContext": response.context}}
         return None
     if harness == "copilot":
         if response.deny and event.kind == "pre_tool":
@@ -121,6 +112,42 @@ def spawn_observer(config: Config) -> bool:
     return _spawn([sys.executable, "-m", "agent_mem", "observe", "--drain", "--quiet"], config)
 
 
+def _listening(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.05):
+            return True
+    except OSError:
+        return False
+
+
+def spawn_viewer(config: Config, *, force: bool = False) -> bool:
+    """Start ``agent-mem serve`` detached when nothing answers on the viewer port. A refused connection on the
+    loopback interface returns at once, so the check costs well under a millisecond on the hook path."""
+    if not config.viewer.enabled or (env_flag("AGENT_MEM_NO_SPAWN") and not force):
+        return False
+    if _listening(config.viewer.port):
+        return False
+    return _spawn([sys.executable, "-m", "agent_mem", "serve", "--quiet"], config)
+
+
+def problems(conn: sqlite3.Connection) -> list[str]:
+    """Failures the user has to act on, shown in the terminal at session start (never to the model)."""
+    lines: list[str] = []
+    for row in conn.execute(
+        "SELECT component, last_error FROM health WHERE last_error_at IS NOT NULL "
+        "AND last_error_at > COALESCE(last_ok_at, '') ORDER BY last_error_at DESC LIMIT 2"
+    ):
+        lines.append(f"{row['component']} fails: {str(row['last_error'])[:160]}. Run `agent-mem doctor`.")
+    with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
+        failed = conn.execute("SELECT COUNT(*), MAX(last_error) FROM observe_queue WHERE state = 'failed'").fetchone()
+        if failed and failed[0]:
+            lines.append(
+                f"{failed[0]} turn(s) failed fact extraction (last: {str(failed[1] or '-')[:160]}). "
+                "Run `agent-mem observe --status`, then `agent-mem observe --retry-failed`."
+            )
+    return lines
+
+
 def _spawn(argv: list[str], config: Config) -> bool:
     env = {**os.environ, "AGENT_MEM_DATA_DIR": str(config.data_dir), "AGENT_MEM_INTERNAL": "1"}
     kwargs: dict[str, Any] = {
@@ -163,6 +190,9 @@ class _Worker(threading.Thread):
         self.response: capture.Response | None = None
         self.spooled = False
         self.error: str | None = None
+        self.problems: list[str] = []
+        self.facts: list[str] = []
+        self.summary: str | None = None
         self._spool_lock = threading.Lock()
 
     def run(self) -> None:
@@ -173,6 +203,13 @@ class _Worker(threading.Thread):
             _maybe_spawn(conn, self.config, self.response.wants_indexer)
             if self.event.kind in {"stop", "session_end"}:
                 spawn_observer(self.config)
+            if self.event.kind == "session_start":
+                spawn_viewer(self.config)
+                if self.event.harness == "claude":
+                    self.problems = problems(conn)
+                    self.facts = inject.overview(conn, f"claude:{self.event.session_id}")
+            elif self.event.kind == "session_end" and self.event.harness == "claude":
+                self.summary = inject.session_summary(conn, f"claude:{self.event.session_id}", _color())
         except db.MigrationPendingError as error:
             # The indexer migrates (with backup) outside the deadline and then replays the spool.
             self.error = f"{type(error).__name__}: {error}"
@@ -240,10 +277,54 @@ def run(harness: str, event_name: str | None, stdin_text: str | None = None, con
         return ""
     if worker.error:
         logutil.write(config.log_dir, "hook", harness=harness, kind=event.kind, error=worker.error[:200])
-    if worker.response is None:
-        return ""
-    output = render(harness, event, worker.response)
+    output = render(harness, event, worker.response) if worker.response is not None else None
+    if harness == "claude":
+        message = _terminal(config, event, worker)
+        if message:
+            output = {**(output or {}), "systemMessage": message}
     return json.dumps(output, ensure_ascii=False) if output else ""
+
+
+def _color() -> bool:
+    return "NO_COLOR" not in os.environ
+
+
+NOTICE_SECONDS = 600
+
+
+def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
+    """What the user sees in Claude Code's terminal: a panel at session start and after compaction, a summary
+    when the session ends, and failures as they happen. Ordinary prompts and tool calls stay quiet."""
+    failure = None
+    # A pending migration or a briefly locked database is routine: the indexer replays the spool later.
+    routine = ("MigrationPendingError", "MigrationInProgressError", "OperationalError: database is locked")
+    if worker.error and not worker.error.startswith(routine):
+        # Without a database nothing is recalled or recorded live; say so instead of failing silently.
+        failure = f"agent-mem cannot use its database ({worker.error[:160]}). Events wait in the spool. Run `agent-mem doctor`."
+    if event.kind == "session_start":
+        heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
+        if event.source == "compact":
+            heading += " · after compaction"
+        context = worker.response.context if worker.response is not None else None
+        viewer = f"http://127.0.0.1:{config.viewer.port}/" if config.viewer.enabled else None
+        notices = [failure] if failure else worker.problems
+        return inject.terminal(context or "", heading, _color(), facts=worker.facts, notices=notices, viewer=viewer)
+    if event.kind == "session_end" and worker.summary:
+        return worker.summary
+    if failure and _notice_due(config, failure):
+        return f"\x1b[31m{failure}\x1b[0m" if _color() else failure
+    return None
+
+
+def _notice_due(config: Config, text: str) -> bool:
+    """The same failure is shown at most every ten minutes, not on every tool call."""
+    marker = config.data_dir / ".last-notice"
+    with contextlib.suppress(OSError):
+        if marker.read_text(encoding="utf-8") == text and time.time() - marker.stat().st_mtime < NOTICE_SECONDS:
+            return False
+    with contextlib.suppress(OSError):
+        marker.write_text(text, encoding="utf-8")
+    return True
 
 
 def _quarantine_note(config: Config, harness: str, event_name: str | None, reason: str) -> None:
