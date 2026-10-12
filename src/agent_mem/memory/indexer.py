@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -77,9 +78,13 @@ def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
             "'trust', json_extract(payload, '$.trust')), trimmed = 1 WHERE trimmed = 0 AND ts < ?",
             (payload_cutoff,),
         ).rowcount
+        # Exposures only: created, get, used and cited feed activation and stay. "injected" adds about twenty rows per
+        # session start and was never deleted.
         accesses = conn.execute(
-            "DELETE FROM accesses WHERE kind IN ('shown', 'warned') AND ts < ?", (access_cutoff,)
+            "DELETE FROM accesses WHERE kind IN ('shown', 'warned', 'injected') AND ts < ?", (access_cutoff,)
         ).rowcount
+        # The model-call log only serves today's budget and recent errors.
+        calls = conn.execute("DELETE FROM observe_calls WHERE ts < ?", (access_cutoff,)).rowcount
     size_mb = config.db_path.stat().st_size / 1_000_000 if config.db_path.exists() else 0
     if size_mb > config.retention.max_db_mb:
         with db.transaction(conn):
@@ -90,7 +95,21 @@ def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
                 "(SELECT id FROM events WHERE trimmed = 0 ORDER BY ts LIMIT 5000)"
             )
         conn.execute("VACUUM")
-    return {"payloads_trimmed": trimmed, "accesses_deleted": accesses}
+    # Quarantined events hold full payloads (privacy, R4); kept as long as payloads are, for `doctor` to show.
+    quarantined = 0
+    if config.quarantine_dir.exists():
+        horizon = time.time() - config.retention.payload_days * 86400
+        for path in config.quarantine_dir.glob("*.json"):
+            with contextlib.suppress(OSError):
+                if path.stat().st_mtime < horizon:
+                    path.unlink()
+                    quarantined += 1
+    return {
+        "payloads_trimmed": trimmed,
+        "accesses_deleted": accesses,
+        "calls_deleted": calls,
+        "quarantine_deleted": quarantined,
+    }
 
 
 def run(config: Config, *, force_consolidate: bool = False, allow_download: bool = True) -> dict[str, Any]:

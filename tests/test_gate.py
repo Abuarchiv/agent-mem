@@ -92,3 +92,31 @@ def test_hook_help_needs_no_stdin():
         check=False,
     )
     assert result.returncode == 0 and b"usage: agent-mem hook" in result.stdout
+
+
+def test_retention_bounds_exposures_call_log_and_quarantine(conn, config: Config, driver: Driver):
+    import time as clock
+
+    from agent_mem.core import spool
+
+    driver.prompt("s1", "anything")
+    old, new = "2020-01-01T00:00:00.000Z", "2999-01-01T00:00:00.000Z"
+    for kind in ("injected", "used", "created"):
+        conn.execute("INSERT INTO accesses(owner_type, owner_id, ts, kind) VALUES ('t', 1, ?, ?)", (old, kind))
+    conn.execute("INSERT INTO accesses(owner_type, owner_id, ts, kind) VALUES ('t', 1, ?, 'injected')", (new,))
+    for ts in (old, new):
+        conn.execute(
+            "INSERT INTO observe_calls(ts, provider, purpose, seconds, ok, prompt_chars, turn_ids) "
+            "VALUES (?, 'claude', 'extract', 1, 1, 1, '[]')",
+            (ts,),
+        )
+    spool.quarantine_record(config.quarantine_dir, {"type": "old"})
+    (stale,) = config.quarantine_dir.glob("*.json")
+    os.utime(stale, (clock.time() - 400 * 86400,) * 2)
+    spool.quarantine_record(config.quarantine_dir, {"type": "fresh"})
+
+    stats = indexer.retention(conn, config)
+    assert stats["calls_deleted"] == 1 and stats["quarantine_deleted"] == 1
+    kinds = sorted(r[0] for r in conn.execute("SELECT kind FROM accesses WHERE ts IN (?, ?)", (old, new)))
+    assert kinds == ["created", "injected", "used"]  # the old injection went, use and creation stay
+    assert len(list(config.quarantine_dir.glob("*.json"))) == 1
