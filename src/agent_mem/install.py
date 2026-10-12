@@ -16,8 +16,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .federate import claude_home, codex_home
-
 HARNESSES = ("claude", "codex", "copilot", "opencode")
 PROVIDERS = ("claude", "codex", "copilot", "ollama")
 MARK = "agent-mem"
@@ -30,6 +28,16 @@ def binary() -> str:
         return str(Path(found).resolve())
     sibling = Path(sys.executable).with_name("agent-mem.exe" if sys.platform == "win32" else "agent-mem")
     return str(sibling) if sibling.exists() else "agent-mem"
+
+
+def claude_home() -> Path:
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override).expanduser() if override else Path.home() / ".claude"
+
+
+def codex_home() -> Path:
+    override = os.environ.get("CODEX_HOME")
+    return Path(override).expanduser() if override else Path.home() / ".codex"
 
 
 def copilot_home() -> Path:

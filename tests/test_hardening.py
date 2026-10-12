@@ -16,14 +16,12 @@ from agent_mem import (
     db,
     hook,
     identity,
-    importers,
     inject,
     search,
     semantic,
     signals,
     spool,
     store,
-    summarize,
     timeutil,
 )
 from agent_mem.config import Config
@@ -208,24 +206,6 @@ def test_again_question_is_a_correction():
     assert signals.is_correction("why did you do that again?")
 
 
-def test_missing_summary_harness_keeps_sessions_pending(conn, config: Config, driver: Driver, monkeypatch):
-    for text in ("Design the cache", "Implement the cache"):
-        driver.prompt("s1", text)
-        driver.stop("s1", "done")
-    driver.send("s1", "session_end", raw_kind="SessionEnd")
-    config.summarize.enabled = True
-
-    def missing(*args, **kwargs):
-        raise FileNotFoundError("claude")
-
-    monkeypatch.setattr(summarize.subprocess, "run", missing)
-    assert summarize.summarize_pending(conn, config) == 0
-    assert conn.execute("SELECT summarized_at FROM sessions").fetchone()[0] is None
-
-
-# --- interfaces ------------------------------------------------------------------
-
-
 def test_mcp_cannot_store_preferences_or_supersede_user_memories(conn, config: Config, project: Path, monkeypatch):
     from agent_mem import mcp_server
 
@@ -249,27 +229,6 @@ def test_mcp_cannot_store_preferences_or_supersede_user_memories(conn, config: C
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
-
-
-def test_claude_import_skips_subagent_transcripts(conn, config: Config, project: Path, tmp_path: Path):
-    base = tmp_path / "projects" / "p"
-    record = {"type": "user", "sessionId": "u1", "cwd": str(project), "timestamp": "2026-08-01T10:00:00Z"}
-    _write_jsonl(
-        base / "u1" / "subagents" / "agent-1.jsonl",
-        [{**record, "isSidechain": True, "message": {"role": "user", "content": "use yarn instead of npm"}}],
-    )
-    _write_jsonl(base / "u1.jsonl", [{**record, "message": {"role": "user", "content": "Why is CI red?"}}])
-    importers.import_claude(conn, config, tmp_path / "projects")
-    prompts = [r[0] for r in conn.execute("SELECT prompt FROM turns")]
-    assert prompts == ["Why is CI red?"]
-    assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
-
-
-def test_agentmemory_items_without_ids_are_kept(conn, config: Config, tmp_path: Path):
-    export = tmp_path / "am.json"
-    export.write_text(json.dumps([{"id": None, "content": "first"}, {"id": None, "content": "second"}]))
-    assert importers.import_agentmemory(conn, config, export)["memories"] == 2
-    assert importers.import_agentmemory(conn, config, export)["memories"] == 0
 
 
 def test_odd_ids_and_durations_are_rejected(config: Config, capsys):

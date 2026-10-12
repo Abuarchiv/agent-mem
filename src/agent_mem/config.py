@@ -86,26 +86,11 @@ class Rules:
 
 
 @dataclass
-class Summarize:
-    enabled: bool = False
-    harness: str = "claude"
-    daily_limit: int = 5
-    timeout_seconds: int = 120
-    max_input_chars: int = 16_000
-
-
-@dataclass
 class Semantic:
     enabled: bool = True
     # E2 (docs/PLAN.md B.19): same Recall@5 as embeddinggemma at a fifth of the size; e5-small needs a custom registration.
     model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     batch_size: int = 32
-
-
-@dataclass
-class Federation:
-    claude: bool = True
-    codex: bool = True
 
 
 @dataclass
@@ -145,9 +130,7 @@ class Config:
     retention: Retention = field(default_factory=Retention)
     limits: Limits = field(default_factory=Limits)
     rules: Rules = field(default_factory=Rules)
-    summarize: Summarize = field(default_factory=Summarize)
     semantic: Semantic = field(default_factory=Semantic)
-    federation: Federation = field(default_factory=Federation)
     observe: Observe = field(default_factory=Observe)
     warnings: list[str] = field(default_factory=list)
 

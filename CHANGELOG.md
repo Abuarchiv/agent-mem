@@ -22,6 +22,10 @@
 - Extras: `semantic` (fastembed) and `observer` (mem0, qdrant). Install scripts install both.
 - Manifests no longer claim "No LLM calls". Issue template asks for `doctor --json` and the last log lines.
 
+### Removed
+
+- `summarize` (session summaries through the harness; facts from the observer replace them), `federate` (reading Claude Code auto memory and Codex memories into the briefing) and `importers` (`agent-mem import` from Claude Code, Codex, claude-mem, agentmemory). The config keys `summarize` and `federation` are gone; unknown keys are reported by `doctor`.
+
 ### Fixes
 
 - A worker without an embedder (no semantic extra) falls back to the raw stage instead of failing every bundle.

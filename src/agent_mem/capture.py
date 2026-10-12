@@ -2,7 +2,7 @@
 
 This is the write path for every event: live hooks, spool replay and transcript
 imports. It is idempotent per event (dedupe key) and standard library only.
-Memories from other sources (MCP, federation, summaries, memory imports) go
+Memories from other sources (MCP, the observer) go
 through ``store.add_memory``, which cleans them the same way.
 """
 

@@ -19,7 +19,7 @@ agent-mem observe  detached, one at a time (observe.lock), low priority, exits a
                    no stage available → raw summary (kind = summary, trust = raw)
 
 agent-mem index    detached, one at a time: spool replay → stale turns → embeddings
-                   → federation → consolidation (daily) → retention → backups
+                   → consolidation (daily) → retention → backups
 
 agent-mem mcp      one per agent session (stdio): mem_search, mem_timeline, mem_get, mem_remember, mem_forget
 agent-mem view     on demand: one self-contained HTML page, no server
@@ -58,7 +58,7 @@ SQLite (WAL)       the truth: sessions, turns, events, memories (facts), queue, 
 | `install.py` | `setup --write` and `uninstall`: hook files with the absolute binary path, MCP entries, detection |
 | `health.py` | `status`, `doctor` (observer queue, providers, index size, hook binary paths) |
 | `evaluate.py` | Fixture and LongMemEval-S runner, `--backend sqlite|mem0` |
-| `indexer.py`, `db.py`, `spool.py`, `federate.py`, `importers.py`, `summarize.py`, `mcp_server.py`, `cli.py`, `commands.py`, `ui/` (the `view` page) | As before |
+| `indexer.py`, `db.py`, `spool.py`, `mcp_server.py`, `cli.py`, `commands.py`, `ui/` (the `view` page) | As before |
 
 ## Data model
 

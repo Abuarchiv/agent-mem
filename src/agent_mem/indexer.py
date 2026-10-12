@@ -1,6 +1,6 @@
 """Background indexer, started detached by hooks (one instance at a time).
 
-Order of work: integrity check, spool replay, stale turns, embeddings, federation,
+Order of work: integrity check, spool replay, stale turns, embeddings,
 consolidation, optional summaries, retention, backups, housekeeping.
 """
 
@@ -15,7 +15,7 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
-from . import capture, consolidate, db, federate, logutil, spool, summarize, timeutil
+from . import capture, consolidate, db, logutil, spool, timeutil
 from .config import Config
 from .events import Event, PayloadError
 
@@ -143,8 +143,6 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
             limit = 100_000 if previous not in (None, "unavailable", embedder.model) else 512
             stats["embedded"] = semantic.embed_pending(conn, embedder, limit=limit)
 
-    stats["federated"] = federate.run(conn, config)
-
     if force_consolidate or consolidate.due(conn, config):
         since = db.get_meta(conn, "consolidated_at")
         linker: Callable[[sqlite3.Connection], int] | None = None
@@ -158,7 +156,6 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
 
         stats["consolidation"] = consolidate.run(conn, config, linker)
 
-    stats["summarized"] = summarize.summarize_pending(conn, config)
     stats["retention"] = retention(conn, config)
 
     if db.get_meta(conn, "backups_dirty") == "1":

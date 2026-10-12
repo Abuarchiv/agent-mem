@@ -25,7 +25,6 @@ def dispatch(ns: argparse.Namespace, config: Config) -> int:
         "show": cmd_show,
         "pause": cmd_pause,
         "resume": cmd_resume,
-        "import": cmd_import,
         "export": cmd_export,
         "purge": cmd_purge,
         "backup": cmd_backup,
@@ -153,27 +152,6 @@ def cmd_resume(ns: argparse.Namespace, config: Config) -> int:
     with _conn(config) as conn, db.transaction(conn):
         conn.execute("DELETE FROM meta WHERE key = 'paused_until'")
     print("Capture resumed.")
-    return 0
-
-
-def cmd_import(ns: argparse.Namespace, config: Config) -> int:
-    from . import importers
-
-    with _conn(config) as conn:
-        if ns.source == "claude":
-            stats = importers.import_claude(conn, config, ns.path, dry_run=ns.dry_run)
-        elif ns.source == "codex":
-            stats = importers.import_codex(conn, config, ns.path, dry_run=ns.dry_run)
-        else:
-            if ns.path is None:
-                print(f"import {ns.source} needs a path", file=sys.stderr)
-                return 2
-            function = {
-                "claude-mem": importers.import_claude_mem,
-                "agentmemory": importers.import_agentmemory,
-            }[ns.source]
-            stats = function(conn, config, ns.path, dry_run=ns.dry_run)
-    print(json.dumps({"source": ns.source, "dry_run": ns.dry_run, **stats}, indent=2))
     return 0
 
 

@@ -4,8 +4,7 @@ Binding rules for every agent and contributor (docs/PLAN.md §13). The plan is t
 of design decisions; measurements go to its Appendix B and are never edited after the fact.
 
 - **R1 Boundary.** No daemon, no HTTP server, no open ports. The viewer writes a static page that
-  works offline. Generative model calls are made only by the `observe` worker (and the optional,
-  existing `summarize`), always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.
+  works offline. Generative model calls are made only by the `observe` worker, always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.
   Agent Mem goes online only to download models.
 - **R2 Hook path.** `hook`, `capture`, `db`, `config`, `privacy`, `signals`, `identity`, `inject`,
   `search`, `learn`, `store`, `spool`, `normalize/*`, `events`, `timeutil`, `logutil` import only the

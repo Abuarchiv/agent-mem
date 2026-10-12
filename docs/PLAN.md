@@ -219,10 +219,9 @@ Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deplo
 | --- | --- |
 | `hook`, `capture`, `normalize/*`, `events`, `spool`, `privacy`, `identity`, `signals`, `timeutil`, `logutil`, `config`, `db` | behalten. `capture` legt Queue-Eintrag an, `config` erhält Worker-Optionen. |
 | `store`, `search`, `inject`, `learn`, `consolidate`, `health`, `views`, `ui/*`, `mcp_server`, `cli`, `commands` | behalten (Viewer-Abhängigkeiten). `inject` und `search` lesen Fakten. |
-| `summarize` | behalten (opt-in, getestet). Ob Fakten ihn ersetzen, entscheidet der Dogfooding-Bericht, nicht dieser Plan. |
+| `summarize`, `federate`, `importers` | **gelöscht am 2026-10-12** auf Wunsch des Nutzers: Session-Zusammenfassungen ersetzt der Observer, fremde Notizen (`native_note`) und Importe aus claude-mem/agentmemory gehören nicht zum neuen Kern. Schema-Spalten bleiben (keine Migration nötig). |
 | `evaluate` | behalten, erhält `--backend {sqlite,mem0}` und Teilmengen-Option (§8). |
 | `semantic`, `indexer` | Schicksal laut E3 (§12). |
-| `federate`, `importers` | unverändert, kein Teil dieses Plans. |
 | neu | `observe/` mit `worker.py`, `queue.py`, `bundle.py`, `providers.py`, `mem0_adapter.py`, `contradiction.py`. Insgesamt Ziel unter 800 Zeilen. |
 | neue Abhängigkeiten | `mem0ai[nlp]`, `qdrant-client` (kommt mit mem0), als Extra `observer`; Kern bleibt wie bisher installierbar. |
 

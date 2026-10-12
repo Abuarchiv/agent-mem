@@ -79,7 +79,7 @@ agent-mem pause [--for 2h] | resume
 agent-mem export [--project DIR] [--output FILE]
 agent-mem purge --id ID | --project DIR | --before DATE | --all  [--yes]
 agent-mem backup | restore [FILE | --latest] | consolidate | index [--no-download]
-agent-mem models [status|install] | import <claude|codex|claude-mem|agentmemory> [PATH] [--dry-run]
+agent-mem models [status|install]
 agent-mem eval <longmemeval.json> [--subset FILE] [--backend sqlite|mem0] | eval --fixture FILE
 ```
 

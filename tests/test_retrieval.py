@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
-from agent_mem import consolidate, db, federate, semantic, store, timeutil
+from agent_mem import consolidate, db, semantic, store, timeutil
 from agent_mem.config import Config
 from tests.conftest import Driver
 
@@ -131,27 +131,6 @@ def test_anchors_detect_changed_and_deleted_files(driver: Driver, conn, project)
     assert consolidate.anchor_status(conn, ("t", 1))[0][1].startswith("changed since")
     (project / "app.py").unlink()
     assert consolidate.anchor_status(conn, ("t", 1)) == [("app.py", "deleted")]
-
-
-def test_federation_reads_claude_auto_memory(driver: Driver, conn, config: Config, project, tmp_path):
-    driver.prompt("s1", "hello")
-    root = conn.execute("SELECT root FROM projects").fetchone()[0]
-    folder = federate.claude_home() / "projects" / federate.encode_claude_project(root) / "memory"
-    folder.mkdir(parents=True)
-    (folder / "MEMORY.md").write_text("- index")
-    (folder / "feedback_testing.md").write_text(
-        "---\nname: Always run tox before pushing\ntype: feedback\n---\nUse tox.\n"
-    )
-    assert federate.run(conn, config) == 1
-    assert federate.run(conn, config) == 0  # unchanged file is skipped
-    (folder / "feedback_testing.md").write_text("---\nname: Always run nox before pushing\n---\nUse nox.\n")
-    assert federate.run(conn, config) == 1
-    rows = conn.execute("SELECT title, invalid_at FROM memories WHERE kind = 'native_note' ORDER BY id").fetchall()
-    assert rows[0]["invalid_at"] is not None and rows[1]["title"] == "Always run nox before pushing"
-    codex = Driver(conn, config, project, harness="codex")
-    claude = Driver(conn, config, project, harness="claude")
-    assert "nox" in (codex.start("c1").context or "")
-    assert "nox" not in (claude.start("s9").context or "")  # Claude already loads its own auto memory
 
 
 def test_link_neighbours_adds_related_keys(driver: Driver, conn, config: Config):

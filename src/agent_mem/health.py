@@ -15,7 +15,7 @@ from typing import Any
 
 from . import db, spool, timeutil
 from .config import Config
-from .federate import claude_home, codex_home
+from .install import claude_home, codex_home
 
 HARNESS_MARKERS = {
     "claude": [claude_home() / "plugins", claude_home() / "settings.json"],
