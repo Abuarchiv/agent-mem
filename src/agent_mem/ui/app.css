@@ -78,6 +78,7 @@ p { margin: 0; }
 .dot { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--off); }
 .dot.good { background: #86C45F; } .dot.warn { background: #E3B341; } .dot.bad { background: #FF7A66; }
 td .dot { display: inline-block; margin-right: 8px; }
+.agents td:nth-child(-n+2) { white-space: nowrap; }
 .main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 #view { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 #view:focus { outline: none; }

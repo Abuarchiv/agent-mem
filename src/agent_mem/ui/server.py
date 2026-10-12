@@ -193,12 +193,14 @@ def install_autostart(config: Config) -> str:
         return "viewer autostart: no systemd on this machine; add `agent-mem serve --quiet` to your login items."
     argv = _argv()
     data_dir = str(config.data_dir)
+    # Login items start with a bare PATH; the health page looks up claude, codex and copilot on it.
+    path = os.environ.get("PATH", "")
     if sys.platform == "darwin":
         content = plistlib.dumps(
             {
                 "Label": LABEL,
                 "ProgramArguments": argv,
-                "EnvironmentVariables": {"AGENT_MEM_DATA_DIR": data_dir, "AGENT_MEM_INTERNAL": "1"},
+                "EnvironmentVariables": {"AGENT_MEM_DATA_DIR": data_dir, "AGENT_MEM_INTERNAL": "1", "PATH": path},
                 "RunAtLoad": True,
                 # Restart after a crash, not after a clean exit (another viewer already answers).
                 "KeepAlive": {"SuccessfulExit": False},
@@ -215,7 +217,7 @@ def install_autostart(config: Config) -> str:
         quoted = " ".join('"' + part.replace("\\", "\\\\").replace('"', '\\"') + '"' for part in argv)
         content = (
             "[Unit]\nDescription=agent-mem viewer on 127.0.0.1\n\n[Service]\n"
-            f'Environment="AGENT_MEM_DATA_DIR={data_dir}" AGENT_MEM_INTERNAL=1\nExecStart={quoted}\n'
+            f'Environment="AGENT_MEM_DATA_DIR={data_dir}" AGENT_MEM_INTERNAL=1 "PATH={path}"\nExecStart={quoted}\n'
             "Restart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n"
         )
     target.parent.mkdir(parents=True, exist_ok=True)

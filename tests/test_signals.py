@@ -14,6 +14,7 @@ def test_command_keys():
     assert signals.command_key("S=/tmp; cd $S && python -m pytest") == "python -m pytest"
     assert signals.command_key("f=$(ls -t logs/* | head -1); grep x $f") == "grep"
     assert not signals.fixable("cat") and not signals.fixable("grep") and signals.fixable("uv run pytest")
+    assert not signals.fixable("cd") and not signals.fixable("-t") and not signals.fixable(None)
 
 
 def test_command_kinds():

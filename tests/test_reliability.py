@@ -105,6 +105,21 @@ def test_invalid_payload_is_quarantined_and_silent(config: Config):
     assert len(list(config.quarantine_dir.glob("*.json"))) == 2
 
 
+def test_quarantine_latest_says_what_was_set_aside(config: Config):
+    from agent_mem.cli.health import quarantine_latest
+    from agent_mem.core import spool
+
+    assert quarantine_latest(config) is None
+    hook.run("claude", None, "{not json", config)
+    assert "Expecting property name" in quarantine_latest(config)["reason"]
+    spool.quarantine_record(
+        config.quarantine_dir,
+        {"type": "event", "event": {"harness": "claude", "kind": "tool", "ts": "2026-10-12T20:00:00.000Z"}},
+    )
+    latest = quarantine_latest(config)
+    assert latest == {"ts": "2026-10-12T20:00:00.000Z", "reason": "a saved claude tool could not be replayed"}
+
+
 def test_hook_help_explains_instead_of_quarantining(config: Config, capsys: pytest.CaptureFixture[str]):
     assert hook.main(["--help"]) == 0
     assert "usage: agent-mem hook" in capsys.readouterr().out

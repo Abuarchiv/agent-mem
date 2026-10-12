@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import stat
@@ -187,6 +188,8 @@ def test_autostart_writes_and_removes_a_login_item(config: Config):
         return  # Linux without systemd: nothing to register
     assert "login item written" in server.install_autostart(config)
     assert target.exists() and str(config.data_dir) in target.read_text(encoding="utf-8")
+    if not target.name.endswith(".cmd"):  # Windows startup scripts inherit the user's PATH
+        assert os.environ["PATH"] in target.read_text(encoding="utf-8")  # the health page finds claude, codex, copilot
     assert server.remove_autostart() == target and not target.exists()
 
 

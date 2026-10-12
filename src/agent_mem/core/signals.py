@@ -268,7 +268,11 @@ def _segment_key(segment: str) -> str | None:
 
 def fixable(command_key: str | None) -> bool:
     """A failure of this command can be fixed by a change (a test, a build), not just retried with other words."""
-    return bool(command_key) and command_key.split()[0] not in INSPECTION
+    if not command_key:
+        return False
+    program = command_key.split()[0]
+    # Keys recorded before command_key skipped shell setup: "cd", "-t" from "f=$(ls -t …)".
+    return program not in INSPECTION and program not in _SETUP and not program.startswith(("-", "$", "("))
 
 
 def command_kind(command: str) -> str | None:

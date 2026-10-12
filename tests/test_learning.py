@@ -199,3 +199,14 @@ def test_turn_moves_to_the_nested_project_its_tools_work_in(conn, config, tmp_pa
     ]
     session = conn.execute("SELECT p.name FROM sessions s JOIN projects p ON p.id = s.project_id").fetchone()
     assert session["name"] == "agent-mem"
+
+
+def test_recipes_only_come_from_project_commands(driver: Driver, conn):
+    crash = 'Traceback (most recent call last):\n  File "x.py", line 1\nValueError: bad input'
+    driver.bash("s1", "python3 scripts/probe.py", crash, failed=True)
+    driver.bash("s1", "python3 scripts/probe.py", "ok")
+    assert conn.execute("SELECT COUNT(*) FROM recipes").fetchone()[0] == 0
+    driver.bash("s1", "pytest tests/test_api.py", "FAILED tests/test_api.py::test_get - AssertionError", failed=True)
+    driver.edit("s1", "app.py")
+    driver.bash("s1", "pytest tests/test_api.py", "1 passed")
+    assert [r[0] for r in conn.execute("SELECT command_key FROM recipes")] == ["pytest"]

@@ -507,7 +507,10 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
         ids = [store.entity_id(conn, project_id, "package", name) for name in tool_signal.packages]
         store.link(conn, "t", turn_id, ids)
 
-    if event.tool_failed and error_sig and tool_signal.command_key:
+    # Error-to-fix recipes only for the project's own commands: a failed `cat` or `cd` followed by one that worked
+    # is looking around, not a fix worth repeating (17 of 17 recipes on real data were such noise).
+    project_command = tool_signal.command_kind in {"test", "build", "lint", "install"}
+    if event.tool_failed and error_sig and tool_signal.command_key and project_command:
         recipe = conn.execute(
             "SELECT * FROM recipes WHERE project_id IS ? AND error_sig = ? ORDER BY command_key = ? DESC, successes DESC LIMIT 1",
             (project_id, error_sig, tool_signal.command_key),
@@ -519,7 +522,8 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
                 if block:
                     response.context = block.text
     elif not event.tool_failed and tool_signal.command_key:
-        _resolve_failures(conn, project_id, session_id, turn_id, tool_signal.command_key, event.ts)
+        if project_command:
+            _resolve_failures(conn, project_id, session_id, turn_id, tool_signal.command_key, event.ts)
         if (
             tool_signal.command_kind in {"test", "build", "lint", "install"}
             and project_id is not None

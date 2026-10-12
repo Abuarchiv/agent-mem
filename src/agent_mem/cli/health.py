@@ -115,7 +115,11 @@ def quarantine_latest(config: Config) -> dict[str, Any] | None:
         return None
     with contextlib.suppress(OSError, ValueError):
         record = json.loads(files[-1].read_text(encoding="utf-8"))
-        return {"ts": record.get("ts"), "reason": str(record.get("reason") or record.get("type") or "")[:160]}
+        event = record.get("event") if isinstance(record.get("event"), dict) else {}
+        reason = record.get("reason") or (
+            f"a saved {event.get('harness', '')} {event.get('kind', 'event')} could not be replayed" if event else ""
+        )
+        return {"ts": record.get("ts") or event.get("ts"), "reason": str(reason or record.get("type") or "")[:160]}
     return None
 
 
