@@ -153,7 +153,64 @@ STOPWORDS = {
     "gibt",
     "alle",
     "alles",
+    # question words and filler verbs: they lower coverage without naming anything (B.29)
+    "who",
+    "will",
+    "been",
+    "these",
+    "those",
+    "used",
+    "uses",
+    "project",
+    "welche",
+    "welcher",
+    "welches",
+    "welchem",
+    "welchen",
+    "womit",
+    "worauf",
+    "wofür",
+    "woran",
+    "wovon",
+    "wann",
+    "heißt",
+    "heißen",
+    "diese",
+    "dieser",
+    "dieses",
+    "diesem",
+    "diesen",
+    "wird",
+    "werden",
+    "wurde",
+    "wurden",
+    "gilt",
+    "nutzt",
+    "nutzen",
+    "verwenden",
+    "verwendet",
+    "achten",
+    "man",
+    "unser",
+    "unsere",
+    "unseren",
+    "unserem",
+    "projekt",
 }
+# "Logging-Bibliothek", "node-version": letters joined by hyphens are searched as their parts.
+_COMPOUND = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)+")
+_SUFFIXES = ("ing", "ed", "es", "en", "er", "e", "s", "t")
+
+
+def stem(term: str) -> str:
+    """Drop one inflection ending so "deployt", "installiere", "branches" find "deploy", "installiert",
+    "branch". FTS5 uses trigrams, so the stem still matches every longer form as a substring."""
+    if not term.isalpha():
+        return term
+    for suffix in _SUFFIXES:
+        if term.endswith(suffix) and len(term) - len(suffix) >= 4:
+            return term[: -len(suffix)]
+    return term
 
 
 @dataclass
@@ -186,12 +243,12 @@ def query_terms(text: str, limit: int = 12) -> list[str]:
     terms: list[str] = []
     for match in _TOKEN.finditer(text.lower()):
         token = match.group(0).strip(".-/")
-        if len(token) < 3 or token in STOPWORDS or token.isdigit():
-            continue
-        if token not in terms:
-            terms.append(token)
-        if len(terms) >= limit:
-            break
+        for part in token.split("-") if _COMPOUND.fullmatch(token) else [token]:
+            if len(part) < 3 or part in STOPWORDS or part.isdigit() or part in terms:
+                continue
+            terms.append(part)
+            if len(terms) >= limit:
+                return terms
     return terms
 
 
@@ -199,7 +256,7 @@ def fts_candidates(conn: sqlite3.Connection, terms: Sequence[str], limit: int = 
     usable = [t for t in terms if len(t) >= 3]
     if not usable:
         return []
-    expression = " OR ".join('"' + t.replace('"', '""') + '"' for t in usable)
+    expression = " OR ".join('"' + stem(t).replace('"', '""') + '"' for t in usable)
     try:
         rows = conn.execute(
             "SELECT k.owner_type, k.owner_id, bm25(search_fts) AS rank FROM search_fts "
@@ -354,7 +411,7 @@ def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
     if not terms:
         return 0.0, 0
     lowered = text.lower()
-    matched = sum(1 for term in terms if term in lowered)
+    matched = sum(1 for term in terms if stem(term) in lowered)
     return matched / len(terms), matched
 
 
@@ -386,6 +443,20 @@ def search(
     lists["graph"] = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, 40)
     if vector_source is not None:
         lists["vector"] = vector_source(query.text, 60)
+    if query.since or query.until:
+        # "What did we do on 8 April?" names a time, not a topic: every turn in the window is a candidate.
+        lists["time"] = [
+            ("t", int(row[0]))
+            for row in conn.execute(
+                "SELECT id FROM turns WHERE project_id IS ? AND started_at >= ? AND started_at < ? "
+                "ORDER BY started_at DESC LIMIT 40",
+                (
+                    query.project_id,
+                    timeutil.iso(query.since) if query.since else "",
+                    timeutil.iso(query.until) if query.until else "9999",
+                ),
+            )
+        ]
     fused = rrf(lists, config.retrieval.rrf_k)
     if not fused:
         return []

@@ -8,7 +8,7 @@ import contextlib
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import numpy as np
@@ -324,13 +324,19 @@ def personalized_pagerank(
 
 # --- time ------------------------------------------------------------------------
 
+_MONTHS = (
+    "january|february|march|april|may|june|july|august|september|october|november|december|"
+    "januar|februar|märz|mai|juni|juli|oktober|dezember"
+)
 _TIME_HINT = re.compile(
     r"(?i)\b(heute|gestern|vorgestern|letzte[nrs]?\s+(woche|monat|jahr)|vorige[nrs]?\s+(woche|monat)|"
     r"diese[nrs]?\s+(woche|monat)|vor\s+\d+\s+(tag(en)?|wochen?|monat(en)?|stunden?)|"
     r"am\s+(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)|"
     r"today|yesterday|last\s+(week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
     r"this\s+(week|month)|\d+\s+(days?|weeks?|months?|hours?)\s+ago|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
-    r"\d{4}-\d{2}-\d{2}|(?<![\d.])\d{1,2}\.\d{1,2}\.(?:\d{2,4})?(?![\d.]))"  # 3.4. / 3.4.2026, not 1.2.3
+    r"\d{4}-\d{2}-\d{2}|(?<![\d.])\d{1,2}\.\d{1,2}\.(?:\d{2,4})?(?![\d.])|"  # 3.4. / 3.4.2026, not 1.2.3
+    rf"(?:{_MONTHS})\s+\d{{1,2}}(?:st|nd|rd|th)?\b(?:,?\s+\d{{4}})?|"  # April 8th 2026
+    rf"\d{{1,2}}(?:st|nd|rd|th|\.)?\s+(?:{_MONTHS})\b(?:\s+\d{{4}})?)"  # 8. April 2026, 8 April
 )
 
 
@@ -348,6 +354,14 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
         start = current - timedelta(days=1)
     elif lowered == "vorgestern":
         start = current - timedelta(days=2)
+    elif numeric := re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})?", lowered):
+        # German day.month.: dateparser reads 3.4.2026 as 4 March.
+        day, month, year = int(numeric[1]), int(numeric[2]), numeric[3]
+        full_year = (2000 + int(year) if len(year) == 2 else int(year)) if year else current.year
+        with contextlib.suppress(ValueError):
+            start = datetime(full_year, month, day, tzinfo=UTC)
+            if not year and start > current:
+                start = start.replace(year=full_year - 1)
     else:
         with contextlib.suppress(Exception):
             import dateparser
@@ -358,6 +372,9 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
                 settings={
                     "PREFER_DATES_FROM": "past",
                     "RETURN_AS_TIMEZONE_AWARE": True,
+                    # A named day is that day in UTC like the stored timestamps; read as local time and
+                    # converted, "8 April" became 7 April 22:00 and the window missed the whole day.
+                    "TIMEZONE": "UTC",
                     "TO_TIMEZONE": "UTC",
                     "RELATIVE_BASE": current.replace(tzinfo=None),
                 },

@@ -47,6 +47,47 @@ def test_time_window_parsing():
     assert end - start == timedelta(days=7) and start < now - timedelta(days=6)
     assert semantic.time_window("fix the parser", now) is None
     assert semantic.strip_time_words("gestern parser bug").strip() == "parser bug"
+    # Named and German dates are that day in UTC, not the evening before (local time converted).
+    for phrase in ("what shipped on April 8th 2026", "was lief am 8. April 2026", "am 8.4.2026", "on 2026-04-08"):
+        start, end = semantic.time_window(phrase, now)
+        assert start == datetime(2026, 4, 8, tzinfo=UTC) and end - start == timedelta(days=1), phrase
+    assert semantic.time_window("am 24.12.", now)[0].year == 2025  # type: ignore[index]  # past, not future
+    assert semantic.time_window("may i ask three things", now) is None
+
+
+def test_time_window_lists_every_turn_of_that_day(driver: Driver, conn, config: Config):
+    driver.prompt("s1", "standup: shipped the auth fix")
+    driver.stop("s1", "noted")
+    driver.prompt("s2", "ship it")
+    driver.stop("s2", "PR #11 opened")
+    conn.execute("UPDATE turns SET started_at = '2026-04-08T09:00:00.000Z'")
+    driver.prompt("s3", "unrelated later work")
+    hits = semantic.Retriever(conn, config).search("what shipped on April 8th 2026?", _pid(conn), record_shown=False)
+    assert {h.session_id for h in hits} >= {"claude:s1", "claude:s2"}
+
+
+def test_query_terms_drop_question_words_and_split_compounds():
+    from agent_mem.memory import search
+
+    assert search.query_terms("Welche Logging-Bibliothek verwenden wir in diesem Projekt?") == ["logging", "bibliothek"]
+    assert search.query_terms("bump node-version, keep LIN-482 and parse.py") == [
+        "bump",
+        "node",
+        "version",
+        "keep",
+        "lin-482",
+        "parse.py",
+    ]
+    assert search.stem("deployt") == "deploy" and search.stem("installiere") == "installier"
+    assert search.stem("branches") == "branch" and search.stem("code") == "code" and search.stem("v1.2") == "v1.2"
+
+
+def test_prompt_hint_finds_inflected_words(driver: Driver, conn):
+    driver.prompt("s1", "Deploy the API to Fly.io, region fra")
+    driver.stop("s1", "Deployed, v12 active in fra")
+    other = Driver(conn, driver.config, driver.cwd, harness="codex")
+    response = other.prompt("c1", "Wohin wird die API deployt?")
+    assert response.context and "fly.io" in response.context.lower()
 
 
 def test_hybrid_search_with_vectors_and_graph(driver: Driver, conn, config: Config):
