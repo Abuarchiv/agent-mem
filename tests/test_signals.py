@@ -86,6 +86,10 @@ def test_corrections_and_preferences():
     # The observer's rule form; prose about paths or "keine lokalen LLMs" is not a command rule.
     assert signals.canonical_rule("Nutze `uv` statt `pip`, weil schneller.") == ("pip", "uv")
     assert signals.canonical_rule("Use ruff instead of black.") == ("black", "ruff")
+    assert signals.canonical_rule("Do not use npm; use pnpm.") == ("npm", "pnpm")
+    assert signals.canonical_rule("Do not use npm, but use pnpm.") == ("npm", "pnpm")
+    assert signals.canonical_rule("Nicht `npm`, sondern `pnpm`.") == ("npm", "pnpm")
+    assert signals.canonical_rule("Nicht `npm`, sondern nutze `pnpm`.") == ("npm", "pnpm")
     assert signals.canonical_rule("Nutze absolute Pfade wie `/x` statt relativer Pfade") is None
     assert signals.canonical_rule("Nutze keine lokalen LLMs") is None
     assert ("yarn", "bun") in signals.preference_pairs("nicht yarn, sondern bun")

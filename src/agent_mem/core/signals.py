@@ -471,15 +471,25 @@ def preference_pairs(text: str) -> list[tuple[str, str | None]]:
 _CANONICAL_RULE = re.compile(
     r"(?i)^\s*(?:use|nutze|verwende)\s+`?([\w.@/+-]+?)`?\s+(?:instead of|statt|anstatt)\s+`?([\w.@/+-]+?)`?(?=[\s.,;:!]|$)"
 )
+_CANONICAL_AVOID_RULE = re.compile(
+    r"(?i)^\s*(?:do not|don't|never|not|no|nicht|nie(?:mals)?)\s+"
+    r"(?:(?:use|nutze|verwende|benutze)\s+)?`?([\w.@/+-]+?)`?\s*[,;]\s*"
+    r"(?:(?:but|sondern)\s+(?:(?:use|nutze|verwende|benutze)\s+)?|"
+    r"(?:use|nutze|verwende|benutze)\s+)`?([\w.@/+-]+?)`?(?=[\s.,;:!]|$)"
+)
 
 
 def canonical_rule(text: str) -> tuple[str, str] | None:
-    """(avoid, prefer) when a sentence starts with exactly "Use X instead of Y" (the observer's rule form)."""
+    """Return one explicit command substitution as (avoid, prefer)."""
     match = _CANONICAL_RULE.match(text)
-    if match is None:
-        return None
-    prefer, avoid = _name(match.group(1)), _name(match.group(2))
-    return (avoid, prefer) if avoid and prefer and avoid != prefer else None
+    if match:
+        prefer, avoid = _name(match.group(1)), _name(match.group(2))
+        return (avoid, prefer) if avoid and prefer and avoid != prefer else None
+    match = _CANONICAL_AVOID_RULE.match(text)
+    if match:
+        avoid, prefer = _name(match.group(1)), _name(match.group(2))
+        return (avoid, prefer) if avoid and prefer and avoid != prefer else None
+    return None
 
 
 def mentions_rule(prompt: str) -> bool:
