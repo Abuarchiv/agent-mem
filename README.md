@@ -49,12 +49,12 @@ The model is the CLI you already pay for, started under your login with no tools
 
 | Turn came from | Model stage | Command |
 | --- | --- | --- |
-| Claude Code | Claude (Haiku) | `claude -p --restricted --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --model haiku` |
-| Codex | Codex | `codex exec --ephemeral --ignore-user-config -s read-only` |
-| Copilot CLI | Copilot | `copilot -s` |
+| Claude Code | Claude Haiku | `claude -p --restricted --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --model haiku` |
+| Codex | GPT-6-Luna, low effort | `codex exec --ephemeral --ignore-user-config -s read-only -m gpt-6-luna -c model_reasoning_effort=low` |
+| Copilot CLI | Auto, efficiency tier (resolves to GPT-6-Luna) | `copilot -s --model auto --auto-tier efficiency` |
 | OpenCode, or no CLI found | none | the turn is kept as a raw summary |
 
-A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Quota or login errors pause the stage for an hour; the turn stays queued. Ollama can be added as a local fallback stage (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95 (see `docs/PLAN.md`, appendix B).
+A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Each stage uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, the stage retries once with the CLI's own default. With only one CLI installed, its turns get facts and the others stay raw; with all three, each turn goes to the CLI it came from. Quota or login errors pause the stage for an hour; the turn stays queued. Ollama can be added as a local fallback stage (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95 (see `docs/PLAN.md`, appendix B).
 
 ### How ranking learns (no model needed)
 
@@ -121,6 +121,8 @@ It listens on this machine only (no login; turn it off on shared machines). `age
     "providers": ["claude", "codex", "copilot"],
     "cross_vendor": false,
     "claude_model": "haiku",
+    "codex_model": "gpt-6-luna",
+    "copilot_model": "auto",
     "daily_limit": 300,
     "bundle_turns": 5,
     "bundle_tokens": 6000

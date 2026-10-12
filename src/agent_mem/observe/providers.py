@@ -73,8 +73,24 @@ def _run(cmd: list[str], prompt: str) -> str:
         except subprocess.TimeoutExpired as exc:
             raise ProviderError(f"{cmd[0]}: timeout after {TIMEOUT_S}s") from exc
     if result.returncode != 0:
-        raise ProviderError(f"{cmd[0]} exit {result.returncode}: {result.stderr.strip()[:300]}")
+        # The tail: codex prints a banner first, the error comes last.
+        raise ProviderError(f"{cmd[0]} exit {result.returncode}: {result.stderr.strip()[-300:]}")
     return result.stdout
+
+
+_NO_MODEL = re.compile(r"model\b.{0,80}\bnot (?:available|supported)", re.I | re.S)
+
+
+def _run_model(cmd: list[str], model_args: list[str], prompt: str) -> str:
+    """Runs with the configured model; a plan without that model falls back to the CLI's own default."""
+    if not model_args:
+        return _run(cmd, prompt)
+    try:
+        return _run([*cmd, *model_args], prompt)
+    except ProviderError as error:
+        if not _NO_MODEL.search(str(error)):
+            raise
+        return _run(cmd, prompt)
 
 
 class ClaudeCliLLM(LLMBase):
@@ -90,7 +106,6 @@ class ClaudeCliLLM(LLMBase):
         "",
         "--strict-mcp-config",
         "--no-session-persistence",
-        "--model",
     )
 
     def __init__(self, config: BaseLlmConfig | None = None) -> None:
@@ -99,12 +114,13 @@ class ClaudeCliLLM(LLMBase):
 
     def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
         wants_json = kwargs.get("response_format") is not None
-        out = _run([*self.CMD, self.model], _flatten(messages, wants_json))
+        out = _run_model(list(self.CMD), ["--model", self.model], _flatten(messages, wants_json))
         return _clean_json(out) if wants_json else out.strip()
 
 
 class CodexCliLLM(LLMBase):
-    """Stage 2: ``codex exec`` under the CLI login (measured, A.7)."""
+    """Stage 2: ``codex exec`` under the CLI login (measured, A.7). Default ``gpt-6-luna`` at low effort,
+    the cheapest model in the Codex catalog (2026-10-12)."""
 
     def __init__(self, config: BaseLlmConfig | None = None) -> None:
         super().__init__(config or BaseLlmConfig(model=""))
@@ -125,9 +141,8 @@ class CodexCliLLM(LLMBase):
                 "-o",
                 out_file,
             ]
-            if self.model:
-                cmd += ["-m", self.model]
-            _run(cmd, _flatten(messages, wants_json))
+            model_args = ["-m", self.model, "-c", "model_reasoning_effort=low"] if self.model else []
+            _run_model(cmd, model_args, _flatten(messages, wants_json))
             with open(out_file, encoding="utf-8") as fh:
                 out = fh.read()
         return _clean_json(out) if wants_json else out.strip()
@@ -136,7 +151,9 @@ class CodexCliLLM(LLMBase):
 class CopilotCliLLM(LLMBase):
     """Stage 3: ``copilot -s`` with the prompt on stdin (measured 2026-10-12: ``-p`` ignores stdin and
     drops prompts over roughly 30k characters on argv; stdin-only mode works under the GitHub login).
-    Memory and tools are off by default in prompt mode."""
+    Memory and tools are off by default in prompt mode. Default ``auto`` with the efficiency tier: a fixed
+    model is refused when it is not in the plan's picker (Free plan refuses all of them), auto resolved to
+    ``gpt-6-luna``, the cheapest catalog model (measured 2026-10-12)."""
 
     def __init__(self, config: BaseLlmConfig | None = None) -> None:
         super().__init__(config or BaseLlmConfig(model=""))
@@ -144,10 +161,10 @@ class CopilotCliLLM(LLMBase):
 
     def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
         wants_json = kwargs.get("response_format") is not None
-        cmd = ["copilot", "-s"]
-        if self.model:
-            cmd += ["--model", self.model]
-        out = _run(cmd, _flatten(messages, wants_json))
+        model_args = ["--model", self.model] if self.model else []
+        if self.model == "auto":
+            model_args += ["--auto-tier", "efficiency"]  # only valid together with auto
+        out = _run_model(["copilot", "-s"], model_args, _flatten(messages, wants_json))
         return _clean_json(out) if wants_json else out.strip()
 
 

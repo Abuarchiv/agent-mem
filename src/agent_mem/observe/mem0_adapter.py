@@ -138,7 +138,13 @@ class Mem0Adapter:
         dims = int(self.embedder.query("dimension probe").shape[0])
         if llm not in LLM_PROVIDERS:
             raise ValueError(f"unknown llm provider {llm!r}")
-        llm_defaults = {"ollama": "qwen3.5:4b-mlx", "claude": "haiku", "codex": "", "copilot": "", "fake": "fake"}
+        llm_defaults = {
+            "ollama": "qwen3.5:4b-mlx",
+            "claude": "haiku",
+            "codex": "gpt-6-luna",
+            "copilot": "auto",
+            "fake": "fake",
+        }
         mem0_config = MemoryConfig(
             **{
                 "llm": {

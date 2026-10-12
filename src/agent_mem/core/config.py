@@ -104,8 +104,9 @@ class Observe:
     # Default: a turn only goes to the vendor that already saw it, then raw (D12).
     cross_vendor: bool = False
     claude_model: str = "haiku"
-    codex_model: str = ""
-    copilot_model: str = ""
+    # Cheapest per CLI (2026-10-12); a plan without the model falls back to the CLI's default.
+    codex_model: str = "gpt-6-luna"
+    copilot_model: str = "auto"
     ollama_model: str = "qwen3.5:4b-mlx"
     daily_limit: int = 300
     idle_seconds: int = 90

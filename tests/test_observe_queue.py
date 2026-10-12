@@ -109,6 +109,43 @@ def test_chain_is_vendor_faithful_by_default(config: Config, monkeypatch) -> Non
     conn.close()
 
 
+def test_only_installed_cli_handles_its_own_turns(config: Config, monkeypatch) -> None:
+    from agent_mem.observe import providers
+
+    monkeypatch.setattr(providers, "available", lambda name: name == "codex")
+    conn = db.connect(config)
+    assert providers.chain(config, "codex", conn) == ["codex"]
+    assert providers.chain(config, "claude", conn) == []  # raw, the Claude turn never goes to OpenAI
+    assert providers.chain(config, "copilot", conn) == []
+    conn.close()
+
+
+def test_cheapest_model_falls_back_to_cli_default(monkeypatch) -> None:
+    from agent_mem.observe import providers
+
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], prompt: str) -> str:
+        calls.append(cmd)
+        if "--model" in cmd and "auto" not in cmd:
+            raise providers.ProviderError(
+                'copilot exit 1: Error: Model "gpt-6-luna" from --model flag is not available.'
+            )
+        return "ok"
+
+    monkeypatch.setattr(providers, "_run", run)
+    msgs = [{"role": "user", "content": "x"}]
+    assert providers.make_llm("copilot", "auto").generate_response(msgs) == "ok"
+    assert calls[-1] == ["copilot", "-s", "--model", "auto", "--auto-tier", "efficiency"]
+    assert providers.make_llm("copilot", "gpt-6-luna").generate_response(msgs) == "ok"
+    assert calls[-2:] == [["copilot", "-s", "--model", "gpt-6-luna"], ["copilot", "-s"]]
+    codex_error = (
+        "codex exit 1: ...\nERROR: The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account."
+    )
+    assert providers._NO_MODEL.search(codex_error)
+    assert not providers._NO_MODEL.search("claude exit 1: usage limit reached")
+
+
 def test_spawn_observer_is_throttled_and_respects_no_spawn(config: Config, monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(hook, "_spawn", lambda argv, cfg: calls.append(argv) or True)
