@@ -12,7 +12,15 @@ MAX_ATTEMPTS = len(BACKOFF)
 
 
 def expire_leases(conn: sqlite3.Connection) -> int:
+    """Turns of a worker that died mid-bundle go back to the queue, or to ``failed`` once they used up their attempts:
+    a turn that kills the worker every time must not block the queue forever."""
     now = timeutil.iso()
+    conn.execute(
+        "UPDATE observe_queue SET state = 'failed', lease_until = NULL, last_error = COALESCE(last_error, "
+        "'worker stopped while processing this turn'), updated_at = ? "
+        "WHERE state = 'running' AND lease_until IS NOT NULL AND lease_until < ? AND attempts > ?",
+        (now, now, MAX_ATTEMPTS),
+    )
     cursor = conn.execute(
         "UPDATE observe_queue SET state = 'pending', lease_until = NULL, updated_at = ? "
         "WHERE state = 'running' AND lease_until IS NOT NULL AND lease_until < ?",

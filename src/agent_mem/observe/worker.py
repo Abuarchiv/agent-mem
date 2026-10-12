@@ -256,7 +256,12 @@ class Worker:
         if not rows:
             return False
         turn_ids = [int(r["turn_id"]) for r in rows]
-        bundles = bundling.build(self.conn, self.config, turn_ids)
+        try:
+            bundles = bundling.build(self.conn, self.config, turn_ids)
+        except Exception as error:  # one broken turn must not stop the queue behind it
+            queue.fail(self.conn, turn_ids, f"bundle: {type(error).__name__}: {error}")
+            self.stats["failed"] += 1
+            return True
         if not bundles:
             queue.finish(self.conn, turn_ids, "done", None)
             return True
@@ -272,6 +277,13 @@ class Worker:
                     store_raw(self.conn, b)
                     queue.finish(self.conn, b.turn_ids, "raw", "raw")
                     self.stats["raw"] += 1
+                continue
+            except Exception as error:
+                # Storing failed (a locked database, a bad fact): back off like a provider error, then `failed`.
+                # Before, the run aborted and the same bundle came first again after its lease: a poison turn
+                # stopped all extraction.
+                queue.fail(self.conn, b.turn_ids, f"{type(error).__name__}: {error}")
+                self.stats["failed"] += 1
                 continue
             if provider == "raw":
                 store_raw(self.conn, b)
