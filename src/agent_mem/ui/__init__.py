@@ -296,7 +296,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
 
 
 def _asset(name: str) -> bytes:
-    return resources.files("agent_mem.viewer").joinpath(name).read_bytes()
+    return resources.files("agent_mem.ui").joinpath(name).read_bytes()
 
 
 def _embedded_json(snapshot: dict[str, Any]) -> str:

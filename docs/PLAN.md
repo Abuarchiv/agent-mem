@@ -140,7 +140,7 @@ Pro Bündel also höchstens zwei Modellaufrufe: die mem0-Extraktion (genau ein A
 
 ### 4.9 Viewer (bleibt, unberührt)
 
-`viewer/` und `views.py` ändern sich nicht. Sie importieren `consolidate`, `learn`, `search`, `store`, `health`. Diese Module und das Schema bleiben deshalb bestehen. Dass der Viewer nun auch gespiegelte Fakten zeigt, ist ein Nebeneffekt von D6.
+`ui/` (Seite von `agent-mem view`, bis 2026-10-12 `viewer/`) und `views.py` ändern sich nicht. Sie importieren `consolidate`, `learn`, `search`, `store`, `health`. Diese Module und das Schema bleiben deshalb bestehen. Dass der Viewer nun auch gespiegelte Fakten zeigt, ist ein Nebeneffekt von D6.
 
 ### 4.10 Graph
 
@@ -218,7 +218,7 @@ Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deplo
 | Modul | Schicksal |
 | --- | --- |
 | `hook`, `capture`, `normalize/*`, `events`, `spool`, `privacy`, `identity`, `signals`, `timeutil`, `logutil`, `config`, `db` | behalten. `capture` legt Queue-Eintrag an, `config` erhält Worker-Optionen. |
-| `store`, `search`, `inject`, `learn`, `consolidate`, `health`, `views`, `viewer/*`, `mcp_server`, `cli`, `commands` | behalten (Viewer-Abhängigkeiten). `inject` und `search` lesen Fakten. |
+| `store`, `search`, `inject`, `learn`, `consolidate`, `health`, `views`, `ui/*`, `mcp_server`, `cli`, `commands` | behalten (Viewer-Abhängigkeiten). `inject` und `search` lesen Fakten. |
 | `summarize` | behalten (opt-in, getestet). Ob Fakten ihn ersetzen, entscheidet der Dogfooding-Bericht, nicht dieser Plan. |
 | `evaluate` | behalten, erhält `--backend {sqlite,mem0}` und Teilmengen-Option (§8). |
 | `semantic`, `indexer` | Schicksal laut E3 (§12). |
@@ -267,7 +267,7 @@ Diese Regeln stammen aus der früheren `AGENTS.md`, die im Arbeitsbaum durch „
 - **R5 Vertrauen.** Host-Eingaben und abgerufener Text sind nicht vertrauenswürdig; injizierter Kontext wird als Daten gerahmt. Externe Inhalte (`tool_external`) werden nie automatisch injiziert und nie zu Regeln oder Präferenzen. Regeln und Präferenzen stammen nur aus den Prompts des Nutzers. Pakete bleiben innerhalb von `config.Budgets`.
 - **R6 Schema.** Jede Schemaänderung ist eine neue nummerierte Datei in `src/agent_mem/schema/` mit Migrationstest.
 - **R7 Plugins.** Manifeste in `plugins/` tragen die Paketversion (Test prüft das).
-- **R8 Viewer.** `viewer/` wird nur vom CLI geladen, escaped jeden gespeicherten String; `purge` löscht geschriebene Seiten.
+- **R8 Viewer.** `ui/` wird nur vom CLI geladen, escaped jeden gespeicherten String; `purge` löscht geschriebene Seiten.
 - **R9 Entwicklung.** `uv sync --all-extras`, `uv run pytest`, `uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright`. `uv.lock` gehört ins Repository, damit Pins reproduzierbar sind. Vor einem Release: CI grün auf Linux, macOS (arm64, x64) und Windows, dazu je Harness eine echte Session von Hand (Capture, Recall in neuer Session, Compaction, Deinstallation).
 - **R10 Git.** Nur lokale Commits, kein Push, keine Releases, solange der Nutzer es nicht ausdrücklich erlaubt. Keine KI-Hinweise in Commits, PRs, Tags oder Dateien.
 
@@ -308,7 +308,7 @@ Phase 4 (§9) übernimmt I1 bis I12 und I9 als Abnahme. Phase 4 wird dafür von 
 
 ## Anhang A: Gemessene Fakten (alle auf dieser Maschine, 2026-10-11/12)
 
-Skripte liegen unter `docs/evidence/spikes/`.
+Skripte lagen unter `docs/evidence/spikes/`; beim Aufräumen am 2026-10-12 wurden sie bis auf `garbage_rate_real_turns.py` entfernt und sind in der Historie (Commit f725fc5) einsehbar.
 
 - **A.1 mem0 ohne Key, Widerspruch** (`mem0_ollama_contradiction.py`): mem0ai 2.2.1, Ollama `qwen3.5:4b-mlx` und `qwen3.6:35b-mlx`, Embedder `nomic-embed-text`, FAISS. Nachrichten „Wir nutzen pytest" und „Korrektur: nox statt pytest" ergaben bei beiden Modellen zwei ADDs; der alte Fakt blieb gültig. Einzelprobe, saubere Läufe mit isoliertem `MEM0_DIR`.
 - **A.2 Provider-Validierung**: Ein eigener Provider-Name in der Config scheitert („Unsupported LLM provider"). Setzen von `memory.llm` nach `from_config` funktioniert.

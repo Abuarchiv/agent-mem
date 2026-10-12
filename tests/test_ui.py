@@ -8,7 +8,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from agent_mem import cli, db, identity, viewer
+from agent_mem import cli, db, identity, ui
 from agent_mem.config import Config
 from tests.conftest import Driver
 
@@ -36,7 +36,7 @@ def _payload(html: str) -> dict:
 
 def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver: Driver):
     _teach(driver)
-    snapshot = viewer.build_snapshot(conn, config)
+    snapshot = ui.build_snapshot(conn, config)
     assert snapshot["counts"]["turns"] == 2 and snapshot["counts"]["sessions"] == 1
     first = next(turn for turn in snapshot["turns"] if "failing search" in turn["prompt"])
     actions = snapshot["actions"][str(first["id"])]
@@ -56,10 +56,10 @@ def test_project_filter_excludes_other_projects(conn, config: Config, driver: Dr
     other = Driver(conn, config, other_root, harness="codex")
     other.prompt("o1", "Unrelated work in another repository")
     other.stop("o1", "ok")
-    everything = viewer.build_snapshot(conn, config)
+    everything = ui.build_snapshot(conn, config)
     assert everything["counts"]["projects"] == 2
     project_id = next(project["id"] for project in everything["projects"] if project["name"] == "demo")
-    scoped = viewer.build_snapshot(conn, config, project_id)
+    scoped = ui.build_snapshot(conn, config, project_id)
     assert {turn["project_id"] for turn in scoped["turns"]} == {project_id}
     assert [project["id"] for project in scoped["projects"]] == [project_id]
     assert scoped["counts"]["turns"] == 2
@@ -67,7 +67,7 @@ def test_project_filter_excludes_other_projects(conn, config: Config, driver: Dr
 
 def test_page_is_self_contained_and_locked_down(conn, config: Config, driver: Driver):
     _teach(driver)
-    html = viewer.render(viewer.build_snapshot(conn, config))
+    html = ui.render(ui.build_snapshot(conn, config))
     policy = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)">', html)
     assert policy
     rules = dict(part.strip().split(" ", 1) for part in policy.group(1).split(";") if part.strip())
@@ -89,7 +89,7 @@ def test_view_command_writes_a_private_page_and_purge_removes_it(
     _teach(driver)
     base = ["--data-dir", str(config.data_dir)]
     assert cli.main([*base, "view", "--no-open"]) == 0
-    page = viewer.view_dir(config) / viewer.PAGE_NAME
+    page = ui.view_dir(config) / ui.PAGE_NAME
     assert str(page) in capsys.readouterr().out
     assert "Fix the failing search tests" in page.read_text(encoding="utf-8")
     if sys.platform != "win32":
@@ -106,12 +106,12 @@ def test_view_command_writes_a_private_page_and_purge_removes_it(
     finally:
         conn.close()
     assert cli.main([*base, "purge", "--id", "T1", "--yes"]) == 0
-    assert not viewer.view_dir(config).exists()
+    assert not ui.view_dir(config).exists()
 
 
 def test_view_assets_ship_with_the_package():
-    folder = resources.files("agent_mem.viewer")
-    for name in ("app.js", "app.css", *(f"fonts/{file}" for _, _, file in viewer.FONTS)):
+    folder = resources.files("agent_mem.ui")
+    for name in ("app.js", "app.css", *(f"fonts/{file}" for _, _, file in ui.FONTS)):
         assert folder.joinpath(name).is_file(), name
     for license_file in ("bricolage-grotesque-OFL.txt", "figtree-OFL.txt", "jetbrains-mono-OFL.txt"):
         assert "Open Font License" in folder.joinpath(f"fonts/{license_file}").read_text(encoding="utf-8")

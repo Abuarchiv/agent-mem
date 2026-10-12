@@ -239,7 +239,7 @@ def _purge_spooled(config: Config, matches: Callable[[dict[str, Any]], bool]) ->
 
 
 def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
-    from . import viewer
+    from . import ui
 
     # A written page holds a copy of the data; it must not outlive a purge. It is discarded only
     # once the purge is confirmed.
@@ -248,7 +248,7 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
             return 1
         import shutil
 
-        viewer.discard(config)
+        ui.discard(config)
         for path in (
             config.db_path,
             Path(f"{config.db_path}-wal"),
@@ -267,7 +267,7 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
             if owner is None:
                 print("invalid id", file=sys.stderr)
                 return 2
-            viewer.discard(config)
+            ui.discard(config)
             with db.transaction(conn):
                 deleted = store.delete_owner(conn, *owner)
             print(f"Deleted {ns.id}." if deleted else f"{ns.id} not found.")
@@ -277,7 +277,7 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 return _unknown_project(ns.project)
             if not _confirm(ns, f"delete all data of project {project.name}"):
                 return 1
-            viewer.discard(config)
+            ui.discard(config)
             with db.transaction(conn):
                 owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE project_id = ?", (project.id,))]
                 owners += [
@@ -300,7 +300,7 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
                 return 2
             if not _confirm(ns, f"delete everything before {ns.before}"):
                 return 1
-            viewer.discard(config)
+            ui.discard(config)
             stamp = timeutil.iso(cutoff)
             with db.transaction(conn):
                 owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE started_at < ?", (stamp,))]
@@ -414,7 +414,7 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_view(ns: argparse.Namespace, config: Config) -> int:
-    from . import viewer
+    from . import ui
 
     with _conn(config) as conn:
         # Look the project up only; viewing must not register a directory as a new project.
@@ -422,8 +422,8 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
         if ns.project and project is None:
             print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
             return 2
-        snapshot = viewer.build_snapshot(conn, config, project.id if project else None)
-    target = viewer.write(config, viewer.render(snapshot), ns.output)
+        snapshot = ui.build_snapshot(conn, config, project.id if project else None)
+    target = ui.write(config, ui.render(snapshot), ns.output)
     print(f"Wrote {target}. It is a local file with a copy of your memory; it makes no network requests.")
     if not ns.no_open:
         import webbrowser

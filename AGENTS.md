@@ -25,7 +25,7 @@ of design decisions; measurements go to its Appendix B and are never edited afte
 - **R6 Schema.** Every schema change is a new numbered file in `src/agent_mem/schema/` with a
   migration test.
 - **R7 Plugins.** Manifests in `plugins/` carry the package version (a test checks this).
-- **R8 Viewer.** `viewer/` is loaded only by the CLI, escapes every stored string; `purge` deletes
+- **R8 Viewer.** `ui/` (the `agent-mem view` page) is loaded only by the CLI, escapes every stored string; `purge` deletes
   written pages.
 - **R9 Development.** `uv sync --all-extras`, `uv run pytest -m "not local"`, `uv run ruff check src
   tests && uv run ruff format --check src tests && uv run pyright`. Tests marked `local` need the

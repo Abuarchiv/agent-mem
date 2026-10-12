@@ -303,10 +303,10 @@ def test_purge_removes_quarantine_and_replaced_database(driver: Driver, config: 
 
 
 def test_declined_purge_keeps_the_view_page(config: Config, monkeypatch):
-    from agent_mem import viewer
+    from agent_mem import ui
 
     discarded = []
-    monkeypatch.setattr(viewer, "discard", discarded.append)
+    monkeypatch.setattr(ui, "discard", discarded.append)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert cli.main(["--data-dir", str(config.data_dir), "purge", "--all"]) == 1
     assert discarded == []
