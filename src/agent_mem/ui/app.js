@@ -313,6 +313,29 @@ ${turnDetail(selected, session)}
 </div>`;
   }
 
+  // Memories the hooks gave the agent during this turn; the first turn also gets the session-start briefing.
+  function recallList(turn) {
+    const all = (data.recalls ?? []).filter((recall) => recall.session_id === turn.session_id);
+    const first = data.turns.filter((other) => other.session_id === turn.session_id).reduce((a, b) => (a && a.started_at <= b.started_at ? a : b), null);
+    const end = turn.ended_at ?? "9999";
+    const seen = new Set();
+    const items = all.filter((recall) => (recall.ts >= turn.started_at && recall.ts <= end) || (first?.id === turn.id && recall.ts < turn.started_at))
+      .sort((a, b) => a.ts.localeCompare(b.ts))
+      .filter((recall) => { const key = recall.owner_type + recall.owner_id; if (seen.has(key)) return false; seen.add(key); return true; });
+    if (!items.length) return "";
+    const row = (recall) => {
+      const isMemory = recall.owner_type === "m";
+      const label = `${isMemory ? "M" : "T"}${recall.owner_id}`;
+      const memory = isMemory ? data.memories.find((item) => item.id === recall.owner_id) : undefined;
+      const other = isMemory ? undefined : data.turns.find((item) => item.id === recall.owner_id);
+      const text = memory ? memoryText(memory) : other ? headline(other) : "";
+      const href = isMemory ? hashFor("memory", { m: String(recall.owner_id) }) : hashFor("timeline", { turn: String(recall.owner_id) });
+      const when = recall.ts < turn.started_at ? "at session start" : clock(recall.ts);
+      return `<li><header>${memory ? tag(readable(memory.kind), `kind-${memory.kind}`) : tag("request")}<a href="${href}"><b>${label}</b></a><span class="muted">${h(when)}</span></header>${text ? h(firstLine(text, 160)) : ""}</li>`;
+    };
+    return `<span class="section-label">Given to the agent (${items.length})</span><ul class="actions">${items.map(row).join("")}</ul>`;
+  }
+
   function turnDetail(turn, session) {
     if (!turn) return `<aside class="detail empty-detail" aria-label="Turn detail"><header><h2>Turn</h2></header><p>Select a turn to see the request, every action, the result and what was learned from it.</p><span class="notice">${icon("lock", 16)}Captured text is untrusted and shown as stored. This page makes no network requests.</span></aside>`;
     const actions = data.actions[turn.id] ?? [];
@@ -330,6 +353,7 @@ ${turn.answer ? `<span class="section-label">Result</span><div class="text-box">
 ${turn.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show T${turn.id}</code> prints more.</span></p>` : ""}
 ${turn.files.length ? `<span class="section-label">Files</span><div class="file-list">${turn.files.map((file) => tag(file, "mono")).join("")}</div>` : ""}
 ${turn.errors.length ? `<span class="section-label">Errors</span><ul class="actions">${turn.errors.map((error) => `<li><code class="error-line">${h(error)}</code></li>`).join("")}</ul>` : ""}
+${recallList(turn)}
 ${learned.length ? `<span class="section-label">Learned from this turn</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
 <span class="notice">${icon("lock", 16)}Captured text is untrusted and shown as stored. Secrets were redacted at capture.</span>
 </aside>`;

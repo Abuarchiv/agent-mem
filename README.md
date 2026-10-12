@@ -30,7 +30,7 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 
 | Moment | What happens |
 | --- | --- |
-| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, and the last session with what was done and what is still open, oldest first so an update reads as one. Claude Code shows a panel in your terminal: the project's memory size, the recent work (time, type, title), what was injected (grouped by day, with ids), anything that needs your attention, and the viewer address. |
+| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, and the last session with what was done and what is still open, oldest first so an update reads as one. Claude Code and Codex show a panel in your terminal: the project's memory size, which model turns your requests into facts (or why none does), the recent work (time, type, title), what was injected (grouped by day, with ids), anything that needs your attention, and the viewer address. Copilot CLI has no way for hooks to show text; use the viewer. |
 | You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). The terminal stays quiet. |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
@@ -38,7 +38,7 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 | Once a day | The worker reads all facts and lessons of a project and retires duplicates and facts that a newer one replaced. Your own notes are never touched. A newer fact and an older one it contradicts are both shown with dates until then; the agent reads the newer one as current. |
 | Context compaction | Session goal, decisions and open problems are re-injected (Claude Code, Codex) or added to the compaction prompt (OpenCode). Claude Code shows the panel again. |
 | Session ends | Claude Code shows what was saved: turns, files, errors. |
-| Something breaks | Claude Code shows it in the terminal right away (at most every ten minutes per failure) with the command that helps, usually `agent-mem doctor`. |
+| Something breaks | Claude Code and Codex show it in the terminal right away (at most every ten minutes per failure) with the command that helps, usually `agent-mem doctor`. |
 
 All harnesses write into the same memory. What Claude Code learned is available to Codex and vice versa.
 

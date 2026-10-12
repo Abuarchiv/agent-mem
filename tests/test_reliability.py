@@ -48,7 +48,9 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     )
     data = json.loads(output)
     assert "Parser" in data["hookSpecificOutput"]["additionalContext"]
-    assert "systemMessage" not in data  # only Claude Code shows it
+    # Codex shows it as a warning: the same panel, without ANSI colors
+    assert data["systemMessage"].startswith("agent-mem · ") and "\x1b[" not in data["systemMessage"]
+    assert "Parser" in data["systemMessage"]
 
     start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "compact"}
     data = json.loads(hook.run("claude", None, json.dumps(start), config))

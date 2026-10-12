@@ -49,6 +49,12 @@ def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver:
     assert set(agents) == {"claude", "codex", "copilot", "opencode"}
     assert all(row["enabled"] and "connected" in row and "facts_ok_today" in row for row in agents.values())
     assert agents["opencode"]["stage"] is None  # its turns are kept as written unless ollama is opted in
+    # what the hooks gave the agent, per session: a second session's prompt recalls the first session's fix
+    driver.start("s2")
+    driver.prompt("s2", "the failing search tests again, what was the ranking fix")
+    recalls = ui.build_snapshot(conn, config)["recalls"]
+    assert recalls and {r["session_id"] for r in recalls} == {"claude:s2"}
+    assert {r["kind"] for r in recalls} <= {"injected", "shown"}
     assert snapshot["recipes"] and snapshot["recipes"][0]["command_key"]
     assert snapshot["learning"]["errors_fixed"] >= 1
     assert snapshot["projects"][0]["name"] == "demo"

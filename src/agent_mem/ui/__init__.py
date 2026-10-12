@@ -36,6 +36,7 @@ LIMITS = {
     "graph_nodes": 160,
     "graph_edges": 420,
     "days": 14,
+    "recalls": 1500,
 }
 TEXT_CHARS = 4000
 BODY_CHARS = 2000
@@ -105,6 +106,18 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             session["summary"] = json.loads(session.pop("summary_json") or "{}")
         except ValueError:
             session["summary"] = {}
+    # What the hooks put into the agent's context (briefing, prompt hints), newest sessions first.
+    session_ids = [session["id"] for session in sessions]
+    recalls = (
+        _rows(
+            conn,
+            "SELECT owner_type, owner_id, ts, kind, session_id FROM accesses WHERE kind IN ('injected', 'shown') "
+            f"AND session_id IN ({','.join('?' for _ in session_ids)}) ORDER BY id DESC LIMIT ?",
+            (*session_ids, LIMITS["recalls"]),
+        )
+        if session_ids
+        else []
+    )
     turns: list[dict[str, Any]] = []
     for row in conn.execute(
         "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, importance, trust, title, type, "
@@ -294,6 +307,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             )
         },
         "agents": agents(conn, config),
+        "recalls": recalls,
         "quarantine_latest": quarantine_latest(config),
         "sessions": sessions,
         "turns": turns,

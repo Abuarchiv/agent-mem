@@ -206,10 +206,11 @@ class _Worker(threading.Thread):
                 spawn_observer(self.config)
             if self.event.kind == "session_start":
                 spawn_viewer(self.config)
-                if self.event.harness == "claude":
+                if self.event.harness in TERMINAL:
+                    session = f"{self.event.harness}:{self.event.session_id}"
                     self.problems = problems(conn)
-                    self.facts = inject.overview(conn, f"claude:{self.event.session_id}", self.config)
-                    self.recent = inject.recent_work(conn, f"claude:{self.event.session_id}")
+                    self.facts = inject.overview(conn, session, self.config)
+                    self.recent = inject.recent_work(conn, session)
             elif self.event.kind == "session_end" and self.event.harness == "claude":
                 self.summary = inject.session_summary(conn, f"claude:{self.event.session_id}", _color())
         except db.MigrationPendingError as error:
@@ -286,23 +287,30 @@ def run(
     if worker.error:
         logutil.write(config.log_dir, "hook", harness=harness, kind=event.kind, error=worker.error[:200])
     output = render(harness, event, worker.response) if worker.response is not None else None
-    if harness == "claude":
+    if harness in TERMINAL:
         message = _terminal(config, event, worker)
         if message:
             output = {**(output or {}), "systemMessage": message}
     return json.dumps(output, ensure_ascii=False) if output else ""
 
 
-def _color() -> bool:
-    return "NO_COLOR" not in os.environ
+# Harnesses that show a hook's systemMessage to the user: Claude Code in its terminal, Codex as a warning
+# (no ANSI colors there, and no output for SessionEnd). Copilot CLI has no such field.
+TERMINAL = {"claude", "codex"}
+
+
+def _color(harness: str = "claude") -> bool:
+    return harness == "claude" and "NO_COLOR" not in os.environ
 
 
 NOTICE_SECONDS = 600
 
 
 def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
-    """What the user sees in Claude Code's terminal: a panel at session start and after compaction, a summary
-    when the session ends, and failures as they happen. Ordinary prompts and tool calls stay quiet."""
+    """What the user sees in the terminal of Claude Code or Codex: a panel at session start and after
+    compaction, a summary when a Claude Code session ends, and failures as they happen. Ordinary prompts and
+    tool calls stay quiet."""
+    color = _color(event.harness)
     failure = None
     # A pending migration or a briefly locked database is routine: the indexer replays the spool later.
     routine = ("MigrationPendingError", "MigrationInProgressError", "OperationalError: database is locked")
@@ -317,12 +325,12 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
         viewer = f"http://localhost:{config.viewer.port}/" if config.viewer.enabled else None
         notices = [failure] if failure else worker.problems
         return inject.terminal(
-            context or "", heading, _color(), facts=worker.facts, notices=notices, viewer=viewer, recent=worker.recent
+            context or "", heading, color, facts=worker.facts, notices=notices, viewer=viewer, recent=worker.recent
         )
     if event.kind == "session_end" and worker.summary:
         return worker.summary
     if failure and _notice_due(config, failure):
-        return f"\x1b[31m{failure}\x1b[0m" if _color() else failure
+        return f"\x1b[31m{failure}\x1b[0m" if color else failure
     return None
 
 
