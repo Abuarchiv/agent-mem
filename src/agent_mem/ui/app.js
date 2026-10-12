@@ -427,7 +427,9 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     // Label only the strongest nodes; the rest get a label on hover, selection, search or zoom.
     const labelled = new Set([...nodes].sort((a, b) => b.strength - a.strength).slice(0, 40).map((node) => node.id));
     const rank = new Map([...nodes].sort((a, b) => b.strength - a.strength).map((node, index) => [node.id, index]));
-    const shortLabel = (node) => { const label = entityLabel(node); if (label.length <= 34) return label; return node.kind === "file" ? `…${label.slice(-33)}` : `${label.slice(0, 33)}…`; };
+    // On the canvas a command reads by what it runs: drop a leading `cd … &&` and `VAR=…` settings, fold heredoc scripts. The side panel keeps the full text.
+    const commandCore = (text) => text.replace(/^\s*cd\s+\S+\s*(&&|;)\s*/, "").replace(/^(\s*[A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'[^']*'|\S*)(\s*;\s*|\s+))+/, "").replace(/\s+-?\s*<<-?\s*['"]?\w+['"]?[\s\S]*$/, " (script)").trim() || text;
+    const shortLabel = (node) => { const label = node.kind === "command" ? commandCore(entityLabel(node)) : entityLabel(node); if (label.length <= 34) return label; return node.kind === "file" ? `…${label.slice(-33)}` : `${label.slice(0, 33)}…`; };
     const edges = sourceEdges.filter((edge) => byId.has(edge.a) && byId.has(edge.b));
     if (nodes.length === 0) {
       host.innerHTML = `<div class="graph-empty">No associations yet. They form when files, commands and errors occur in the same turn.</div>`;
