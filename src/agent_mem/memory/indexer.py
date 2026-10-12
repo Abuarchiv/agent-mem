@@ -43,9 +43,14 @@ def recover_if_corrupt(config: Config) -> bool:
     """Returns True if a corrupt database was replaced by the latest backup."""
     if not config.db_path.exists():
         return False
-    probe = sqlite3.connect(config.db_path)
+    # Read-only: a writable connection checkpoints and deletes the WAL when it closes, even on a damaged database.
+    probe = sqlite3.connect(f"{config.db_path.resolve().as_uri()}?mode=ro", uri=True)
     try:
         ok = probe.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    except sqlite3.OperationalError:
+        # Locked or busy (a migration, a VACUUM, a long write) is not damage. Replacing the database would throw
+        # away everything written since the last backup; look again next run.
+        return False
     except sqlite3.DatabaseError:
         ok = False
     finally:
@@ -53,11 +58,10 @@ def recover_if_corrupt(config: Config) -> bool:
     if ok:
         return False
     stamp = timeutil.iso().replace(":", "")
-    with contextlib.suppress(OSError):
-        os.replace(config.db_path, Path(f"{config.db_path}.corrupt-{stamp}"))
-    for suffix in ("-wal", "-shm"):
+    # The WAL holds committed writes: keep it next to the damaged copy for a manual rescue, never delete it.
+    for suffix in ("", "-wal", "-shm"):
         with contextlib.suppress(OSError):
-            Path(f"{config.db_path}{suffix}").unlink()
+            os.replace(Path(f"{config.db_path}{suffix}"), Path(f"{config.db_path}.corrupt-{stamp}{suffix}"))
     backup = db.latest_backup(config)
     if backup is not None:
         db.restore(config, backup)

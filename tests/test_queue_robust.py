@@ -215,3 +215,43 @@ def test_a_model_cli_that_hangs_is_killed_with_its_helpers(tmp_path: Path, monke
     time.sleep(0.5)
     with pytest.raises(ProcessLookupError):
         os.kill(helper, 0)  # the helper process is gone as well
+
+
+def test_a_locked_database_is_never_replaced_by_an_older_backup(config: Config):
+    import sqlite3
+
+    from agent_mem.memory import indexer
+
+    conn = db.connect(config)
+    db.backup(conn, config)
+    conn.execute("INSERT INTO meta(key, value) VALUES ('after_backup', 'written')")
+    conn.close()
+    locker = sqlite3.connect(config.db_path, isolation_level=None, timeout=0)
+    locker.execute("PRAGMA locking_mode=EXCLUSIVE")
+    locker.execute("BEGIN EXCLUSIVE")
+    locker.execute("UPDATE meta SET value = 'x' WHERE key = 'after_backup'")
+    try:
+        assert indexer.recover_if_corrupt(config) is False
+    finally:
+        locker.execute("ROLLBACK")
+        locker.close()
+    check = db.connect(config)
+    assert check.execute("SELECT value FROM meta WHERE key = 'after_backup'").fetchone()[0] == "written"
+    check.close()
+
+
+def test_a_damaged_database_is_restored_and_its_wal_kept(config: Config):
+    from agent_mem.memory import indexer
+
+    conn = db.connect(config)
+    db.backup(conn, config)
+    conn.close()
+    config.db_path.write_bytes(b"not a database" * 200)
+    wal = config.db_path.with_name(config.db_path.name + "-wal")
+    wal.write_bytes(b"committed pages")
+    assert indexer.recover_if_corrupt(config) is True
+    [wal_copy] = config.data_dir.glob("memory.db.corrupt-*-wal")  # kept for a manual rescue, never deleted
+    assert wal_copy.read_bytes() == b"committed pages"
+    restored = db.connect(config)
+    assert db.quick_check(restored)
+    restored.close()
