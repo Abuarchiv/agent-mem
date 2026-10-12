@@ -270,3 +270,33 @@ def test_an_oversized_database_is_vacuumed_once_a_day_not_on_every_run(config: C
         indexer.retention(conn, config)
     assert sum(s.strip().upper() == "VACUUM" for s in statements) <= 1
     conn.close()
+
+
+def test_forgetting_a_turn_takes_what_was_drawn_from_it(config: Config, project: Path):
+    from agent_mem import cli
+    from agent_mem.memory import store
+
+    _turn(config, project, "s1", "the staging password policy is secret-ish")
+    _turn(config, project, "s1", "something unrelated")
+    conn = db.connect(config)
+    first, second = (int(r[0]) for r in conn.execute("SELECT id FROM turns ORDER BY id"))
+    for turn_id, kind, mem0 in ((first, "fact", "a1"), (first, "lesson", None), (second, "fact", "b2")):
+        store.add_memory(
+            conn,
+            project_id=None,
+            kind=kind,
+            title=f"{kind} of T{turn_id}",
+            body="x",
+            source="agent",
+            trust="observer",
+            turn_id=turn_id,
+            dedupe=f"mem0:{mem0}" if mem0 else f"lesson:{turn_id}",
+        )
+    conn.execute("UPDATE sessions SET title = 'Staging policy', summary_json = '{\"learned\": [\"policy\"]}'")
+    conn.close()
+    assert cli.main(["--data-dir", str(config.data_dir), "purge", "--id", f"T{first}", "--yes"]) == 0
+    conn = db.connect(config)
+    assert [r[0] for r in conn.execute("SELECT title FROM memories")] == [f"fact of T{second}"]
+    assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["a1"]
+    assert tuple(conn.execute("SELECT title, summary_json FROM sessions").fetchone()) == (None, None)
+    conn.close()

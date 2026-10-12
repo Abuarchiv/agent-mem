@@ -201,6 +201,14 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
     for table in ("vectors", "links", "anchors", "accesses"):
         conn.execute(f"DELETE FROM {table} WHERE owner_type = ? AND owner_id = ?", (owner_type, owner_id))
     if owner_type == "t":
+        # What was drawn from the turn holds its content too: facts and lessons (with their mem0 copies) and the
+        # session summary. memories.turn_id is ON DELETE SET NULL, so they used to stay behind.
+        for (memory_id,) in conn.execute("SELECT id FROM memories WHERE turn_id = ?", (owner_id,)).fetchall():
+            delete_owner(conn, "m", int(memory_id))
+        conn.execute(
+            "UPDATE sessions SET title = NULL, summary_json = NULL WHERE id = (SELECT session_id FROM turns WHERE id = ?)",
+            (owner_id,),
+        )
         conn.execute("DELETE FROM events WHERE turn_id = ?", (owner_id,))
         cursor = conn.execute("DELETE FROM turns WHERE id = ?", (owner_id,))
     else:
