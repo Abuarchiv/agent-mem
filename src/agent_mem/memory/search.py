@@ -200,6 +200,12 @@ STOPWORDS = {
     "unseren",
     "unserem",
     "projekt",
+    # Day words: "was läuft heute im kino" matched a fact over "läuft" and "heute". A named time is read by the
+    # time window (semantic.time_window), not as a search word.
+    "heute",
+    "gestern",
+    "morgen",
+    "today",
     # chat filler: a question made of these matched any long turn ("nun schaue … gesamte")
     "nun",
     "schau",

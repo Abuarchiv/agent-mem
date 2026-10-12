@@ -326,3 +326,12 @@ def test_a_newer_near_duplicate_retires_the_older_fact(conn, config: Config):
     rows = dict(conn.execute("SELECT id, superseded_by FROM memories").fetchall())
     assert rows[old] == new and rows[mine] is None and rows[other] is None and rows[new] is None
     assert semantic.merge_duplicates(conn, config, "m1") == 0  # only new memories are compared next time
+
+
+def test_day_words_are_no_topic(driver: Driver, conn):
+    driver.start("s1")
+    driver.prompt("s1", "Heute läuft der Viewer neu auf Port 37778, was läuft sonst noch heute")
+    driver.stop("s1", "Der Viewer läuft heute stabil.")
+    other = Driver(conn, driver.config, driver.cwd)
+    assert not other.prompt("s2", "was läuft heute im kino").context  # only "läuft" and "heute" in common
+    assert other.prompt("s2", "auf welchem port läuft der viewer").context
