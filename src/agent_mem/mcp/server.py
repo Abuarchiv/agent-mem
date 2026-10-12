@@ -39,14 +39,16 @@ def build(config: Config | None = None) -> MCPServer:
 
     @server.tool()
     def mem_search(query: str, limit: int = 8, all_projects: bool = False) -> str:
-        """Search memory. Returns ids with one-line titles. Time words like 'gestern' or 'last week' filter by date."""
+        """Search memory. Returns ids with one-line titles; says so when nothing matches confidently.
+        Time words like 'gestern' or 'last week' rank that time first."""
         limit = max(1, min(limit, 20))
         with db.transaction(state.conn):
             hits = state.retriever.search(
                 query[:2000], state.project_id, limit=limit, include_other_projects=all_projects
             )
+        sure = semantic.confident_hits(hits, state.config, query[:2000])
         views.prime_anchor_states(state.conn, hits)
-        return views.search_lines(hits)
+        return views.search_lines(sure, weak=hits[:3])
 
     @server.tool()
     def mem_timeline(id: str, before: int = 3, after: int = 3) -> str:

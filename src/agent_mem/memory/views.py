@@ -11,10 +11,14 @@ from agent_mem.memory import consolidate, learn, search
 from agent_mem.memory.store import owner_label, parse_owner
 
 
-def search_lines(hits: list[search.Hit]) -> str:
-    if not hits:
+def search_lines(hits: list[search.Hit], weak: list[search.Hit] | None = None) -> str:
+    """Confident hits; without any, the weak candidates under a header that says so."""
+    if not hits and not weak:
         return "No matching memories."
     lines = []
+    if not hits:
+        lines.append("No confident match. Weak candidates, likely unrelated (rephrase or verify with mem_get):")
+        hits = weak or []
     for hit in hits:
         stale = ""
         states = [state for _, state in _anchor_states(hit)]

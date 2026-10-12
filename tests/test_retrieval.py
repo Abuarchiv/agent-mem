@@ -216,3 +216,16 @@ def test_export_is_valid_json(driver: Driver, conn, config: Config, project, cap
     cli.main(["--data-dir", str(config.data_dir), "export", "--project", str(project)])
     data = json.loads(capsys.readouterr().out)
     assert data["version"] == 2 and data["turns"][0]["prompt"] == "export me"
+
+
+def test_semantic_hit_needs_a_third_of_the_terms(config: Config):
+    from agent_mem.memory import search
+
+    hit = search.Hit(owner=("t", 1), score=1.0, sources={"fts", "vector"})
+    terms = ["test", "account", "staging", "shop", "team"]
+    hit.coverage, hit.matched_terms = search.coverage("the tests run with pytest", terms)
+    assert hit.matched_terms == 1 and not search.confident(hit, config, terms)  # 1 of 5: unrelated
+    terms = ["logging", "bibliothek"]
+    hit.coverage, hit.matched_terms = search.coverage("logging with structlog", terms)
+    assert search.confident(hit, config, terms)  # 1 of 2 with vector support
+    assert search.query_terms("Welche Datei enthält den Vertrag?") == ["datei", "vertrag"]

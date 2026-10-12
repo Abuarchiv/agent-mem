@@ -31,7 +31,11 @@ def test_mcp_tools(conn, config: Config, project: Path, driver: Driver, monkeypa
 
     tools = asyncio.run(server.list_tools())
     assert [t.name for t in tools] == ["mem_search", "mem_timeline", "mem_get", "mem_remember", "mem_forget"]
-    assert "T1" in call("mem_search", {"query": "restic backup"})
+    found = call("mem_search", {"query": "restic backup"})
+    assert "T1" in found and "No confident match" not in found
+    # One generic word of five: shown as a weak candidate, labeled as such, never as a match.
+    weak = call("mem_search", {"query": "who approves the nightly invoice export budget"})
+    assert weak.startswith("No confident match") or weak == "No matching memories."
     assert "backup.sh" in call("mem_get", {"ids": ["T1"]})
     assert "▶ T1" in call("mem_timeline", {"id": "T1"})
     stored = call("mem_remember", {"text": "Backups go to the B2 bucket", "kind": "decision"})

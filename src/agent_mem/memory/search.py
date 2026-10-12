@@ -190,6 +190,10 @@ STOPWORDS = {
     "verwenden",
     "verwendet",
     "achten",
+    "enthält",
+    "enthalten",
+    "contains",
+    "contain",
     "man",
     "unser",
     "unsere",
@@ -509,7 +513,9 @@ def confident(hit: Hit, config: Config, terms: Sequence[str]) -> bool:
     """Abstention gate for automatic injection: never inject weak matches."""
     if hit.score < config.retrieval.inject_min_score:
         return False
-    if "vector" in hit.sources and hit.matched_terms >= 1:
+    # A semantic hit still has to share a third of the question's content words: unrelated questions
+    # matched one generic word of five or more (c26, c30, c37 in B.29), real ones at least one of three.
+    if "vector" in hit.sources and hit.matched_terms >= 1 and hit.coverage >= 1 / 3:
         return True
     needed = 1 if len(terms) <= 1 else 2
     return hit.matched_terms >= needed and hit.coverage >= config.retrieval.min_term_coverage

@@ -13,7 +13,8 @@ Two data sets, two backends:
 * ``fixture``: ``tests/fixtures/memory_cases.json``. hit@1 (top result contains an expected substring),
   abstention (no result for unanswerable questions) and contradiction resolution (top result shows the
   current value and none of the obsolete ones). ``injected_*`` repeat hit@1 and abstention for what the
-  prompt hook would inject (lexical search plus ``search.confident``, no vectors), sqlite backend only.
+  prompt hook would inject (lexical search plus ``search.confident``, no vectors), ``mcp_*`` for what
+  ``mem_search`` returns as confident (full search plus the same gate); sqlite backend only.
 
 Backends: ``sqlite`` is the existing stack (capture + FTS5 + vectors + graph), ``mem0`` is the
 observer path (:mod:`agent_mem.observe.mem0_adapter`). Each item runs in a fresh data directory.
@@ -122,6 +123,13 @@ class SqliteBackend:
             text = hit.text or semantic.owner_text(self.conn, hit.owner) or ""
             out.append((native, text, float(hit.score or 0.0)))
         return out
+
+    def confident(self, question: str) -> list[str]:
+        """What mem_search returns as confident (full search, then the same gate as the hook)."""
+        project = self.conn.execute("SELECT id FROM projects").fetchone()[0]
+        retriever = semantic.Retriever(self.conn, self.config, self.embedder)
+        hits = retriever.search(question, project, limit=5, record_shown=False)
+        return [h.text for h in semantic.confident_hits(hits, self.config, question)]
 
     def injected(self, question: str) -> list[str]:
         """What the prompt hook would inject: lexical search without vectors, behind the confidence gate."""
@@ -320,6 +328,8 @@ class Runner:
         abstains: list[int] = []
         injected_hits: list[int] = []  # prompt hook path (sqlite backend only)
         injected_abstains: list[int] = []
+        mcp_hits: list[int] = []  # mem_search confident results (sqlite backend only)
+        mcp_abstains: list[int] = []
         resolved: list[int] = []
         details: list[dict[str, Any]] = []
         for case in data["cases"]:
@@ -329,18 +339,23 @@ class Runner:
                 backend.ingest(sessions, [f"{case['id']}-s{i}" for i in range(len(sessions))])
                 ranked = [r for r in backend.ranked(case["question"], 5) if r[2] >= self.min_score]
                 top = ranked[0][1].lower() if ranked else ""
-                injected = backend.injected(case["question"]) if isinstance(backend, SqliteBackend) else None
+                sqlite = isinstance(backend, SqliteBackend)
+                injected = backend.injected(case["question"]) if sqlite else None
+                sure = backend.confident(case["question"]) if sqlite else None
                 if case.get("abstain"):
                     ok = not ranked
                     abstains.append(int(ok))
-                    if injected is not None:
+                    if injected is not None and sure is not None:
                         injected_abstains.append(int(not injected))
+                        mcp_abstains.append(int(not sure))
                 else:
                     ok = any(e.lower() in top for e in case["expect_any"])
                     hits.append(int(ok))
-                    if injected is not None:
+                    if injected is not None and sure is not None:
                         first = injected[0].lower() if injected else ""
                         injected_hits.append(int(any(e.lower() in first for e in case["expect_any"])))
+                        first = sure[0].lower() if sure else ""
+                        mcp_hits.append(int(any(e.lower() in first for e in case["expect_any"])))
                 details.append(
                     {
                         "id": case["id"],
@@ -348,6 +363,7 @@ class Runner:
                         "top": top[:160],
                         "score": ranked[0][2] if ranked else None,
                         "injected": [t[:160] for t in injected or []],
+                        "mcp_confident": [t[:160] for t in sure or []],
                     }
                 )
                 self._collect(backend)
@@ -381,6 +397,8 @@ class Runner:
             "injected_abstention": round(sum(injected_abstains) / len(injected_abstains), 4)
             if injected_abstains
             else None,
+            "mcp_hit@1": round(sum(mcp_hits) / len(mcp_hits), 4) if mcp_hits else None,
+            "mcp_abstention": round(sum(mcp_abstains) / len(mcp_abstains), 4) if mcp_abstains else None,
             "contradictions_resolved": f"{sum(resolved)}/{len(resolved)}",
             "n": {"answerable": len(hits), "abstain": len(abstains), "pairs": len(resolved)},
             "details": details,

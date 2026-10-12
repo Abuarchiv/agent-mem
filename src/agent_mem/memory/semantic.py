@@ -396,5 +396,11 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
     return begin, begin + timedelta(days=1)
 
 
+def confident_hits(hits: list[search.Hit], config: Config, text: str) -> list[search.Hit]:
+    """The hits that pass :func:`search.confident` for ``text``, with time words removed as in the search."""
+    terms = search.query_terms(strip_time_words(text) if time_window(text) else text)
+    return [h for h in hits if search.confident(h, config, terms)]
+
+
 def strip_time_words(text: str) -> str:
     return _TIME_HINT.sub(" ", text).strip() or text

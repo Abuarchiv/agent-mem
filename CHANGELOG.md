@@ -17,6 +17,7 @@
 - Injection lists memories oldest first and says that the newer entry holds when two disagree. If the budget is short, the weakest hit is dropped, not the newest.
 - Claude Code shows one terminal line at session start with the number of injected items and tokens. `status` shows injected tokens today, over seven days and per session.
 - With a working observer, corrections and decisions in prompts are no longer stored by pattern; the model writes them. Facts are tagged ([decision], [rule], [dead_end], [fact]); "Use X instead of Y" becomes a rule. The prompt excludes states that change soon (test counts, commits, scores, next steps); on 20 real turns garbage without duplicates fell from 29 to 1 to 3 facts of about 110. Subagent answers enter the bundle.
+- `mem_search` returns only confident hits (the hook's gate; a semantic hit must share a third of the question's content words). Without one it says "No confident match" and lists three weak candidates as such. On the fixture: right answer 20 of 20, silent on 20 of 20 unanswerable questions (before 10). "enthält" and "contains" are filler verbs, not search terms.
 - `eval` reports `All@k` and what the prompt hook would inject (`injected_hit@1`, `injected_abstention`); the fixture has 20 abstention cases instead of 5.
 
 ### Retrieval
