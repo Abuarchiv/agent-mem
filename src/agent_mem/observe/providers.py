@@ -78,11 +78,14 @@ def _run(cmd: list[str], prompt: str) -> str:
     return result.stdout
 
 
-_NO_MODEL = re.compile(r"model\b.{0,80}\bnot (?:available|supported)", re.I | re.S)
+# A plan without the model, or an older CLI without the flag (``--auto-tier``, ``-c``).
+_NO_MODEL = re.compile(
+    r"model\b.{0,80}\bnot (?:available|supported)|unexpected argument|unknown (?:option|argument)", re.I | re.S
+)
 
 
 def _run_model(cmd: list[str], model_args: list[str], prompt: str) -> str:
-    """Runs with the configured model; a plan without that model falls back to the CLI's own default."""
+    """Runs with the configured model; if the CLI refuses it, once more with the CLI's own default."""
     if not model_args:
         return _run(cmd, prompt)
     try:

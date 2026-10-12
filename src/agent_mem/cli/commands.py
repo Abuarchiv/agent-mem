@@ -503,41 +503,56 @@ def _detect_table(found: dict[str, Any]) -> str:
     return "\n".join(rows)
 
 
+def _targets(harness: str, found: dict[str, Any]) -> list[str]:
+    """``all`` means every harness on PATH, so someone using only Codex or all four sets up the same way."""
+    if harness != "all":
+        return [harness]
+    return [name for name, path in found["harnesses"].items() if path]
+
+
 def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.cli import install
 
     folder = plugins_dir()
     found = install.detect()
+    targets = _targets(ns.harness, found)
+    if not targets:
+        print(
+            "No harness on PATH (claude, codex, copilot, opencode). Install one, or name it: `agent-mem setup codex`."
+        )
+        print("\nDetected:\n" + _detect_table(found))
+        return 1
     if not ns.write:
-        print(SETUP[ns.harness].format(plugins=folder))
-        print("\nOr let agent-mem write the files with absolute paths: `agent-mem setup " + ns.harness + " --write`.")
+        for name in targets:
+            print(SETUP[name].format(plugins=folder) + "\n")
+        print("Or let agent-mem write the files with absolute paths: `agent-mem setup " + ns.harness + " --write`.")
         print("\nDetected:\n" + _detect_table(found))
         return 0
-    touched = install.write(ns.harness, folder)
-    print(f"{ns.harness}: hooks and MCP server registered with {found['binary']}.")
-    for path in touched:
-        print(f"  wrote {path}")
-    if ns.harness == "codex":
-        print("  Codex asks you to trust the hooks once: start codex and run /hooks.")
+    for name in targets:
+        touched = install.write(name, folder)
+        print(f"{name}: hooks and MCP server registered with {found['binary']}.")
+        for path in touched:
+            print(f"  wrote {path}")
+        if name == "codex":
+            print("  Codex asks you to trust the hooks once: start codex and run /hooks.")
+        if not found["extras"]["observer"]:
+            continue
+        if name == "opencode":
+            print('  facts: OpenCode turns are kept raw unless you add "ollama" to observe.providers.')
+        elif found["providers"].get(name):
+            model = getattr(config.observe, f"{name}_model") or "the CLI default"
+            print(f"  facts: extracted in the background through `{name}` ({model}) under your existing login.")
+        else:
+            print(f"  facts: `{name}` is not on PATH; turns of this harness are kept raw until it is.")
     if found["extras"]["semantic"] and not ns.no_models:
         from agent_mem.memory import semantic
 
         embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
-        print(
-            f"  embedding model {embedder.model} ready." if embedder else f"  embedding model not available: {reason}"
-        )
-    if found["extras"]["observer"]:
-        stage = {"claude": "claude", "codex": "codex", "copilot": "copilot"}.get(ns.harness)
-        if stage and found["providers"].get(stage):
-            print(f"  facts: extracted in the background through `{stage}` under your existing login (no API key).")
-        elif stage:
-            print(f"  facts: `{stage}` is not on PATH; turns of this harness are kept raw until it is.")
-        else:
-            print('  facts: OpenCode turns are kept raw unless you add "ollama" to observe.providers.')
+        print(f"embedding model {embedder.model} ready." if embedder else f"embedding model not available: {reason}")
     if config.viewer.enabled:
         from agent_mem.ui import server
 
-        print("  " + server.install_autostart(config))
+        print(server.install_autostart(config))
     print("\nDetected:\n" + _detect_table(found))
     print("\nStart a session, then run `agent-mem doctor`. `agent-mem view` opens the viewer.")
     return 0
@@ -546,13 +561,14 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
 def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.cli import install
 
-    touched = install.remove(ns.harness)
-    if touched:
-        print(f"{ns.harness}: removed agent-mem hooks and MCP entries from:")
-        for path in touched:
-            print(f"  {path}")
-    else:
-        print(f"{ns.harness}: nothing written by `setup --write` was found.")
+    for name in install.HARNESSES if ns.harness == "all" else [ns.harness]:
+        touched = install.remove(name)
+        if touched:
+            print(f"{name}: removed agent-mem hooks and MCP entries from:")
+            for path in touched:
+                print(f"  {path}")
+        elif ns.harness != "all":
+            print(f"{name}: nothing written by `setup --write` was found.")
     from agent_mem.cli.health import harness_installed
     from agent_mem.ui import server
 

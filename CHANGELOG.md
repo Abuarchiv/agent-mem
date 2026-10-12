@@ -36,6 +36,8 @@
 - `agent-mem setup <harness> --write` registers hooks and the MCP server with the absolute path of the binary (Claude Code `settings.json`, Codex `hooks.json` and `config.toml`, Copilot `hooks/agent-mem.json` and `mcp-config.json`, OpenCode plugin and `opencode.json`), downloads the embedding model and prints what it detected. `agent-mem uninstall <harness>` removes exactly that.
 - `doctor` checks the observer extra, queue and last model call, available provider stages, index size and whether every hook command points at an existing binary.
 - Extras: `semantic` (fastembed) and `observer` (mem0, qdrant). Install scripts install both.
+- `agent-mem setup all --write` sets up every harness on PATH at once; `uninstall all` removes them. `doctor` lists each provider stage with its model and whether it is paused.
+- Each stage uses the cheapest model of its CLI: Claude Haiku, Codex `gpt-6-luna` at low effort, Copilot `auto` on the efficiency tier. A plan without the model, or an older CLI without the flag, falls back to the CLI default.
 - Manifests no longer claim "No LLM calls". Issue template asks for `doctor --json` and the last log lines.
 
 ### Structure

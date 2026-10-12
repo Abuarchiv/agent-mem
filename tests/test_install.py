@@ -95,3 +95,23 @@ def test_detect_reports_binary_and_extras(homes: Path) -> None:
     assert set(found["harnesses"]) == set(install.HARNESSES)
     assert set(found["extras"]) == {"semantic", "observer"}
     assert found["binary"]
+
+
+def test_setup_all_writes_only_harnesses_on_path(homes: Path, config, monkeypatch, capsys) -> None:
+    import argparse
+
+    from agent_mem.cli import commands
+
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+    config.viewer.enabled = False
+    ns = argparse.Namespace(harness="all", write=True, no_models=True)
+    assert commands.cmd_setup(ns, config) == 0
+    assert (homes / ".codex" / "hooks.json").exists()
+    assert not (homes / ".claude" / "settings.json").exists() and not (homes / ".copilot").exists()
+
+    commands.cmd_uninstall(argparse.Namespace(harness="all"), config)
+    assert install.hook_commands("codex") == []
+
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    assert commands.cmd_setup(ns, config) == 1
+    assert "No harness on PATH" in capsys.readouterr().out

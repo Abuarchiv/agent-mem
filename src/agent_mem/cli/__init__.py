@@ -152,7 +152,9 @@ def _main(args: list[str]) -> int:
     p.add_argument("--vector-floor", type=float, help="override retrieval.min_vector_score (sqlite backend)")
     p.add_argument("--progress", type=Path, help="JSONL with one line per finished question; resumes on rerun")
     p = sub.add_parser("setup", help="connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
-    p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
+    p.add_argument(
+        "harness", choices=["all", "claude", "codex", "copilot", "opencode"], help="all: every harness on PATH"
+    )
     p.add_argument(
         "--write",
         action="store_true",
@@ -160,7 +162,7 @@ def _main(args: list[str]) -> int:
     )
     p.add_argument("--no-models", action="store_true", help="with --write: skip the embedding model download")
     p = sub.add_parser("uninstall", help="remove hooks and MCP entries written by `setup --write`; data stays")
-    p.add_argument("harness", choices=["claude", "codex", "copilot", "opencode"])
+    p.add_argument("harness", choices=["all", "claude", "codex", "copilot", "opencode"])
     p = sub.add_parser("view", help="open the viewer in the browser (starts it if needed)")
     p.add_argument("--project", help="only this project directory (default: all projects)")
     p.add_argument(

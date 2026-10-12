@@ -144,6 +144,7 @@ def test_cheapest_model_falls_back_to_cli_default(monkeypatch) -> None:
     )
     assert providers._NO_MODEL.search(codex_error)
     assert not providers._NO_MODEL.search("claude exit 1: usage limit reached")
+    assert providers._NO_MODEL.search("copilot exit 2: error: unexpected argument '--auto-tier' found")
 
 
 def test_spawn_observer_is_throttled_and_respects_no_spawn(config: Config, monkeypatch) -> None:

@@ -8,7 +8,7 @@ Agent Mem records what your coding agents do through their native hooks, turns i
 
 ```sh
 uv tool install "agent-mem[semantic,observer]"      # or: pipx install "agent-mem[semantic,observer]"
-agent-mem setup claude --write                      # also: codex, copilot, opencode
+agent-mem setup all --write                         # every harness on PATH; or one: claude, codex, copilot, opencode
 agent-mem doctor
 ```
 
@@ -72,7 +72,7 @@ Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusi
 
 ```
 agent-mem status [--json] | doctor [--fix] [--json] | paths
-agent-mem setup <harness> [--write] [--no-models] | uninstall <harness>
+agent-mem setup all|<harness> [--write] [--no-models] | uninstall all|<harness>
 agent-mem observe [--drain] [--once] [--status] [--retry-failed] [--reprocess-raw] [--reindex]
 agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
 agent-mem show T12 M3 | view [--project DIR] [--output FILE|FOLDER] [--no-open]

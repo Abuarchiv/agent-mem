@@ -341,12 +341,20 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
             warn_only=True,
         )
     )
+    from agent_mem.observe import providers
+
     stages = [n for n in config.observe.providers if shutil.which(n)]
+    now = timeutil.iso()
+    shown = []
+    for name in stages:
+        until = providers.paused_until(conn, name)
+        paused = f", paused until {until}" if until and until > now else ""
+        shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
     checks.append(
         Check(
             "observer providers",
             bool(stages),
-            ", ".join(stages) if stages else f"none of {config.observe.providers} on PATH",
+            ", ".join(shown) if stages else f"none of {config.observe.providers} on PATH",
             'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.',
             warn_only=True,
         )

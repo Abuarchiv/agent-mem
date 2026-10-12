@@ -23,6 +23,6 @@ if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem (network or git 
 uv tool update-shell | Out-Null
 Write-Host ""
 Write-Host "Installed. Next steps:"
-Write-Host "  agent-mem setup claude --write    # or: codex, copilot, opencode (writes hooks + MCP with absolute paths)"
+Write-Host "  agent-mem setup all --write       # every harness on PATH; or one: claude, codex, copilot, opencode"
 Write-Host "  agent-mem doctor"
 Write-Host "If 'agent-mem' is not found, open a new terminal (uv added it to your PATH)."

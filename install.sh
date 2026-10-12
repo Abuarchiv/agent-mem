@@ -19,6 +19,6 @@ uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com
 uv tool update-shell >/dev/null 2>&1 || true
 echo
 echo "Installed. Next steps:"
-echo "  agent-mem setup claude --write    # or: codex, copilot, opencode (writes hooks + MCP with absolute paths)"
+echo "  agent-mem setup all --write       # every harness on PATH; or one: claude, codex, copilot, opencode"
 echo "  agent-mem doctor"
 echo "If 'agent-mem' is not found, open a new terminal (uv added it to your PATH)."
