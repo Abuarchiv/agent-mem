@@ -21,6 +21,8 @@
 - `eval` reports `All@k` and what the prompt hook would inject (`injected_hit@1`, `injected_abstention`); the fixture has 20 abstention cases instead of 5.
 
 ### Viewer
+
+- Connections shows what the memories are about instead of files, commands and errors used together: the concepts mem0's entity linking extracts (spaCy), mirrored into SQLite by the worker (tables `concepts`, `concept_links`, migration 005). Only concrete things (names, code, compound terms) that link at least two memories are drawn; plain nouns such as "Fehler" stay out. `observe.entity_model` picks the spaCy model; German facts need `de_core_news_sm`.
 - `agent-mem view --watch [SECONDS]` rewrites the page every 10 s (minimum 2) until Ctrl+C; the open page reloads itself and keeps search, filters and scroll position. It waits while you click, type, select text or use the graph. Still no server and no open port.
 - Every memory opens a detail panel with its full text, validity, recall counts, source turn and successor, plus copy buttons for `agent-mem show` and `agent-mem purge --id`. Commands in turn details and rules copy with one click.
 - Observer facts show their whole sentence instead of the 120-character title.

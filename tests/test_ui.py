@@ -56,19 +56,29 @@ def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver:
     assert recalls and {r["session_id"] for r in recalls} == {"claude:s2"}
     assert {r["kind"] for r in recalls} <= {"injected", "shown"}
 
-    # graph: a decision that names a file hangs on that file as a square (agentmemory's decision -> file)
+    # graph: mem0's concepts that two memories share (observe/concepts.py), never commands or plain nouns
     from agent_mem.memory import store
+    from agent_mem.observe import concepts
 
     project_id = snapshot["sessions"][0]["project_id"]
-    body = "Keep the ranking weight in app.py at 0.7."
-    store.add_memory(conn, project_id=project_id, kind="decision", title="", body=body, source="agent", trust="user")
+    for body in ("The Viewer reads app.py.", "When the Viewer starts, the hook runs.", "When one Fehler is in app.py."):
+        store.add_memory(conn, project_id=project_id, kind="fact", title="", body=body, source="agent", trust="user")
+
+    def extract(text: str) -> list[tuple[str, str]]:
+        return [
+            (kind, word)
+            for kind, word in (("PROPER", "Viewer"), ("IDENTIFIER", "app.py"), ("PROPER", "Fehler"), ("PROPER", "When"))
+            if word in text
+        ]
+
+    concepts.link_new(conn, extract, names=lambda text: {"viewer", "when"})
     graph = ui.build_snapshot(conn, config)["graph"]
-    memory = next(node for node in graph["nodes"] if node["kind"] == "memory")
-    file_node = next(node for node in graph["nodes"] if node["kind"] == "file" and node["key"].endswith("app.py"))
-    assert (
-        memory["memory_kind"] == "decision"
-        and {"a": memory["id"], "b": file_node["id"], "weight": 0.6} in graph["edges"]
-    )
+    labels = {node["key"]: node for node in graph["nodes"]}
+    assert set(labels) == {"Viewer", "app.py"}  # "Fehler" is a plain noun, "When" a question word
+    assert labels["Viewer"]["kind"] == "name" and labels["app.py"]["kind"] == "code"
+    [edge] = graph["edges"]  # both appear in "The Viewer reads app.py."
+    assert {edge["a"], edge["b"]} == {labels["Viewer"]["id"], labels["app.py"]["id"]} and edge["weight"] == 1.0
+    assert len(labels["Viewer"]["memory_ids"]) == 2
     assert snapshot["recipes"] and snapshot["recipes"][0]["command_key"]
     assert snapshot["learning"]["errors_fixed"] >= 1
     assert snapshot["projects"][0]["name"] == "demo"

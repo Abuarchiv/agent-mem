@@ -93,6 +93,8 @@ MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `
 
 Open **http://localhost:37778** (or run `agent-mem view`). It runs in the background, starts with every agent session, and `setup --write` also registers it as a login item (macOS LaunchAgent, systemd user service, Windows Startup folder), so it is reachable after a restart. The page is built fresh on every reload; an open tab reloads itself every ten seconds.
 
+**Connections** is the graph of what your memories are about: the concepts mem0's entity linking finds in them (names, code such as `hook.py`, compound terms), linked when two appear in the same memory. Click one to read those memories. Set `observe.entity_model` to a spaCy model in the language of your facts, for example `de_core_news_sm` (mem0's default is `en_core_web_sm`), and install it into the tool: `uv tool install --with de_core_news_sm@https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl "agent-mem[semantic,observer]"`. `agent-mem doctor` says which one is missing.
+
 It listens on this machine only (no login; turn it off on shared machines). `agent-mem view --output FILE` writes an offline snapshot instead. Change the port with `"viewer": {"port": 37778}`, turn it off with `"viewer": {"enabled": false}`, remove the login item with `agent-mem serve --no-autostart`.
 
 ## When something is missing
@@ -124,6 +126,7 @@ It listens on this machine only (no login; turn it off on shared machines). `age
     "claude_model": "haiku",
     "codex_model": "gpt-6-luna",
     "copilot_model": "auto",
+    "entity_model": "en_core_web_sm",
     "daily_limit": 300,
     "bundle_turns": 5,
     "bundle_tokens": 6000

@@ -54,6 +54,30 @@ def test_missing_spacy_model_disables_entity_linking_instead_of_installing(monke
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "en_core_web_sm" else real(name))
     monkeypatch.setattr(spacy_models, "_load_failed_full", False)
     monkeypatch.setattr(spacy_models, "_load_failed_lemma", False)
-    mem0_adapter._disable_entity_linking_if_model_missing()
+    mem0_adapter._use_entity_model()
     assert spacy_models._load_failed_full is True and spacy_models._load_failed_lemma is True
     assert spacy_models.get_nlp_full() is None  # no download attempt
+
+
+def test_migration_005_adds_concept_tables_to_a_v4_database(config) -> None:
+    from agent_mem.core import db
+
+    conn = db.connect(config)
+    conn.execute("DROP TABLE concept_links")
+    conn.execute("DROP TABLE concepts")
+    conn.execute("PRAGMA user_version = 4")
+    conn.close()
+    conn = db.connect(config)
+    assert db.user_version(conn) == db.SCHEMA_VERSION >= 5
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
+    memory = conn.execute(
+        "INSERT INTO memories(project_id, kind, title, body, source, trust, importance, valid_from, created_at, "
+        "dedupe_key) VALUES ('p', 'fact', '', 'x', 'agent', 'user', 0.5, 't', 't', 'k') RETURNING id"
+    ).fetchone()[0]
+    concept = conn.execute(
+        "INSERT INTO concepts(project_id, key, label, type) VALUES ('p', 'viewer', 'Viewer', 'proper') RETURNING id"
+    ).fetchone()[0]
+    conn.execute("INSERT INTO concept_links VALUES (?, ?)", (concept, memory))
+    conn.execute("DELETE FROM memories WHERE id = ?", (memory,))
+    assert conn.execute("SELECT COUNT(*) FROM concept_links").fetchone()[0] == 0  # a purged memory takes its links
+    conn.close()

@@ -75,7 +75,7 @@ def _register() -> None:
     LlmFactory.provider_to_class["agent_mem_fake"] = ("agent_mem.observe.providers.FakeLLM", BaseLlmConfig)
 
 
-def _ensure_env(mem0_dir: Path) -> None:
+def _ensure_env(mem0_dir: Path, entity_model: str = "en_core_web_sm") -> None:
     """Point mem0 at our directory. Its modules copied the value at import time, so patch those too."""
     import mem0.configs.base as mem0_configs_base
     import mem0.memory.main as mem0_main
@@ -90,25 +90,30 @@ def _ensure_env(mem0_dir: Path) -> None:
         setattr(module, "mem0_dir", str(mem0_dir))  # noqa: B010  (module globals read at call time)
     mem0_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(mem0_dir, 0o700)
-    _disable_entity_linking_if_model_missing()
+    _use_entity_model(entity_model)
 
 
-def spacy_model_available() -> bool:
+def spacy_model_available(name: str = "en_core_web_sm") -> bool:
     import importlib.util
 
-    return importlib.util.find_spec("en_core_web_sm") is not None
+    return importlib.util.find_spec(name) is not None
 
 
-def _disable_entity_linking_if_model_missing() -> None:
-    """Without ``en_core_web_sm`` mem0 would run ``spacy download`` (a pip/uv install into the live
-    environment, which ends the process in a tool install). Mark the model as failed instead: entity
-    linking is skipped, facts and search are unaffected (docs/PLAN.md B.27)."""
-    if spacy_model_available():
-        return
+def _use_entity_model(name: str = "en_core_web_sm") -> None:
+    """mem0 loads ``en_core_web_sm`` for entity linking; on German facts it returns fragments ("Der", "und
+    nur"). Load the configured model into mem0's loader instead. Without the model mem0 would run
+    ``spacy download`` (an install into the live environment, which ends the process in a tool install), so
+    mark it as failed: entity linking is skipped, facts and search are unaffected (docs/PLAN.md B.27)."""
     from mem0.utils import spacy_models
 
-    spacy_models._load_failed_full = True
-    spacy_models._load_failed_lemma = True
+    if not spacy_model_available(name):
+        spacy_models._load_failed_full = True
+        spacy_models._load_failed_lemma = True
+        return
+    if name != "en_core_web_sm" and spacy_models._nlp_full is None:
+        import spacy
+
+        spacy_models._nlp_full = spacy.load(name)
 
 
 class Mem0Adapter:
@@ -125,7 +130,7 @@ class Mem0Adapter:
         self.config = config
         self.llm, self.llm_model, self.custom_instructions = llm, llm_model, custom_instructions
         self.mem0_dir = mem0_dir or (config.data_dir / "mem0")
-        _ensure_env(self.mem0_dir)
+        _ensure_env(self.mem0_dir, config.observe.entity_model)
         _register()
         from mem0 import Memory
         from mem0.configs.base import MemoryConfig

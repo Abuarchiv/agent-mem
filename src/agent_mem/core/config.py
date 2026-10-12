@@ -108,6 +108,9 @@ class Observe:
     codex_model: str = "gpt-6-luna"
     copilot_model: str = "auto"
     ollama_model: str = "qwen3.5:4b-mlx"
+    # spaCy model for mem0's entity linking (the concepts in the viewer's graph). mem0's default is English;
+    # use the language your facts are written in, e.g. "de_core_news_sm". Installed with the tool (README).
+    entity_model: str = "en_core_web_sm"
     daily_limit: int = 300
     idle_seconds: int = 90
     lease_seconds: int = 900

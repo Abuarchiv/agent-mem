@@ -24,7 +24,7 @@ from agent_mem.core import db, logutil, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store
 from agent_mem.observe import bundle as bundling
-from agent_mem.observe import providers, queue, review, summary
+from agent_mem.observe import concepts, providers, queue, review, summary
 from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 POLL_SECONDS = 2.0
@@ -321,7 +321,17 @@ class Worker:
             time.sleep(POLL_SECONDS)
         self.review_due()
         self.drain_forget()
+        self.link_concepts()
         return self.stats
+
+    def link_concepts(self) -> None:
+        """Mirror mem0's concepts for new memories (``observe/concepts.py``); spaCy loads with the adapter."""
+        try:
+            self.adapter  # noqa: B018  (applies observe.entity_model to mem0's spaCy loader)
+            while concepts.link_new(self.conn) == concepts.BATCH:
+                pass
+        except Exception as error:  # the graph is a view; it never stops the worker
+            logutil.write(self.config.log_dir, "observe", error=f"concepts: {type(error).__name__}: {error}"[:200])
 
     def review_due(self) -> None:
         """The daily review per project (``observe/review.py``), through the vendor the project used last."""

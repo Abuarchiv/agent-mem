@@ -17,13 +17,12 @@ import sqlite3
 import sys
 from datetime import timedelta
 from importlib import resources
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 from agent_mem import __version__
 from agent_mem.core import timeutil
 from agent_mem.core.config import Config
-from agent_mem.core.signals import first_line
 from agent_mem.memory import learn
 
 LIMITS = {
@@ -36,7 +35,6 @@ LIMITS = {
     "profile": 200,
     "graph_nodes": 160,
     "graph_edges": 420,
-    "graph_memories": 60,
     "days": 14,
     "recalls": 1500,
 }
@@ -226,25 +224,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         (since, *params),
     )
 
-    entity_scope = "WHERE e.project_id = ?" if scoped else ""
-    nodes = _rows(
-        conn,
-        "SELECT e.id, e.kind, e.key, e.project_id, ROUND(SUM(x.weight), 3) AS strength, COUNT(*) AS degree FROM entities e "
-        "JOIN (SELECT a AS id, weight FROM edges UNION ALL SELECT b AS id, weight FROM edges) x ON x.id = e.id "
-        f"{entity_scope} GROUP BY e.id ORDER BY strength DESC LIMIT ?",
-        (*params, LIMITS["graph_nodes"]),
-    )
-    node_ids = [int(node["id"]) for node in nodes]
-    edges: list[dict[str, Any]] = []
-    if node_ids:
-        marks = ",".join("?" for _ in node_ids)
-        edges = _rows(
-            conn,
-            f"SELECT a, b, ROUND(weight, 3) AS weight FROM edges WHERE a IN ({marks}) AND b IN ({marks}) "
-            "ORDER BY weight DESC LIMIT ?",
-            (*node_ids, *node_ids, LIMITS["graph_edges"]),
-        )
-    memory_nodes, memory_edges = _memory_links(conn, nodes, project_id)
+    nodes, edges = _concept_graph(conn, project_id)
 
     counts = {
         "projects": len(projects),
@@ -266,12 +246,10 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             f"SELECT COUNT(*) FROM rules WHERE enabled = 0 {'AND (project_id = ? OR project_id IS NULL)' if scoped else ''}",
             params,
         ),
-        "entities": _count(conn, f"SELECT COUNT(*) FROM entities {where}", params),
-        "edges": _count(
+        "concepts": _count(
             conn,
-            "SELECT COUNT(*) FROM edges WHERE a IN (SELECT id FROM entities WHERE project_id = ?)"
-            if scoped
-            else "SELECT COUNT(*) FROM edges",
+            "SELECT COUNT(*) FROM (SELECT l.concept_id FROM concept_links l JOIN concepts c ON c.id = l.concept_id "
+            f"WHERE c.specific = 1 {'AND c.project_id = ?' if scoped else ''} GROUP BY l.concept_id HAVING COUNT(*) >= 2)",
             params,
         ),
     }
@@ -320,60 +298,54 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         "rules": rules,
         "profile": profile,
         "daily": daily,
-        "graph": {"nodes": nodes + memory_nodes, "edges": edges + memory_edges},
+        "graph": {"nodes": nodes, "edges": edges},
     }
 
 
-GRAPH_MEMORY_KINDS = ("decision", "dead_end", "lesson", "preference", "fact")
+# mem0's entity types as the viewer names them.
+CONCEPT_KIND = {"proper": "name", "topic": "topic", "identifier": "code", "quoted": "quoted"}
 
 
-def _memory_links(
-    conn: sqlite3.Connection, nodes: list[dict[str, Any]], project_id: str | None
+def _concept_graph(
+    conn: sqlite3.Connection, project_id: str | None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Decisions, dead ends, lessons and facts as graph nodes, linked to the files and commands they name.
-
-    Like agentmemory's decision -> file edges, but from text already stored: a memory links to a file when it
-    names the file (``inject.py`` or its path), to a command when it contains it. No model call."""
-    targets: list[tuple[str, int]] = []
-    for node in nodes:
-        key = str(node["key"])
-        if node["kind"] == "file":
-            name = PurePosixPath(key).name
-            targets += [(key, int(node["id"]))] + ([(name, int(node["id"]))] if "." in name and len(name) >= 5 else [])
-        elif node["kind"] == "command" and len(key) >= 6:
-            targets.append((key, int(node["id"])))
-    if not targets:
-        return [], []
-    scope = "AND project_id = ?" if project_id is not None else ""
+    """mem0's concepts (``observe/concepts.py``) that connect at least two current memories, and how often
+    two of them occur in the same memory. A concept used by a single memory connects nothing."""
+    scope = "AND c.project_id = ?" if project_id is not None else ""
+    params: tuple[Any, ...] = (project_id,) if project_id is not None else ()
     rows = conn.execute(
-        f"SELECT id, kind, title, body, project_id, importance FROM memories WHERE invalid_at IS NULL "
-        f"AND kind IN ({','.join('?' for _ in GRAPH_MEMORY_KINDS)}) {scope} ORDER BY created_at DESC LIMIT 400",
-        (*GRAPH_MEMORY_KINDS, *([project_id] if project_id is not None else [])),
+        "SELECT c.id, c.label, c.type, c.project_id, COUNT(*) AS n, GROUP_CONCAT(l.memory_id) AS ids "
+        "FROM concepts c JOIN concept_links l ON l.concept_id = c.id "
+        f"JOIN memories m ON m.id = l.memory_id AND m.invalid_at IS NULL WHERE c.specific = 1 {scope} "
+        "GROUP BY c.id HAVING n >= 2 ORDER BY n DESC, c.id LIMIT ?",
+        (*params, LIMITS["graph_nodes"]),
     ).fetchall()
-    found: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    for row in rows:
-        text = f"{row['title'] or ''}\n{row['body'] or ''}"
-        hits = sorted({entity for needle, entity in targets if needle in text})[:4]
-        if not hits:
-            continue
-        node_id = -int(row["id"])  # entity ids are positive
-        found.append(
-            {
-                "id": node_id,
-                "kind": "memory",
-                "memory_kind": row["kind"],
-                "memory_id": row["id"],
-                "key": first_line(row["body"] or row["title"] or "", 160),
-                "project_id": row["project_id"],
-                "strength": round(0.5 + float(row["importance"] or 0), 3),
-                "degree": len(hits),
-            }
-        )
-        edges += [{"a": node_id, "b": entity, "weight": 0.6} for entity in hits]
-        if len(found) >= LIMITS["graph_memories"]:
-            break
-    return found, edges
+    nodes = [
+        {
+            "id": row["id"],
+            "kind": CONCEPT_KIND.get(row["type"], "topic"),
+            "key": row["label"],
+            "project_id": row["project_id"] or None,
+            "degree": row["n"],
+            "strength": row["n"],
+            "memory_ids": sorted((int(i) for i in str(row["ids"]).split(",")), reverse=True)[:12],
+        }
+        for row in rows
+    ]
+    if not nodes:
+        return [], []
+    marks = ",".join("?" for _ in nodes)
+    ids = [node["id"] for node in nodes]
+    pairs = conn.execute(
+        "SELECT a.concept_id AS a, b.concept_id AS b, COUNT(*) AS n FROM concept_links a "
+        "JOIN concept_links b ON b.memory_id = a.memory_id AND a.concept_id < b.concept_id "
+        "JOIN memories m ON m.id = a.memory_id AND m.invalid_at IS NULL "
+        f"WHERE a.concept_id IN ({marks}) AND b.concept_id IN ({marks}) GROUP BY a.concept_id, b.concept_id "
+        "ORDER BY n DESC LIMIT ?",
+        (*ids, *ids, LIMITS["graph_edges"]),
+    ).fetchall()
+    top = max((row["n"] for row in pairs), default=1)
+    return nodes, [{"a": row["a"], "b": row["b"], "weight": round(row["n"] / top, 3)} for row in pairs]
 
 
 def _asset(name: str) -> bytes:
