@@ -56,3 +56,21 @@ def test_a_turn_whose_worker_keeps_dying_ends_as_failed(config: Config, project:
     states = dict(conn.execute("SELECT t.prompt, q.state FROM observe_queue q JOIN turns t ON t.id = q.turn_id"))
     assert states == {"kills the worker": "failed", "fine": "pending"}
     conn.close()
+
+
+def test_a_forget_request_survives_a_failed_delete_in_mem0(config: Config):
+    from agent_mem.observe import worker
+
+    conn = db.connect(config)
+    conn.execute("INSERT INTO observe_forget(mem0_id, ts) VALUES ('m1', '2026-10-12'), ('m2', '2026-10-12')")
+
+    class Adapter:
+        def forget(self, mem0_id: str) -> bool:
+            if mem0_id == "m1":
+                raise RuntimeError("Qdrant storage is locked")
+            return False  # already gone
+
+    w = worker.Worker(config, conn, adapter=Adapter())  # type: ignore[arg-type]
+    w.drain_forget()
+    assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["m1"]  # retried next run
+    conn.close()

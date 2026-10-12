@@ -242,8 +242,12 @@ class Worker:
         if not rows:
             return
         for row in rows:
-            with contextlib.suppress(Exception):
-                self.adapter.forget(str(row[0]))
+            try:
+                self.adapter.forget(str(row[0]))  # False when mem0 no longer has it: done as well
+            except Exception as error:
+                # Keep the request: a deleted fact must not stay in the vector index because Qdrant was busy once.
+                logutil.write(self.config.log_dir, "observe", error=f"forget: {type(error).__name__}: {error}"[:200])
+                continue
             self.conn.execute("DELETE FROM observe_forget WHERE mem0_id = ?", (row[0],))
             self.stats["forgotten"] += 1
 
