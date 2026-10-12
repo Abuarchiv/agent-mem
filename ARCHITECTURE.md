@@ -15,6 +15,8 @@ agent-mem observe  detached, one at a time (observe.lock), low priority, exits a
                    → mem0.add through the harness CLI of the turn's vendor
                    → mirror facts into SQLite (dedupe_key = mem0:<id>)
                    → contradiction check: similar old facts → one model verdict per bundle
+                   → work log: type and title per turn, running session summary (one call per bundle)
+                   → once a day per project: review of all facts, duplicates and outdated ones retired
                      (KEEP | SUPERSEDE | DUPLICATE) → store.supersede + forget in Qdrant
                    no stage available → raw summary (kind = summary, trust = raw)
 
