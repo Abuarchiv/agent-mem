@@ -304,6 +304,12 @@ def _narrow_turn(conn: sqlite3.Connection, turn_id: int, project: identity.Proje
         return
     if row["root"] is None or identity.is_within(project.root, row["root"]):
         conn.execute("UPDATE turns SET project_id = ? WHERE id = ?", (project.id, turn_id))
+        # The session follows: started in ~/Lernen, it is an agent-mem session once it works there.
+        conn.execute(
+            "UPDATE sessions SET project_id = ? WHERE id = (SELECT session_id FROM turns WHERE id = ?) "
+            "AND project_id IS ?",
+            (project.id, turn_id, row["project_id"]),
+        )
 
 
 def _rel_files(project: identity.Project | None, files: tuple[str, ...]) -> list[str]:
@@ -563,7 +569,7 @@ def _resolve_failures(
             (json.dumps(changed[:10]), turn_id, ts, project_id, failure["error_sig"], command_key),
         )
         # A non-zero exit without an error line (grep without a match) is not an error that was fixed.
-        if updated.rowcount == 0 and signals.looks_like_error(error_line):
+        if updated.rowcount == 0 and signals.looks_like_error(error_line) and signals.fixable(command_key):
             conn.execute(
                 "INSERT INTO recipes(project_id, error_sig, error_text, command_key, files_json, successes, "
                 "last_turn_id, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",

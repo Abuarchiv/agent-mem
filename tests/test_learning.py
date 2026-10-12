@@ -197,3 +197,5 @@ def test_turn_moves_to_the_nested_project_its_tools_work_in(conn, config, tmp_pa
         ("Fix the viewer in agent-mem", "agent-mem"),
         ("What is in this folder?", "Lernen"),
     ]
+    session = conn.execute("SELECT p.name FROM sessions s JOIN projects p ON p.id = s.project_id").fetchone()
+    assert session["name"] == "agent-mem"
