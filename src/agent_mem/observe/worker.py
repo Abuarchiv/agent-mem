@@ -14,6 +14,7 @@ import os
 import sqlite3
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from filelock import FileLock, Timeout
@@ -115,7 +116,10 @@ class Worker:
     @property
     def adapter(self) -> Mem0Adapter:
         if self._adapter is None:
-            self._adapter = Mem0Adapter(self.config, llm="ollama", llm_model=self.config.observe.ollama_model)
+            instructions = (Path(__file__).with_name("coding_instructions.md")).read_text(encoding="utf-8")  # E8
+            self._adapter = Mem0Adapter(
+                self.config, llm="ollama", llm_model=self.config.observe.ollama_model, custom_instructions=instructions
+            )
         return self._adapter
 
     # --- one bundle --------------------------------------------------------------------------
@@ -204,7 +208,11 @@ class Worker:
             b.turn_ids,
             None,
         )
-        counts = contradiction.apply(self.conn, self.adapter, verdicts)
+        try:
+            counts = contradiction.apply(self.conn, self.adapter, verdicts)
+        except Exception as error:  # facts are mirrored already; a broken verdict must not lose the bundle
+            logutil.write(self.config.log_dir, "observe", error=f"apply: {type(error).__name__}: {error}"[:200])
+            return
         self.stats["superseded"] += counts["SUPERSEDE"]
 
     # --- loop ----------------------------------------------------------------------------------
@@ -292,6 +300,41 @@ def run(
             worker.close()
         logutil.write(config.log_dir, "observe", **{k: str(v) for k, v in stats.items()})
         return stats
+    finally:
+        conn.close()
+        lock.release()
+
+
+def reindex(config: Config) -> dict[str, int]:
+    """Rebuild Qdrant, the entity store and history.db from the valid facts in SQLite (docs/PLAN.md §5).
+
+    mem0 assigns new ids, so the mirror's ``dedupe_key`` is rewritten to the new id. No model call.
+    """
+    lock = FileLock(str(config.observe_lock_path))
+    lock.acquire(timeout=30)
+    conn = db.connect(config)
+    try:
+        rows = conn.execute(
+            "SELECT id, project_id, body, turn_id, origin FROM memories "
+            "WHERE kind = 'fact' AND invalid_at IS NULL AND dedupe_key LIKE 'mem0:%' ORDER BY id"
+        ).fetchall()
+        adapter = Mem0Adapter(config, llm="fake")  # no extraction; add_raw only embeds
+        try:
+            adapter.reindex([])  # wipe
+            count = 0
+            for row in rows:
+                facts = adapter.add_raw(
+                    [str(row["body"])],
+                    namespace_for(row["project_id"]),
+                    {"turn_id": row["turn_id"], "harness": row["origin"], "memory_id": int(row["id"])},
+                )
+                if facts:
+                    conn.execute("UPDATE memories SET dedupe_key = ? WHERE id = ?", (f"mem0:{facts[0].id}", row["id"]))
+                    count += 1
+            conn.execute("DELETE FROM observe_forget")
+        finally:
+            adapter.close()
+        return {"facts": count, "skipped": len(rows) - count}
     finally:
         conn.close()
         lock.release()

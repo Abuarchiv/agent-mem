@@ -88,18 +88,23 @@ def memory_id_for(conn: sqlite3.Connection, mem0_id: str) -> int | None:
 def apply(conn: sqlite3.Connection, adapter: Mem0Adapter, verdicts: list[Verdict]) -> dict[str, int]:
     counts = {"SUPERSEDE": 0, "DUPLICATE": 0, "KEEP": 0}
     seen_new: set[str] = set()
+    gone: set[str] = set()  # the same old fact may lose to several new facts in one bundle
     for v in verdicts:
         counts[v.verdict] += 1
         new_id = memory_id_for(conn, v.pair.new.id)
         old_id = memory_id_for(conn, v.pair.old.id)
         if v.verdict == "SUPERSEDE" and new_id is not None and old_id is not None:
             store.supersede(conn, old_id, new_id)
-            adapter.forget(v.pair.old.id)
+            if v.pair.old.id not in gone:
+                gone.add(v.pair.old.id)
+                adapter.forget(v.pair.old.id)
         elif v.verdict == "DUPLICATE" and new_id is not None and v.pair.new.id not in seen_new:
             seen_new.add(v.pair.new.id)
             conn.execute(
                 "UPDATE memories SET invalid_at = ?, superseded_by = ? WHERE id = ? AND invalid_at IS NULL",
                 (timeutil.iso(), old_id, new_id),
             )
-            adapter.forget(v.pair.new.id)
+            if v.pair.new.id not in gone:
+                gone.add(v.pair.new.id)
+                adapter.forget(v.pair.new.id)
     return counts

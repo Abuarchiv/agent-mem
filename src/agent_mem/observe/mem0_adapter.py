@@ -175,8 +175,13 @@ class Mem0Adapter:
         ]
         return facts[:k]
 
-    def forget(self, mem0_id: str) -> None:
-        self.memory.delete(mem0_id)
+    def forget(self, mem0_id: str) -> bool:
+        """Remove a fact from Qdrant, entity links and history. False if mem0 no longer has it."""
+        try:
+            self.memory.delete(mem0_id)
+        except ValueError:
+            return False
+        return True
 
     def reindex(self, facts: list[tuple[str, str, dict[str, Any]]]) -> int:
         """``facts`` are (text, namespace, metadata). Wipes the index and re-adds without a model call."""

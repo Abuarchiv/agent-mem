@@ -75,7 +75,7 @@ def test_worker_extracts_mirrors_and_finishes(observe_config: Config, project: P
     assert all(f["trust"] == "observer" and f["source"] == "agent" for f in facts)
     assert {r["state"] for r in conn.execute("SELECT state FROM observe_queue")} == {"done"}
     calls = conn.execute("SELECT provider, purpose, ok FROM observe_calls").fetchall()
-    assert [tuple(c) for c in calls][0] == ("fake", "extract", 1)
+    assert next(tuple(c) for c in calls) == ("fake", "extract", 1)
     conn.close()
 
 

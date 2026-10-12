@@ -78,6 +78,9 @@ def _main(args: list[str]) -> int:
     p.add_argument("--status", action="store_true", help="show queue, errors and today's model calls")
     p.add_argument("--retry-failed", action="store_true")
     p.add_argument("--reprocess-raw", action="store_true", help="re-queue turns that were stored without a model")
+    p.add_argument(
+        "--reindex", action="store_true", help="rebuild the mem0 index from the facts in SQLite (no model call)"
+    )
     p.add_argument("--quiet", action="store_true")
     p = sub.add_parser("index", help="run the background indexer once")
     p.add_argument("--quiet", action="store_true")
@@ -134,6 +137,11 @@ def _main(args: list[str]) -> int:
                 print(json.dumps(queue.status(conn), indent=2, ensure_ascii=False, default=str))
             finally:
                 conn.close()
+            return 0
+        if ns.reindex:
+            from .observe.worker import reindex
+
+            print(json.dumps(reindex(config), indent=2))
             return 0
         from .observe.worker import run as observe_run
 

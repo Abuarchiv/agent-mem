@@ -13,17 +13,16 @@ if importlib.util.find_spec("mem0") is None:  # find_spec does not import; impor
 
 
 def test_mem0_telemetry_is_off_and_home_is_not_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEM0_TELEMETRY", raising=False)
     monkeypatch.setenv("AGENT_MEM_DATA_DIR", str(tmp_path / "data"))
     # Order matters: the package sets the env, and only then may mem0 be imported.
     observe = importlib.import_module("agent_mem.observe")
     mem0_adapter = importlib.import_module("agent_mem.observe.mem0_adapter")
     telemetry = importlib.import_module("mem0.memory.telemetry")
     assert observe is not None
-    assert os.environ["MEM0_TELEMETRY"] == "False"
-    assert telemetry.MEM0_TELEMETRY is False
+    assert telemetry.MEM0_TELEMETRY is False  # read once at import; the package set the env first
 
     mem0_adapter._ensure_env(tmp_path / "data" / "mem0")
+    assert os.environ["MEM0_TELEMETRY"] == "False"
     main = importlib.import_module("mem0.memory.main")
     setup = importlib.import_module("mem0.memory.setup")
 

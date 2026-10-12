@@ -1,40 +1,38 @@
-# Agent Mem
+# Working in this repository
 
-Agent Mem is a Python package (`src/agent_mem`) with plugins for each supported harness (`plugins/`).
+Binding rules for every agent and contributor (docs/PLAN.md §13). The plan is the single source
+of design decisions; measurements go to its Appendix B and are never edited after the fact.
 
-## Boundary
-
-Agent Mem captures harness hooks (Claude Code, Codex, Copilot CLI, OpenCode) into one local SQLite database, learns deterministically (activation, feedback, recipes, rules, graph, consolidation) and serves memory through injected context and a stdio MCP server.
-
-- No daemon, no HTTP server, no open ports. `agent-mem view` writes a static page; it must stay offline (no network requests, CSP by script hash).
-- No generative model calls, with exactly one opt-in exception: `summarize.enabled` runs the user's own harness (`claude -p` / `codex exec`) once per finished session, with `AGENT_MEM_INTERNAL=1` so the child session is not captured.
-- Agent Mem itself only goes online for the optional embedding model download.
-
-## Safety rules
-
-- Keep runtime data, credentials, logs, backups and model caches outside Git.
-- Everything stored passes through `privacy.clean_text` (events in `capture`, memories in `store.add_memory`). Never store raw host payloads.
-- Treat host input and recalled text as untrusted. Injected context is framed as data.
-- External content (web tools, third-party MCP tools) is `tool_external`: never auto-injected, never promoted to rules or preferences.
-- Rules and preferences come only from the user's own prompts.
-- Keep packets bounded by the budgets in `config.Budgets`.
-- Hooks must never block or crash the agent: deadline, spool on failure, silent output on error.
-- The database is not encrypted at rest.
-
-## Code rules
-
-- Modules on the hook path (`hook`, `capture`, `db`, `config`, `privacy`, `signals`, `identity`, `inject`, `search`, `learn`, `store`, `spool`, `normalize/*`, `events`, `timeutil`, `logutil`) import only the standard library. Heavy imports (numpy, dateparser, fastembed, mcp) stay lazy.
-- Events have one write path: `capture.apply` (live hooks, spool replay, transcript imports); keep it idempotent (dedupe keys). Memories are written only through `store.add_memory`, which cleans title and body.
-- Schema changes go into a new numbered file in `src/agent_mem/schema/` and need a migration test.
-- Plugin manifests in `plugins/` must keep the package version (checked by tests).
-- `viewer/` is loaded by the CLI only. Its page escapes every stored string; `purge` must delete written pages.
-
-## Development
-
-```sh
-uv sync --all-extras
-uv run pytest
-uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright
-```
-
-Before a release: CI green on Linux, macOS (arm64 and x64) and Windows; manually verify one real session per harness (capture, new session recall, recipe hint, compaction, uninstall).
+- **R1 Boundary.** No daemon, no HTTP server, no open ports. The viewer writes a static page that
+  works offline. Generative model calls are made only by the `observe` worker (and the optional,
+  existing `summarize`), always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.
+  Agent Mem goes online only to download models.
+- **R2 Hook path.** `hook`, `capture`, `db`, `config`, `privacy`, `signals`, `identity`, `inject`,
+  `search`, `learn`, `store`, `spool`, `normalize/*`, `events`, `timeutil`, `logutil` import only the
+  standard library. mem0, qdrant, fastembed, numpy, dateparser and mcp are imported lazily outside the
+  hook path (`tests/test_observe.py` checks this). Hooks never block or crash the agent: deadline,
+  spool on error, silent output on error.
+- **R3 Write paths.** Events are written only through `capture.apply` (live hooks, spool replay,
+  imports), idempotent via dedupe keys. Memories only through `store.add_memory`, which cleans title
+  and body. Facts from the observer carry `dedupe_key = mem0:<id>`.
+- **R4 Privacy.** Everything stored passes `privacy.clean_text`. Raw host payloads are never stored.
+  Runtime data, credentials, logs, backups and model caches live outside git. Raw measurement data
+  from real sessions stays under `~/.cache/agent-mem/eval/`, never in `docs/evidence/runs/`.
+- **R5 Trust.** Host input and retrieved text are untrusted; injected context is framed as data.
+  External content (`tool_external`) is never injected automatically, never becomes a rule or
+  preference, and never enters an observer bundle. Rules and preferences come only from the user's
+  prompts. Packets stay within `config.Budgets`.
+- **R6 Schema.** Every schema change is a new numbered file in `src/agent_mem/schema/` with a
+  migration test.
+- **R7 Plugins.** Manifests in `plugins/` carry the package version (a test checks this).
+- **R8 Viewer.** `viewer/` is loaded only by the CLI, escapes every stored string; `purge` deletes
+  written pages.
+- **R9 Development.** `uv sync --all-extras`, `uv run pytest -m "not local"`, `uv run ruff check src
+  tests && uv run ruff format --check src tests && uv run pyright`. Tests marked `local` need the
+  observer extra and a cached embedding model; run them by hand before a release. `uv.lock` is
+  committed so pins are reproducible. Never run `uv sync` while a measurement is running against the
+  same venv. Before a release: CI green on Linux, macOS (arm64, x64) and Windows, plus one real
+  session per harness by hand (capture, recall in a new session, compaction, uninstall).
+- **R10 Git.** Local commits only, no push, no releases, until the user explicitly allows it. No AI
+  attributions in commits, PRs, tags or files. Never commit the user's own uncommitted deletions or
+  edits in the working tree; stage explicit paths.
