@@ -315,6 +315,9 @@ def run(
         worker = Worker(config, conn)
         try:
             stats = worker.run(drain=drain)
+        except BaseException as error:  # the detached process has no stderr; leave a trace (lease expires later)
+            logutil.write(config.log_dir, "observe", error=f"aborted: {type(error).__name__}: {error}"[:300])
+            raise
         finally:
             worker.close()
         logutil.write(config.log_dir, "observe", **{k: str(v) for k, v in stats.items()})

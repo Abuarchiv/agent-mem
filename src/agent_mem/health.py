@@ -295,6 +295,19 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
             warn_only=True,
         )
     )
+    from .observe import mem0_adapter
+
+    checks.append(
+        Check(
+            "entity linking",
+            mem0_adapter.spacy_model_available(),
+            "spaCy model en_core_web_sm present"
+            if mem0_adapter.spacy_model_available()
+            else "spaCy model missing; facts and search work, entity links are skipped",
+            'Optional: reinstall with `uv tool install --with en_core_web_sm@https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl "agent-mem[semantic,observer]"`.',
+            warn_only=True,
+        )
+    )
     qdrant = config.mem0_dir / "qdrant"
     if qdrant.exists():
         size_mb = sum(p.stat().st_size for p in qdrant.rglob("*") if p.is_file()) / 1_000_000

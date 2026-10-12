@@ -43,3 +43,17 @@ def test_hook_path_does_not_import_observer() -> None:
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
     assert out == "", f"hook path imported: {out}"
+
+
+def test_missing_spacy_model_disables_entity_linking_instead_of_installing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+
+    mem0_adapter = importlib.import_module("agent_mem.observe.mem0_adapter")
+    spacy_models = importlib.import_module("mem0.utils.spacy_models")
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "en_core_web_sm" else real(name))
+    monkeypatch.setattr(spacy_models, "_load_failed_full", False)
+    monkeypatch.setattr(spacy_models, "_load_failed_lemma", False)
+    mem0_adapter._disable_entity_linking_if_model_missing()
+    assert spacy_models._load_failed_full is True and spacy_models._load_failed_lemma is True
+    assert spacy_models.get_nlp_full() is None  # no download attempt

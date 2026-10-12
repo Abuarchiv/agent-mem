@@ -90,6 +90,25 @@ def _ensure_env(mem0_dir: Path) -> None:
         setattr(module, "mem0_dir", str(mem0_dir))  # noqa: B010  (module globals read at call time)
     mem0_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(mem0_dir, 0o700)
+    _disable_entity_linking_if_model_missing()
+
+
+def spacy_model_available() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("en_core_web_sm") is not None
+
+
+def _disable_entity_linking_if_model_missing() -> None:
+    """Without ``en_core_web_sm`` mem0 would run ``spacy download`` (a pip/uv install into the live
+    environment, which ends the process in a tool install). Mark the model as failed instead: entity
+    linking is skipped, facts and search are unaffected (docs/PLAN.md B.27)."""
+    if spacy_model_available():
+        return
+    from mem0.utils import spacy_models
+
+    spacy_models._load_failed_full = True
+    spacy_models._load_failed_lemma = True
 
 
 class Mem0Adapter:
