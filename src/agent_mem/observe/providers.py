@@ -7,11 +7,14 @@ with ``AGENT_MEM_INTERNAL=1`` so its own session is never captured.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 from typing import Any, ClassVar
 
@@ -65,17 +68,44 @@ def _clean_json(text: str) -> str:
 def _run(cmd: list[str], prompt: str) -> str:
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE")}
     env["AGENT_MEM_INTERNAL"] = "1"
+    group: dict[str, Any] = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if sys.platform == "win32"
+        else {"start_new_session": True}
+    )
     with tempfile.TemporaryDirectory() as cwd:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            env=env,
+            **group,
+        )
         try:
-            result = subprocess.run(
-                cmd, input=prompt, capture_output=True, text=True, cwd=cwd, env=env, timeout=TIMEOUT_S, check=False
-            )
+            stdout, stderr = process.communicate(prompt, timeout=TIMEOUT_S)
         except subprocess.TimeoutExpired as exc:
+            # The CLIs start helper processes; killing only the CLI would leave them running (and spending quota).
+            _kill_group(process)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.communicate(timeout=5)
             raise ProviderError(f"{cmd[0]}: timeout after {TIMEOUT_S}s") from exc
-    if result.returncode != 0:
+    if process.returncode != 0:
         # The tail: codex prints a banner first, the error comes last.
-        raise ProviderError(f"{cmd[0]} exit {result.returncode}: {result.stderr.strip()[-300:]}")
-    return result.stdout
+        raise ProviderError(f"{cmd[0]} exit {process.returncode}: {stderr.strip()[-300:]}")
+    return stdout
+
+
+def _kill_group(process: subprocess.Popen[str]) -> None:
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False)
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    with contextlib.suppress(OSError):
+        process.kill()
 
 
 # A plan without the model, or an older CLI without the flag (``--auto-tier``, ``-c``).

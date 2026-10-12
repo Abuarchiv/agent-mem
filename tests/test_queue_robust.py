@@ -187,3 +187,31 @@ def test_a_replayed_prompt_does_not_close_the_turn_running_now(config: Config, p
     rows = {r["prompt"]: (r["outcome"], r["answer"]) for r in conn.execute("SELECT * FROM turns")}
     assert rows["running now"] == ("ok", "done")
     conn.close()
+
+
+def test_a_model_cli_that_hangs_is_killed_with_its_helpers(tmp_path: Path, monkeypatch):
+    import os
+    import sys
+    import time
+
+    import pytest
+
+    from agent_mem.observe import providers
+
+    if sys.platform == "win32":
+        pytest.skip("process groups via taskkill; checked on POSIX")
+    pid_file = tmp_path / "helper.pid"
+    child = (
+        "import subprocess, sys, time; "
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        f"open({str(pid_file)!r}, 'w').write(str(p.pid)); time.sleep(60)"
+    )
+    monkeypatch.setattr(providers, "TIMEOUT_S", 2)
+    started = time.monotonic()
+    with pytest.raises(providers.ProviderError, match="timeout after 2s"):
+        providers._run([sys.executable, "-c", child], "prompt")
+    assert time.monotonic() - started < 15
+    helper = int(pid_file.read_text())
+    time.sleep(0.5)
+    with pytest.raises(ProcessLookupError):
+        os.kill(helper, 0)  # the helper process is gone as well
