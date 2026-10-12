@@ -254,14 +254,17 @@ def _new_turn(conn: sqlite3.Connection, session_id: str, project_id: str | None,
     return int(cursor.lastrowid or 0)
 
 
-def _close_turn(conn: sqlite3.Connection, turn_id: int, outcome: str, ts: str) -> None:
+def _close_turn(conn: sqlite3.Connection, config: Config, turn_id: int, outcome: str, ts: str) -> None:
     unresolved = conn.execute(
         "SELECT COUNT(*) FROM events WHERE turn_id = ? AND error_sig IS NOT NULL AND resolved = 0", (turn_id,)
     ).fetchone()[0]
     final = "error" if outcome == "ok" and unresolved else outcome
     conn.execute("UPDATE turns SET outcome = ?, ended_at = ? WHERE id = ?", (final, ts, turn_id))
     store.index_turn(conn, turn_id)
-    # Same transaction as the close: the observer worker picks it up later (docs/PLAN.md §4.2).
+    # Same transaction as the close: the observer worker picks it up later (docs/PLAN.md §4.2). With the observer
+    # off nothing is queued: switched on again, it would send turns captured while model calls were off.
+    if not config.observe.enabled:
+        return
     with contextlib.suppress(sqlite3.OperationalError):  # a database without the observer tables still captures
         conn.execute(
             "INSERT OR IGNORE INTO observe_queue(turn_id, state, next_try, updated_at) VALUES (?, 'pending', ?, ?)",
@@ -351,7 +354,7 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
     previous = _open_turn(conn, session_id)
     # A prompt replayed from the spool after a later one must not close that later turn, which is still running.
     if previous is not None and previous["started_at"] <= event.ts:
-        _close_turn(conn, int(previous["id"]), "unknown", event.ts)
+        _close_turn(conn, config, int(previous["id"]), "unknown", event.ts)
     last = conn.execute(
         "SELECT id, prompt, commands_json FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)
     ).fetchone()
@@ -691,7 +694,7 @@ def _on_stop(conn, config, event, project, project_id, session_id, event_id, pay
         existing = [o for o in cited if _owner_exists(conn, o)]
         learn.record_access(conn, existing, "cited", session_id)
     if turn["outcome"] == "open":
-        _close_turn(conn, turn_id, "ok", event.ts)
+        _close_turn(conn, config, turn_id, "ok", event.ts)
     else:
         store.index_turn(conn, turn_id)
     response.wants_indexer = True
@@ -722,7 +725,7 @@ def _on_compact(conn, config, event, project, project_id, session_id, event_id, 
 def _on_session_end(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
     turn = _open_turn(conn, session_id)
     if turn is not None:
-        _close_turn(conn, int(turn["id"]), "ok" if turn["answer"] else "unknown", event.ts)
+        _close_turn(conn, config, int(turn["id"]), "ok" if turn["answer"] else "unknown", event.ts)
     conn.execute("UPDATE sessions SET ended_at = ? WHERE id = ?", (event.ts, session_id))
     response.wants_indexer = True
 
@@ -736,6 +739,6 @@ def close_stale_turns(conn: sqlite3.Connection, config: Config) -> int:
     ).fetchall():
         if timeutil.hours_between(turn["last_event_at"]) >= cutoff_hours:
             with db.transaction(conn):
-                _close_turn(conn, int(turn["id"]), "unknown", turn["last_event_at"])
+                _close_turn(conn, config, int(turn["id"]), "unknown", turn["last_event_at"])
             closed += 1
     return closed

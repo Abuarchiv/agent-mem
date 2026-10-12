@@ -321,6 +321,8 @@ class Worker:
     def run(self, *, drain: bool = True) -> dict[str, int]:
         self._reindex_if_embedder_changed()
         self.drain_forget()
+        if not self.config.observe.enabled:  # "stops all model calls" (README); deletions above still reach mem0
+            return self.stats
         idle_since = time.monotonic()
         while True:
             if self.step():

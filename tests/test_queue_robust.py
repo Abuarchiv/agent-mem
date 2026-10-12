@@ -457,3 +457,16 @@ def test_forgotten_and_purged_text_leaves_mem0_history(config: Config, project: 
     assert history.connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
     assert db.get_meta(conn, store.SCRUB_MESSAGES) is None
     conn.close()
+
+
+def test_with_the_observer_off_no_turn_waits_to_be_sent_later(config: Config, project: Path, monkeypatch):
+    from agent_mem.observe import worker
+
+    config.observe.enabled = False
+    _turn(config, project, "s1", "captured while model calls are off")
+    conn = db.connect(config)
+    assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 1  # still captured and searchable
+    assert conn.execute("SELECT COUNT(*) FROM observe_queue").fetchone()[0] == 0
+    monkeypatch.setattr(worker.Worker, "step", lambda self: (_ for _ in ()).throw(AssertionError("model call")))
+    worker.Worker(config, conn).run(drain=False)
+    conn.close()
