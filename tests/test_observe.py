@@ -81,3 +81,20 @@ def test_migration_005_adds_concept_tables_to_a_v4_database(config) -> None:
     conn.execute("DELETE FROM memories WHERE id = ?", (memory,))
     assert conn.execute("SELECT COUNT(*) FROM concept_links").fetchone()[0] == 0  # a purged memory takes its links
     conn.close()
+
+
+def test_concept_variants_are_one_concept_and_a_new_key_relinks(conn) -> None:
+    from agent_mem.core import db
+    from agent_mem.memory import store
+    from agent_mem.observe import concepts
+
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
+    for body in ("agent_mem stores facts.", "Agent-Mem runs hooks."):
+        store.add_memory(conn, project_id="p", kind="fact", title="", body=body, source="agent", trust="user")
+    words = {"agent_mem stores facts.": "agent_mem", "Agent-Mem runs hooks.": "Agent-Mem"}
+    concepts.link_new(conn, lambda text: [("IDENTIFIER", words[text])])
+    rows = conn.execute("SELECT key, (SELECT COUNT(*) FROM concept_links) FROM concepts").fetchall()
+    assert [tuple(row) for row in rows] == [("agent-mem", 2)]
+    db.set_meta(conn, "concepts.version", "old")
+    assert concepts.link_new(conn, lambda text: [("IDENTIFIER", words[text])]) == 2  # relinked from scratch
+    assert conn.execute("SELECT COUNT(*) FROM concept_links").fetchone()[0] == 2

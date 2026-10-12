@@ -16,6 +16,8 @@ from agent_mem.memory.search import STOPWORDS
 
 BATCH = 200
 _META = "concepts.last_memory_id"
+# Raised when the key changes; the next run then links every memory again (a few seconds for a few hundred).
+VERSION = "2"
 # A concept needs a letter and three characters; numbers, ports and single symbols connect nothing.
 _USEFUL = re.compile(r"(?=.*[^\W\d_]).{3,}")
 
@@ -31,8 +33,10 @@ def specific(surface: str, kind: str, names: set[str]) -> bool:
 
 
 def normalize(text: str) -> str:
-    """mem0's own normalisation (``Memory._normalize_entity_text``), plus code quotes removed."""
-    return " ".join(text.strip().strip("`'\"").lower().split())
+    """mem0's own normalisation (``Memory._normalize_entity_text``), plus code quotes removed; "agent_mem",
+    "agent-mem" and "Agent Mem" are one concept."""
+    key = " ".join(text.strip().strip("`'\"").lower().split())
+    return key if "/" in key or "." in key else re.sub(r"[\s_-]+", "-", key)
 
 
 def link_new(
@@ -57,6 +61,12 @@ def link_new(
         base = lambda text: " ".join(token.lemma_ for token in nlp(text))  # noqa: E731
         names = lambda text: {token.text.lower() for token in nlp(text) if token.pos_ == "PROPN"}  # noqa: E731
 
+    if db.get_meta(conn, "concepts.version") != VERSION:
+        with db.transaction(conn):
+            conn.execute("DELETE FROM concept_links")
+            conn.execute("DELETE FROM concepts")
+            db.set_meta(conn, _META, "0")
+            db.set_meta(conn, "concepts.version", VERSION)
     last = int(db.get_meta(conn, _META) or 0)
     rows = conn.execute(
         "SELECT id, project_id, title, body FROM memories WHERE id > ? ORDER BY id LIMIT ?", (last, BATCH)

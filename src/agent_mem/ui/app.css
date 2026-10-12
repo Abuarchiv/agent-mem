@@ -271,6 +271,7 @@ td.num { text-align: right; white-space: nowrap; }
 .inspector h2 { font-size: 22px; overflow-wrap: anywhere; }
 .inspector .stat span { color: rgba(26, 24, 20, .75); }
 .inspector ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.inspector .tag { border: 1.5px solid #1A1814; } /* a yellow kind tag on the yellow panel */
 .inspector li { display: flex; align-items: center; gap: 8px; }
 .inspector li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; font-size: 13px; }
