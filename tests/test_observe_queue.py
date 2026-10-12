@@ -55,7 +55,8 @@ def test_lease_bundle_groups_same_session_and_backs_off(config: Config, project:
         "SELECT state, attempts, next_try, last_error FROM observe_queue WHERE turn_id = ?", (turn_ids[0],)
     ).fetchone()
     assert row["state"] == "pending" and row["attempts"] == 1 and row["next_try"] > row["last_error"][:0]
-    assert queue.pending_count(conn) == 0  # backed off into the future
+    assert queue.status(conn)["queue"]["pending"] == 2  # both failed turns wait for their backoff
+    assert not queue.lease_bundle(conn, max_turns=5, lease_seconds=60)  # nothing due yet
     for _ in range(queue.MAX_ATTEMPTS):
         conn.execute(
             "UPDATE observe_queue SET next_try = '2000-01-01T00:00:00Z' WHERE turn_id IN (?, ?)", tuple(turn_ids)

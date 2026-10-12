@@ -11,14 +11,6 @@ BACKOFF = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=30), ti
 MAX_ATTEMPTS = len(BACKOFF)
 
 
-def enqueue(conn: sqlite3.Connection, turn_id: int, ts: str | None = None) -> None:
-    now = ts or timeutil.iso()
-    conn.execute(
-        "INSERT OR IGNORE INTO observe_queue(turn_id, state, next_try, updated_at) VALUES (?, 'pending', ?, ?)",
-        (turn_id, now, now),
-    )
-
-
 def expire_leases(conn: sqlite3.Connection) -> int:
     now = timeutil.iso()
     cursor = conn.execute(
@@ -97,14 +89,6 @@ def reprocess_raw(conn: sqlite3.Connection) -> int:
         (now, now),
     )
     return cursor.rowcount
-
-
-def pending_count(conn: sqlite3.Connection) -> int:
-    return int(
-        conn.execute(
-            "SELECT COUNT(*) FROM observe_queue WHERE state = 'pending' AND next_try <= ?", (timeutil.iso(),)
-        ).fetchone()[0]
-    )
 
 
 def status(conn: sqlite3.Connection) -> dict[str, object]:
