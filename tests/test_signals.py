@@ -73,6 +73,11 @@ def test_corrections_and_preferences():
     assert ("npm", "pnpm") in signals.preference_pairs("nutze pnpm statt npm")
     assert ("npm", "pnpm") in signals.preference_pairs("use pnpm instead of npm")
     assert signals.preference_pairs("Use pnpm instead of npm.") == [("npm", "pnpm")]  # sentence end
+    # The observer's rule form; prose about paths or "keine lokalen LLMs" is not a command rule.
+    assert signals.canonical_rule("Nutze `uv` statt `pip`, weil schneller.") == ("pip", "uv")
+    assert signals.canonical_rule("Use ruff instead of black.") == ("black", "ruff")
+    assert signals.canonical_rule("Nutze absolute Pfade wie `/x` statt relativer Pfade") is None
+    assert signals.canonical_rule("Nutze keine lokalen LLMs") is None
     assert ("yarn", "bun") in signals.preference_pairs("nicht yarn, sondern bun")
     assert ("requests", None) in signals.preference_pairs("never use requests here")
 

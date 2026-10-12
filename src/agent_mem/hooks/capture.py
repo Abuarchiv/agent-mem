@@ -333,7 +333,9 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
     if corrective:
         _raise_importance(conn, turn_id, signals.IMPORTANCE["correction"])
         for avoid, prefer in signals.preference_pairs(prompt):
-            store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
+            # A bare "nicht X" is too loose to become a rule when the observer can write the rule itself.
+            if prefer is not None or not observed:
+                store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
     for sentence in [] if observed else signals.decision_sentences(prompt):
         store.add_memory(
             conn,

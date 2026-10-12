@@ -5,7 +5,7 @@ Reads the newest Claude Code transcripts on this machine, builds bundles like ob
 runs mem0 extraction with Haiku under the subscription login. Output: JSON with the facts per turn
 for manual garbage judgement. Nothing leaves the machine except through the harness binary.
 
-Usage: .venv/bin/python docs/evidence/spikes/garbage_rate_real_turns.py OUT_DIR [N_TURNS]
+Usage: .venv/bin/python docs/evidence/spikes/garbage_rate_real_turns.py OUT_DIR [N_TURNS] [default,coding]
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from agent_mem.config import Config
+from agent_mem.core.config import Config
 from agent_mem.observe.mem0_adapter import Mem0Adapter
 
 CAP_CHARS = 6000 * 4
@@ -77,7 +77,9 @@ def main() -> None:
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     turns = turns_from_transcripts(n)
     coding = (Path(__file__).resolve().parents[3] / "src/agent_mem/observe/coding_instructions.md").read_text()
-    for name, instr in (("default", None), ("coding", coding)):
+    prompts = {"default": None, "coding": coding}
+    wanted = sys.argv[3].split(",") if len(sys.argv) > 3 else list(prompts)
+    for name, instr in ((name, prompts[name]) for name in wanted):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = Mem0Adapter(Config(data_dir=Path(tmp) / "data"), llm="claude", custom_instructions=instr)
             rows = []

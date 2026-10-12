@@ -14,11 +14,16 @@ Record:
 Do not record:
 - Generic programming knowledge the developer asked about (what a tuple is, how to reverse a string).
 - Routine actions without lasting information (renamed a file, ran the tests, committed).
+- States that will change soon: test counts, commit hashes, what is committed or pushed, current
+  scores or measurements, progress of a plan, next steps, what is still open. Keep the lasting
+  decision or rule behind it instead ("tests run with `uv run pytest`", not "135 tests green").
+- The same memory twice: if the input repeats something, record it once.
 - File contents, code snippets, stack traces or tool output. Name the file or command instead.
 - Secrets, tokens, passwords or keys, even if they appear in the text.
 
 Start every memory with exactly one tag: [decision] for a choice and its reason, [rule] for how the
-agent must or must not work (corrections, preferences, "never force-push to main"), [dead_end] for
+agent must or must not work in future sessions too (corrections, preferences, "never force-push to
+main"; not a one-off instruction for the current task), [dead_end] for
 an approach that failed and what worked instead, [fact] for everything else. When a rule replaces
 one tool or command with another, write it as "Use X instead of Y" (German: "Nutze X statt Y"),
 with the exact names, even if the developer said it differently ("stop using npm, we are on pnpm").

@@ -200,4 +200,6 @@ def test_observer_writes_corrections_the_hook_only_marks_them(config: Config, pr
     _turn(config, project, "s1", "nein, immer noch falsch: nutze uv statt pip. Wir verwenden ab jetzt ruff.", "ok")
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind IN ('correction', 'decision')").fetchone()[0] == 1
     assert {r[0] for r in conn.execute("SELECT pattern FROM rules")} == {"npm", "pip"}
+    _turn(config, project, "s1", "nein, keine lokalen Modelle", "ok")  # bare "keine X" stays with the observer
+    assert {r[0] for r in conn.execute("SELECT pattern FROM rules")} == {"npm", "pip"}
     conn.close()

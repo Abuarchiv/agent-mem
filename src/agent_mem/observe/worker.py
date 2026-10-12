@@ -118,10 +118,10 @@ def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: 
         )
         if memory_id:
             ids.append(memory_id)
-        if kind == "preference":
+        pair = signals.canonical_rule(text) if kind == "preference" else None
+        if pair is not None:
             # "Use pnpm instead of npm" becomes the same rule a typed "pnpm statt npm" creates.
-            for avoid, prefer in signals.preference_pairs(text):
-                store.learn_rule(conn, config, b.project_id, avoid, prefer, b.turn_ids[-1])
+            store.learn_rule(conn, config, b.project_id, pair[0], pair[1], b.turn_ids[-1])
     return ids
 
 
