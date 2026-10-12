@@ -1,7 +1,8 @@
 """``agent-mem serve``: the viewer at http://localhost:<port>, always on.
 
-Read-only and local. It binds the loopback interface only, answers GET for one page and builds that page fresh from
-the database on every request, so an open tab stays current by reloading itself. The login item and the SessionStart
+Read-only and local. It binds the loopback interface only and answers GET for one page, rebuilt whenever the database
+changed, so an open tab stays current by reloading itself. After an upgrade it exits on the next request and is
+restarted with the new code. The login item and the SessionStart
 hook start it detached when nothing answers on the port. Loaded by the CLI only, never on the hook path.
 """
 
@@ -15,6 +16,8 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 import urllib.parse
 import urllib.request
 from http import HTTPStatus
@@ -63,6 +66,9 @@ class _Server(http.server.ThreadingHTTPServer):
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        self.code = _code_stamp()
+        self.restart = False  # set when the installed code changed: serve() then exits non-zero and is restarted
+        self.cache: dict[str | None, tuple[tuple[int, ...], float, bytes]] = {}
         port = config.viewer.port
         self.hosts = {f"{HOST}:{port}", f"localhost:{port}"}
         super().__init__((HOST, port), _Handler)
@@ -103,8 +109,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         project = (urllib.parse.parse_qs(parts.query).get("project") or [""])[0]
         try:
-            body = self._page(project or None).encode("utf-8")
-        except (sqlite3.Error, OSError, db.SchemaTooNewError, db.MigrationInProgressError) as error:
+            if _code_stamp() != self.server.code:
+                raise _Outdated
+            body = self._cached(project or None)
+        except (_Outdated, db.SchemaTooNewError):
+            # This process still runs the code from before an upgrade (and a newer one may have migrated the
+            # database). Answer, then exit: launchd or the next session start runs the new code.
+            self._send(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                _message_page("agent-mem was updated", "The viewer restarts with the new version; this page reloads."),
+                {"Refresh": "3"},
+            )
+            self.server.restart = True
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+        except (sqlite3.Error, OSError, db.MigrationInProgressError) as error:
             self._send(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 _message_page(
@@ -115,6 +134,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             )
             return
         self._send(HTTPStatus.OK, body)
+
+    def _cached(self, project_id: str | None) -> bytes:
+        """The page is rebuilt only when the database changed, at most once a minute otherwise: an open tab reloads
+        every few seconds, and a full snapshot costs a third of a second on a 13 MB database."""
+        stamp = _db_stamp(self.server.config)
+        hit = self.server.cache.get(project_id)
+        if hit is not None and hit[0] == stamp and time.monotonic() - hit[1] < 60:
+            return hit[2]
+        body = self._page(project_id).encode("utf-8")
+        self.server.cache[project_id] = (stamp, time.monotonic(), body)
+        return body
 
     def _page(self, project_id: str | None) -> str:
         from agent_mem import ui
@@ -127,6 +157,36 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         finally:
             conn.close()
         return ui.render({**snapshot, "refresh": config.viewer.refresh_seconds, "served": True})
+
+
+class _Outdated(Exception):
+    pass
+
+
+def _code_stamp() -> tuple[int, ...]:
+    """Modification times of the installed package's key files; an upgrade rewrites them."""
+    package = Path(__file__).resolve().parents[1]
+    files = [package / "__init__.py", package / "ui" / "app.js", package / "ui" / "server.py"]
+    files += sorted((package / "core" / "schema").glob("*.sql"))
+    stamps = []
+    for path in files:
+        try:
+            stamps.append(path.stat().st_mtime_ns)
+        except OSError:
+            stamps.append(0)
+    return tuple(stamps)
+
+
+def _db_stamp(config: Config) -> tuple[int, ...]:
+    """Changes whenever anything is written: the WAL file grows or a checkpoint rewrites the database."""
+    stamps = []
+    for path in (config.db_path, Path(f"{config.db_path}-wal")):
+        try:
+            info = path.stat()
+            stamps += [info.st_mtime_ns, info.st_size]
+        except OSError:
+            stamps += [0, 0]
+    return tuple(stamps)
 
 
 def serve(config: Config, *, quiet: bool = False) -> int:
@@ -151,7 +211,8 @@ def serve(config: Config, *, quiet: bool = False) -> int:
         pass
     finally:
         server.server_close()
-    return 0
+    # EX_TEMPFAIL: launchd and systemd restart a failed run (KeepAlive SuccessfulExit false, Restart=on-failure).
+    return 75 if server.restart else 0
 
 
 # Autostart at login, so the viewer is reachable after a restart without starting an agent first.

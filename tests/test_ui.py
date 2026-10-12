@@ -167,6 +167,7 @@ def test_served_viewer_builds_a_fresh_page_on_localhost(config: Config, driver: 
             raise sqlite3.DatabaseError("file is not a database")
 
         monkeypatch.setattr(ui, "build_snapshot", broken)
+        httpd.cache.clear()  # otherwise the unchanged database is served from the cache
         status, _, page = _get(config, "/")
         assert status == 503 and "agent-mem doctor" in page
     finally:
@@ -223,3 +224,33 @@ def test_is_within_compares_whole_path_segments(tmp_path: Path):
     assert identity.is_within(root, root)
     assert identity.is_within(str(root / "src"), root)
     assert not identity.is_within(str(tmp_path / "proj2"), root)
+
+
+def test_viewer_rebuilds_the_page_only_after_a_write_and_restarts_after_an_upgrade(
+    config: Config, driver: Driver, monkeypatch
+):
+    from agent_mem.ui import server
+
+    _teach(driver)
+    httpd = _serve(config)
+    built = []
+    real = server._Handler._page
+
+    def counting(self, project_id):
+        built.append(project_id)
+        return real(self, project_id)
+
+    monkeypatch.setattr(server._Handler, "_page", counting)
+    try:
+        assert _get(config, "/")[0] == 200 and _get(config, "/")[0] == 200
+        assert len(built) == 1  # nothing written in between: served from the cache
+        driver.prompt("s1", "A write between two reloads")
+        assert "A write between two reloads" in _get(config, "/")[2] and len(built) == 2
+
+        monkeypatch.setattr(server, "_code_stamp", lambda: (1,))  # the package was reinstalled
+        status, headers, page = _get(config, "/")
+        assert status == 503 and "was updated" in page and headers["Refresh"] == "3"
+        assert httpd.restart is True
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
