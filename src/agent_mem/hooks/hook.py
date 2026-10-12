@@ -306,7 +306,7 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
         if event.source == "compact":
             heading += " · after compaction"
         context = worker.response.context if worker.response is not None else None
-        viewer = f"http://127.0.0.1:{config.viewer.port}/" if config.viewer.enabled else None
+        viewer = f"http://localhost:{config.viewer.port}/" if config.viewer.enabled else None
         notices = [failure] if failure else worker.problems
         return inject.terminal(context or "", heading, _color(), facts=worker.facts, notices=notices, viewer=viewer)
     if event.kind == "session_end" and worker.summary:

@@ -4,7 +4,7 @@ Binding rules for every agent and contributor (docs/PLAN.md §13). The plan is t
 of design decisions; measurements go to its Appendix B and are never edited after the fact.
 
 - **R1 Boundary.** No network service except the read-only viewer (`agent-mem serve`): loopback
-  only, GET only, key-protected (SECURITY.md). Nothing else listens on a port. Generative model calls are made only by the `observe` worker, always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.
+  only, GET only, foreign Host headers rejected (SECURITY.md). Nothing else listens on a port. Generative model calls are made only by the `observe` worker, always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.
   Agent Mem goes online only to download models.
 - **R2 Hook path.** `core/*`, `hooks/*` and the `memory` modules they use (`store`, `search`,
   `learn`) import only the standard library. mem0, qdrant, fastembed, numpy, dateparser and mcp are imported lazily outside the

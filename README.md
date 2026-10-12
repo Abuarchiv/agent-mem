@@ -2,7 +2,7 @@
 
 One local memory for **Claude Code, Codex, GitHub Copilot CLI and OpenCode**.
 
-Agent Mem records what your coding agents do through their native hooks, turns it into facts in the background, and gives every agent the relevant part of that history at the right moment. No telemetry, no cloud, no API key: one SQLite file plus a small vector index on your machine, and a read-only viewer on `127.0.0.1` only. Model calls for fact extraction go through the harness CLI you are already logged into.
+Agent Mem records what your coding agents do through their native hooks, turns it into facts in the background, and gives every agent the relevant part of that history at the right moment. No telemetry, no cloud, no API key: one SQLite file plus a small vector index on your machine, and a read-only viewer at `http://localhost:37778`. Model calls for fact extraction go through the harness CLI you are already logged into.
 
 ## Install
 
@@ -90,9 +90,9 @@ MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `
 
 ## Viewer
 
-`agent-mem view` opens the viewer at `http://127.0.0.1:37778/`. It runs in the background, starts with every agent session, and `setup --write` also registers it as a login item (macOS LaunchAgent, systemd user service, Windows Startup folder), so it is reachable after a restart. The page is built fresh on every reload; an open tab reloads itself every ten seconds.
+Open **http://localhost:37778** (or run `agent-mem view`). It runs in the background, starts with every agent session, and `setup --write` also registers it as a login item (macOS LaunchAgent, systemd user service, Windows Startup folder), so it is reachable after a restart. The page is built fresh on every reload; an open tab reloads itself every ten seconds.
 
-It listens on the loopback interface only. The first visit needs a key so other users of the same machine cannot read your memory: `agent-mem view` opens the address with the key, and the browser keeps it as a cookie. `agent-mem view --output FILE` writes an offline snapshot instead. Change the port with `"viewer": {"port": 37778}`, turn it off with `"viewer": {"enabled": false}`, remove the login item with `agent-mem serve --no-autostart`.
+It listens on this machine only (no login; turn it off on shared machines). `agent-mem view --output FILE` writes an offline snapshot instead. Change the port with `"viewer": {"port": 37778}`, turn it off with `"viewer": {"enabled": false}`, remove the login item with `agent-mem serve --no-autostart`.
 
 ## When something is missing
 

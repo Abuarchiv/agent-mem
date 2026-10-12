@@ -150,6 +150,8 @@ class Worker:
                 self.adapter  # noqa: B018  (builds mem0 once; without an embedder there is only the raw stage)
             except RuntimeError as error:
                 logutil.write(self.config.log_dir, "observe", error=f"adapter: {error}"[:200])
+                with contextlib.suppress(sqlite3.Error):
+                    db.record_health(self.conn, "observer", f"facts unavailable, turns kept raw: {error}")
                 chain = []
         if _calls_today(self.conn) >= self.config.observe.daily_limit:
             chain = [name for name in chain if name == "ollama"]
@@ -336,9 +338,14 @@ def run(
             stats = worker.run(drain=drain)
         except BaseException as error:  # the detached process has no stderr; leave a trace (lease expires later)
             logutil.write(config.log_dir, "observe", error=f"aborted: {type(error).__name__}: {error}"[:300])
+            with contextlib.suppress(sqlite3.Error):
+                db.record_health(conn, "observer", f"worker aborted: {type(error).__name__}: {error}")
             raise
         finally:
             worker.close()
+        if stats.get("bundles"):
+            with contextlib.suppress(sqlite3.Error):
+                db.record_health(conn, "observer")
         logutil.write(config.log_dir, "observe", **{k: str(v) for k, v in stats.items()})
         return stats
     finally:

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
+import threading
+from collections.abc import Callable
 from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
@@ -33,11 +36,32 @@ class State:
         return self.project.id if self.project else None
 
 
+def _serialized(lock: threading.Lock, tool: Callable[..., str]) -> Callable[..., str]:
+    """The server runs tool calls in parallel threads, but they share one SQLite connection: one at a time.
+    A database failure reaches the agent as a sentence it can act on, not as a bare tool error."""
+
+    @functools.wraps(tool)
+    def run(*args: object, **kwargs: object) -> str:
+        with lock:
+            try:
+                return tool(*args, **kwargs)
+            except sqlite3.OperationalError as error:
+                return f"agent-mem: memory is busy or unavailable ({error}); try again, or ask the user to run `agent-mem doctor`."
+            except sqlite3.DatabaseError as error:
+                return f"agent-mem: the memory database is damaged ({error}); ask the user to run `agent-mem doctor`."
+
+    return run
+
+
 def build(config: Config | None = None) -> MCPServer:
     state = State(config or load())
     server = MCPServer("agent-mem", instructions=INSTRUCTIONS, version=__version__, log_level="WARNING")
+    lock = threading.Lock()
 
-    @server.tool()
+    def tool(function: Callable[..., str]) -> Callable[..., str]:
+        return server.tool()(_serialized(lock, function))
+
+    @tool
     def mem_search(query: str, limit: int = 8, all_projects: bool = False) -> str:
         """Search memory. Returns ids with one-line titles; says so when nothing matches confidently.
         Time words like 'gestern' or 'last week' rank that time first."""
@@ -50,18 +74,18 @@ def build(config: Config | None = None) -> MCPServer:
         views.prime_anchor_states(state.conn, hits)
         return views.search_lines(sure, weak=hits[:3])
 
-    @server.tool()
+    @tool
     def mem_timeline(id: str, before: int = 3, after: int = 3) -> str:
         """Show what happened before and after a turn (T..) or memory (M..) in the same session."""
         return views.timeline(state.conn, id, min(before, 10), min(after, 10))
 
-    @server.tool()
+    @tool
     def mem_get(ids: list[str]) -> str:
         """Full details for up to 10 ids (T.. turns, M.. memories), including provenance and file staleness."""
         with db.transaction(state.conn):
             return views.details(state.conn, ids)
 
-    @server.tool()
+    @tool
     def mem_remember(
         text: str,
         kind: Literal["fact", "decision", "dead_end", "lesson"] = "fact",
@@ -111,7 +135,7 @@ def build(config: Config | None = None) -> MCPServer:
                 store.supersede(state.conn, old_id, memory_id)
         return f"Stored M{memory_id}."
 
-    @server.tool()
+    @tool
     def mem_forget(id: str) -> str:
         """Permanently delete a turn (T..) or memory (M..), including its search keys and vectors."""
         owner = store.parse_owner(id)

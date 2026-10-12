@@ -136,6 +136,24 @@ def test_worker_without_embedder_stores_raw(config: Config, monkeypatch) -> None
         turn_ids=[1], session_id="s", project_id=None, harness="claude", messages=[{"role": "user", "content": "x"}]
     )
     assert w.process(b) == "raw"
+    # The fallback is no longer silent: the next session start tells the user.
+    assert any("facts unavailable" in line for line in hook.problems(conn))
+    conn.close()
+
+
+def test_aborted_worker_is_reported_at_session_start(config: Config, monkeypatch) -> None:
+    import pytest
+
+    from agent_mem.observe import worker
+
+    def crash(self, drain=True):
+        raise ValueError("bad state")
+
+    monkeypatch.setattr(worker.Worker, "run", crash)
+    with pytest.raises(ValueError):
+        worker.run(config)
+    conn = db.connect(config)
+    assert any("worker aborted: ValueError: bad state" in line for line in hook.problems(conn))
     conn.close()
 
 

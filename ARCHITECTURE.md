@@ -22,7 +22,7 @@ agent-mem index    detached, one at a time: spool replay → stale turns → emb
                    → consolidation (daily) → retention → backups
 
 agent-mem mcp      one per agent session (stdio): mem_search, mem_timeline, mem_get, mem_remember, mem_forget
-agent-mem serve    detached, one per machine: read-only viewer on 127.0.0.1, key-protected, page built
+agent-mem serve    detached, one per machine: read-only viewer on localhost:37778, page built
                    per request; started by the SessionStart hook, `agent-mem view` and the login item
 
 SQLite (WAL)       the truth: sessions, turns, events, memories (facts), queue, calls

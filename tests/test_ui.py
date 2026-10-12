@@ -134,39 +134,33 @@ def _get(config: Config, path: str, headers: dict[str, str] | None = None):
     return response.status, dict(response.getheaders()), response.read().decode("utf-8")
 
 
-def test_served_viewer_needs_the_key_and_builds_a_fresh_page(config: Config, driver: Driver, monkeypatch):
+def test_served_viewer_builds_a_fresh_page_on_localhost(config: Config, driver: Driver, monkeypatch):
     from agent_mem.ui import server
 
     _teach(driver)
     httpd = _serve(config)
     try:
-        assert server.running(config)
-        assert _get(config, "/")[0] == 401
-        assert _get(config, "/?key=wrong")[0] == 403
+        assert server.running(config) and server.url(config) == f"http://localhost:{config.viewer.port}/"
         assert _get(config, "/", {"Host": "evil.example:80"})[0] == 403  # DNS rebinding
-        status, headers, _ = _get(config, "/?key=" + server.key(config))
-        assert status == 303 and headers["Location"] == "/" and "HttpOnly" in headers["Set-Cookie"]
-        cookie = {"Cookie": headers["Set-Cookie"].split(";")[0]}
-        status, headers, page = _get(config, "/", cookie)
+        assert _get(config, "/", {"Host": f"localhost:{config.viewer.port}"})[0] == 200
+        status, headers, page = _get(config, "/")
         assert status == 200 and headers["Cache-Control"] == "no-store"
         payload = _payload(page)
         assert payload["served"] is True and payload["refresh"] == config.viewer.refresh_seconds
         driver.prompt("s1", "Asked after the page was first served")
         assert any(
-            t["prompt"] == "Asked after the page was first served"
-            for t in _payload(_get(config, "/", cookie)[2])["turns"]
+            t["prompt"] == "Asked after the page was first served" for t in _payload(_get(config, "/")[2])["turns"]
         )
 
         def broken(*args, **kwargs):
             raise sqlite3.DatabaseError("file is not a database")
 
         monkeypatch.setattr(ui, "build_snapshot", broken)
-        status, _, page = _get(config, "/", cookie)
+        status, _, page = _get(config, "/")
         assert status == 503 and "agent-mem doctor" in page
     finally:
         httpd.shutdown()
         httpd.server_close()
-    assert stat.S_IMODE((config.data_dir / server.KEY_FILE).stat().st_mode) == 0o600 or sys.platform == "win32"
 
 
 def test_second_viewer_on_the_same_port_exits_cleanly(config: Config, capsys):

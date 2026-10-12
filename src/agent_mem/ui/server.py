@@ -1,21 +1,16 @@
-"""``agent-mem serve``: the viewer at http://127.0.0.1:<port>, always on.
+"""``agent-mem serve``: the viewer at http://localhost:<port>, always on.
 
 Read-only and local. It binds the loopback interface only, answers GET for one page and builds that page fresh from
-the database on every request, so an open tab stays current by reloading itself. A random key in the private data
-directory keeps other users of the same machine out: ``agent-mem view`` opens the URL with the key once, the browser
-keeps it as a cookie. The SessionStart hook starts the server detached when nothing answers on the port. Loaded by
-the CLI only, never on the hook path.
+the database on every request, so an open tab stays current by reloading itself. The login item and the SessionStart
+hook start it detached when nothing answers on the port. Loaded by the CLI only, never on the hook path.
 """
 
 from __future__ import annotations
 
-import contextlib
-import hmac
 import html
 import http.server
 import os
 import plistlib
-import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -23,7 +18,6 @@ import sys
 import urllib.parse
 import urllib.request
 from http import HTTPStatus
-from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 
 from agent_mem import __version__
@@ -31,8 +25,6 @@ from agent_mem.core import db
 from agent_mem.core.config import Config, env_flag
 
 HOST = "127.0.0.1"
-COOKIE = "agent_mem_key"
-KEY_FILE = "viewer.key"
 HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
@@ -43,36 +35,13 @@ HEADERS = {
 
 
 def url(config: Config) -> str:
-    return f"http://{HOST}:{config.viewer.port}/"
-
-
-def key(config: Config) -> str:
-    """The access key, created on first use. Readable only by the user, like the database."""
-    path = config.data_dir / KEY_FILE
-    with contextlib.suppress(FileNotFoundError):
-        value = path.read_text(encoding="ascii").strip()
-        if value:
-            return value
-    db.ensure_private_dir(config.data_dir)
-    value = secrets.token_urlsafe(24)
-    try:
-        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:  # another process created it a moment ago
-        return path.read_text(encoding="ascii").strip()
-    with os.fdopen(handle, "w", encoding="ascii") as file:
-        file.write(value)
-    return value
-
-
-def open_url(config: Config, project_id: str | None = None) -> str:
-    query = {"key": key(config), **({"project": project_id} if project_id else {})}
-    return url(config) + "?" + urllib.parse.urlencode(query)
+    return f"http://localhost:{config.viewer.port}/"
 
 
 def running(config: Config, timeout: float = 1.0) -> bool:
     """True when an agent-mem viewer answers on the configured port."""
     try:
-        with urllib.request.urlopen(url(config) + "health", timeout=timeout) as response:
+        with urllib.request.urlopen(f"http://{HOST}:{config.viewer.port}/health", timeout=timeout) as response:
             return response.read(16).startswith(b"agent-mem")
     except (OSError, ValueError):
         return False
@@ -94,7 +63,6 @@ class _Server(http.server.ThreadingHTTPServer):
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.key = key(config)
         port = config.viewer.port
         self.hosts = {f"{HOST}:{port}", f"localhost:{port}"}
         super().__init__((HOST, port), _Handler)
@@ -133,31 +101,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND, _message_page("Not found", f"The viewer lives at {url(self.server.config)}.")
             )
             return
-        query = urllib.parse.parse_qs(parts.query)
-        project = (query.get("project") or [""])[0]
-        given = (query.get("key") or [""])[0]
-        if given:
-            if not hmac.compare_digest(given, self.server.key):
-                self._send(HTTPStatus.FORBIDDEN, _message_page("Wrong key", "Run `agent-mem view` to open the viewer."))
-                return
-            # Move the key into a cookie so it leaves the address bar and the history.
-            target = "/" + ("?" + urllib.parse.urlencode({"project": project}) if project else "")
-            cookie = f"{COOKIE}={given}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
-            self._send(HTTPStatus.SEE_OTHER, b"", {"Location": target, "Set-Cookie": cookie})
-            return
-        cookies = SimpleCookie()
-        with contextlib.suppress(CookieError):
-            cookies.load(self.headers.get("Cookie") or "")
-        morsel = cookies.get(COOKIE)
-        if morsel is None or not hmac.compare_digest(morsel.value, self.server.key):
-            self._send(
-                HTTPStatus.UNAUTHORIZED,
-                _message_page(
-                    "agent-mem is running",
-                    "This browser has no access yet. Run `agent-mem view` once; it opens this page with your key.",
-                ),
-            )
-            return
+        project = (urllib.parse.parse_qs(parts.query).get("project") or [""])[0]
         try:
             body = self._page(project or None).encode("utf-8")
         except (sqlite3.Error, OSError, db.SchemaTooNewError, db.MigrationInProgressError) as error:
@@ -299,9 +243,10 @@ def remove_autostart() -> Path | None:
     target = autostart_path()
     if target is None or not target.exists():
         return None
-    if sys.platform == "darwin":
+    # The service manager is per user, not per HOME: tests (AGENT_MEM_NO_SPAWN) must not stop the real viewer.
+    if sys.platform == "darwin" and not env_flag("AGENT_MEM_NO_SPAWN"):
         _quiet("launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}")
-    elif sys.platform != "win32":
+    elif sys.platform not in ("darwin", "win32") and not env_flag("AGENT_MEM_NO_SPAWN"):
         _quiet("systemctl", "--user", "disable", "--now", "agent-mem-viewer.service")
     target.unlink()
     return target

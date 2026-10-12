@@ -414,9 +414,9 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
         if address is not None:
             import webbrowser
 
-            print(f"Viewer at {address.split('?')[0]} (always on; reload the tab for the latest state).")
+            print(f"Viewer at {address} (always on).")
             if not webbrowser.open(address):
-                print(f"No browser found. Open this address once to unlock it in a browser:\n  {address}")
+                print("No browser found; open the address above.")
             return 0
         with _conn(config) as conn:
             snapshot = ui.build_snapshot(conn, config, project_id)
@@ -432,7 +432,7 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
 
 
 def _served_url(config: Config, project_id: str | None) -> str | None:
-    """Address of the running viewer with the access key, starting it first if needed."""
+    """Address of the running viewer, starting it first if needed."""
     from agent_mem.hooks.hook import spawn_viewer
     from agent_mem.ui import server
 
@@ -445,7 +445,9 @@ def _served_url(config: Config, project_id: str | None) -> str | None:
             if time.monotonic() > deadline:
                 return None
             time.sleep(0.2)
-    return server.open_url(config, project_id)
+    from urllib.parse import quote
+
+    return server.url(config) + (f"?project={quote(project_id)}" if project_id else "")
 
 
 def plugins_dir() -> Path:

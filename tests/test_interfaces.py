@@ -43,6 +43,16 @@ def test_mcp_tools(conn, config: Config, project: Path, driver: Driver, monkeypa
     assert "B2 bucket" in call("mem_get", {"ids": [memory_id]})
     assert call("mem_forget", {"id": memory_id}).startswith("Deleted")
     assert "not found" in call("mem_get", {"ids": [memory_id]})
+
+    # Agents call tools in parallel; the server runs them in threads on one shared connection.
+    async def burst() -> list:
+        calls = [("mem_search", {"query": "restic backup"}), ("mem_get", {"ids": ["T1"]})] * 6
+        calls += [("mem_remember", {"text": f"Parallel note {n}"}) for n in range(6)]
+        return await asyncio.gather(*(server.call_tool(name, args) for name, args in calls))
+
+    texts = [result.content[0].text for result in asyncio.run(burst())]
+    assert not any("Error executing tool" in text or "transaction" in text for text in texts)
+    assert sum(text.startswith("Stored M") for text in texts) == 6
     assert db.get_meta(conn, "backups_dirty") == "1"
     assert conn.execute("SELECT COUNT(*) FROM accesses WHERE kind = 'get'").fetchone()[0] >= 1
 

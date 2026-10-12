@@ -76,3 +76,16 @@ def test_mcp_configs_start_the_server():
     for path in PLUGINS.rglob(".mcp.json"):
         server = _json(path)["mcpServers"]["agent-mem"]
         assert server["command"] == "agent-mem" and server["args"] == ["mcp"]
+
+
+def test_installers_parse():
+    import shutil
+    import subprocess
+
+    sh = shutil.which("sh")
+    if sh:
+        subprocess.run([sh, "-n", str(ROOT / "install.sh")], check=True)
+    for line in (ROOT / "install.ps1").read_text(encoding="utf-8").splitlines():
+        assert line.count('"') % 2 == 0, line  # PowerShell is not available everywhere; catch broken quoting
+    for name in ("install.sh", "install.ps1"):
+        assert "agent-mem doctor" in (ROOT / name).read_text(encoding="utf-8")
