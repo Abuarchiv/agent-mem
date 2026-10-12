@@ -146,3 +146,17 @@ def test_a_replayed_stop_answers_the_turn_it_happened_in(config: Config, project
     assert rows["first"][0] == "answer to the first" and "pytest" in rows["first"][1]
     assert rows["second"] == ("", "[]")
     conn.close()
+
+
+def test_tools_of_a_spooled_prompt_never_land_in_the_finished_turn_before(config: Config, project: Path):
+    base = {"session_id": "s1", "cwd": str(project)}
+    hook.run("claude", None, json.dumps({**base, "hook_event_name": "UserPromptSubmit", "prompt": "first"}), config)
+    hook.run("claude", None, json.dumps({**base, "hook_event_name": "Stop", "last_assistant_message": "done"}), config)
+    # The second prompt is in the spool; its tool call arrives live.
+    tool = {**base, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "t9"}
+    tool |= {"tool_input": {"command": "pytest -q"}, "tool_response": {"stdout": "1 passed"}}
+    hook.run("claude", None, json.dumps(tool), config)
+    conn = db.connect(config)
+    first = conn.execute("SELECT commands_json FROM turns WHERE prompt = 'first'").fetchone()[0]
+    assert first == "[]"
+    conn.close()

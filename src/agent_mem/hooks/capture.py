@@ -280,14 +280,13 @@ def _turn_at(conn: sqlite3.Connection, session_id: str, ts: str) -> sqlite3.Row 
 
 def _turn_for_tool(conn: sqlite3.Connection, session_id: str, project_id: str | None, ts: str) -> int:
     turn = _open_turn(conn, session_id)
-    if turn is not None and turn["started_at"] <= ts:
+    if turn is None:
+        # No open turn (its prompt may still be in the spool): a turn of its own, never the finished one before it.
+        return _new_turn(conn, session_id, project_id, ts, "")
+    if turn["started_at"] <= ts:
         return int(turn["id"])
-    earlier = _turn_at(conn, session_id, ts)
-    if earlier is not None:
-        return int(earlier["id"])
-    if turn is not None:
-        return int(turn["id"])
-    return _new_turn(conn, session_id, project_id, ts, "")
+    earlier = _turn_at(conn, session_id, ts)  # replayed after a later prompt opened the current turn
+    return int(earlier["id"] if earlier is not None else turn["id"])
 
 
 def _append_json(conn: sqlite3.Connection, turn_id: int, column: str, values: list[str], cap: int = 40) -> None:
