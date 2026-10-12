@@ -72,3 +72,29 @@ def test_excluded_paths():
     assert privacy.path_excluded("secrets/prod.yaml", globs)
     assert privacy.path_excluded("app/secrets/prod.yaml", globs)
     assert not privacy.path_excluded("src/app.py", globs)
+
+
+def test_passwords_given_as_command_line_options_are_redacted():
+    from agent_mem.core.privacy import clean_text
+
+    leaking = [
+        "mysql -u root -pS3cr3tpw -h db",
+        "mysqldump -pS3cr3tpw db",
+        "psql --password S3cr3tpw",
+        "sshpass -p S3cr3tpw ssh host",
+        "curl -u admin:S3cr3tpw https://x.io",
+        "docker login -u me -p S3cr3tpw",
+        "redis-cli -a S3cr3tpw",
+    ]
+    for command in leaking:
+        assert "S3cr3t" not in clean_text(command, 500), command
+    untouched = [
+        "mkdir -p src/pkg",
+        "tar -pxf a.tar",
+        "ssh -p 2222 host",
+        "git push -u origin main",
+        "mysql -p db",
+        "date -u +%H:%M:%S",
+    ]
+    for command in untouched:
+        assert clean_text(command, 500) == command

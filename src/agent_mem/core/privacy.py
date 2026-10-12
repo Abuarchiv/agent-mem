@@ -32,6 +32,17 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
     ("bearer", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}")),
     ("url_credentials", re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s:/@]+:[^\s@/]+@")),
+    # Passwords given as command-line options; group 1 stays, group 2 is the secret. Only for the tools that take
+    # them this way: a bare "-p" means something else to mkdir or tar.
+    (
+        "cli_password",
+        re.compile(r"(?i)(\b(?:mysql|mysqldump|mysqladmin|mariadb(?:-dump)?)\b[^\n|;&]*?\s-p)([^\s-]\S*)"),
+    ),
+    ("cli_password", re.compile(r"(?i)((?:^|\s)--pass(?:word)?\s+)([^\s-]\S*)")),
+    ("cli_password", re.compile(r"(?i)(\bsshpass\s+-p\s*)(\S+)")),
+    ("cli_password", re.compile(r"(?i)(\b(?:docker|podman|helm)\s+(?:registry\s+)?login\b[^\n|;&]*?\s-p\s+)(\S+)")),
+    ("cli_password", re.compile(r"(?i)(\bredis-cli\b[^\n|;&]*?\s-a\s+)(\S+)")),
+    ("cli_password", re.compile(r"((?:^|\s)(?:-u|--user)\s+[A-Za-z0-9][A-Za-z0-9._-]*:)([^\s@]+)")),
     (
         "assignment",
         re.compile(
@@ -67,6 +78,8 @@ def redact(text: str) -> tuple[str, int]:
     for kind, pattern in _SECRET_PATTERNS:
         if kind == "url_credentials":
             text, n = pattern.subn(lambda m, k=kind: f"{m.group(1)}{REDACTED.format(kind=k)}@", text)
+        elif kind == "cli_password":
+            text, n = pattern.subn(lambda m: f"{m.group(1)}{REDACTED.format(kind='secret')}", text)
         elif kind == "assignment":
             text, n = pattern.subn(_redact_assignment, text)
         else:
