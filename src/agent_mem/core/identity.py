@@ -85,6 +85,17 @@ def _git_backed(project: Project) -> bool:
     return project.remote is not None or (project.root / ".git").exists()
 
 
+def _nested_repo(path: Path, root: Path) -> bool:
+    """True when a ``.git`` lies between ``path`` and ``root`` (exclusive): its own repository. No git spawn."""
+    base = _canonical(root)
+    for folder in (path, *path.parents):
+        if _canonical(folder) == base:
+            return False
+        if (folder / ".git").exists():
+            return True
+    return False
+
+
 def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool = True) -> Project | None:
     """Project for ``cwd``. With ``register=False`` nothing is written; call :func:`register_project` later."""
     if not cwd:
@@ -93,8 +104,11 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
     if not path.is_absolute():
         return None
     found = _lookup(conn, path)
-    # A parent that is a plain directory (no git) must not swallow repositories nested below it.
-    if found is not None and (str(found.root) == _canonical(path) or _git_backed(found)):
+    # A parent must not swallow a repository nested below it: neither a plain directory nor a git repository
+    # whose folder holds other repositories (~/Lernen with ~/Lernen/agent-mem).
+    if found is not None and (
+        str(found.root) == _canonical(path) or (_git_backed(found) and not _nested_repo(path, found.root))
+    ):
         return found
     if not path.exists():
         return found

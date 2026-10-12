@@ -293,6 +293,19 @@ def _raise_importance(conn: sqlite3.Connection, turn_id: int, value: float) -> N
     conn.execute("UPDATE turns SET importance = MAX(importance, ?) WHERE id = ?", (value, turn_id))
 
 
+def _narrow_turn(conn: sqlite3.Connection, turn_id: int, project: identity.Project) -> None:
+    """A turn asked in a parent folder belongs to the nested project its tools work in (``cd agent-mem && …``),
+    so its facts land where a session in that project finds them."""
+    row = conn.execute(
+        "SELECT t.project_id, p.root FROM turns t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+        (turn_id,),
+    ).fetchone()
+    if row is None or row["project_id"] == project.id:
+        return
+    if row["root"] is None or identity.is_within(project.root, row["root"]):
+        conn.execute("UPDATE turns SET project_id = ? WHERE id = ?", (project.id, turn_id))
+
+
 def _rel_files(project: identity.Project | None, files: tuple[str, ...]) -> list[str]:
     if project is None:
         return [f.replace("\\", "/") for f in files]
@@ -458,6 +471,8 @@ def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id,
 def _on_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
     tool_signal = signals.analyze_tool(event.tool or "", event.tool_input)
     turn_id = _turn_for_tool(conn, session_id, project_id, event.ts)
+    if project is not None:
+        _narrow_turn(conn, turn_id, project)
     files = _rel_files(project, tool_signal.files)
     error_sig = payload.get("error_sig")
     conn.execute(

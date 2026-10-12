@@ -169,3 +169,31 @@ def test_only_failing_project_commands_count_as_open_errors(driver: Driver, conn
     project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
     lines = [line for line, _ in inject._open_errors(conn, project_id, "claude:other")]
     assert len(lines) == 1 and "pytest" in lines[0]
+
+
+def test_turn_moves_to_the_nested_project_its_tools_work_in(conn, config, tmp_path):
+    import subprocess
+
+    from tests.conftest import Driver as Fresh
+
+    parent = tmp_path / "Lernen"
+    nested = parent / "agent-mem"
+    nested.mkdir(parents=True)
+    for root in (parent, nested):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (nested / "app.py").write_text("x = 1\n")
+    driver = Fresh(conn, config, parent)
+    driver.prompt("s1", "Fix the viewer in agent-mem")
+    driver.cwd = str(nested)  # Claude Code reports the new folder after `cd agent-mem`
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "Fixed.")
+    driver.cwd = str(parent)
+    driver.prompt("s1", "What is in this folder?")
+    driver.stop("s1", "Several projects.")
+    rows = conn.execute(
+        "SELECT t.prompt, p.name FROM turns t JOIN projects p ON p.id = t.project_id ORDER BY t.id"
+    ).fetchall()
+    assert [(r["prompt"], r["name"]) for r in rows] == [
+        ("Fix the viewer in agent-mem", "agent-mem"),
+        ("What is in this folder?", "Lernen"),
+    ]
