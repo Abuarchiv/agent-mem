@@ -55,7 +55,7 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
                 ids = [m.group(1) for line in lines if (m := re.match(r"- \[([A-Z]\d+) ", line))]
                 cited = f"{', '.join(ids)}; " if ids else ""
                 out["systemMessage"] = (
-                    f"agent-mem: {len(lines)} items injected ({cited}~{inject.tokens(response.context)} tokens)"
+                    f"agent-mem: {len(lines)} item{'s' * (len(lines) != 1)} injected ({cited}~{inject.tokens(response.context)} tokens)"
                 )
             return out
         return None
