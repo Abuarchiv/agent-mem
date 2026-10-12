@@ -531,7 +531,8 @@ def _resolve_failures(
             "WHERE project_id IS ? AND error_sig = ? AND command_key = ?",
             (json.dumps(changed[:10]), turn_id, ts, project_id, failure["error_sig"], command_key),
         )
-        if updated.rowcount == 0:
+        # A non-zero exit without an error line (grep without a match) is not an error that was fixed.
+        if updated.rowcount == 0 and signals.looks_like_error(error_line):
             conn.execute(
                 "INSERT INTO recipes(project_id, error_sig, error_text, command_key, files_json, successes, "
                 "last_turn_id, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",

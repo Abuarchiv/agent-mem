@@ -27,12 +27,12 @@
   const icon = (name, size = 20, width = 1.8) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 
   const NAV = [
-    { id: "overview", label: "Overview", icon: "overview", group: "Memory", search: "Search turns, memories and files…" },
+    { id: "overview", label: "Overview", icon: "overview", group: "Memory", search: "Search requests, memories and files…" },
     { id: "timeline", label: "Timeline", icon: "timeline", group: "Memory", search: "Search requests, results, files and commands…" },
     { id: "memory", label: "Memories", icon: "memory", group: "Memory", search: "Search memories…" },
     { id: "learned", label: "Learned", icon: "learned", group: "Memory", search: "Search rules, recipes and preferences…" },
-    { id: "graph", label: "Association graph", short: "Graph", icon: "graph", group: "Memory", search: "Search files, commands and errors…" },
-    { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search components…" },
+    { id: "graph", label: "Connections", short: "Links", icon: "graph", group: "Memory", search: "Search files, commands and errors…" },
+    { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search running parts…" },
   ];
   const MEMORY_KINDS = ["decision", "fact", "preference", "correction", "dead_end", "lesson", "summary", "native_note"];
   const PROFILE_LABEL = { "cmd:test": "Test command", "cmd:lint": "Lint command", "cmd:build": "Build command", "cmd:install": "Install command" };
@@ -109,7 +109,9 @@
   const inProjectOrGlobal = (id) => state.project === "all" || id === state.project || !id;
   const harnessLabel = (harness) => ({ claude: "Claude Code", codex: "Codex", copilot: "Copilot CLI", opencode: "OpenCode" })[harness] ?? harness ?? "unknown";
   const hashFor = (view, params = {}) => { const query = new URLSearchParams(params).toString(); return `#/${view}${query ? `?${query}` : ""}`; };
-  const outcomeLabel = (outcome) => ({ ok: "done", error: "failed", open: "open", unknown: "unknown" })[outcome] ?? outcome;
+  const COMPONENT_LABEL = { indexer: "Search index", semantic: "Meaning search", observer: "Fact extraction", consolidation: "Cleanup", backup: "Backup" };
+  const componentLabel = (name) => (name.startsWith("hook:") ? `${harnessLabel(name.slice(5))} hooks` : COMPONENT_LABEL[name] ?? readable(name));
+  const outcomeLabel = (outcome) => ({ ok: "done", error: "failed", open: "open", unknown: "no result" })[outcome] ?? outcome;
   const outcomeTag = (outcome) => tag(outcomeLabel(outcome), outcome === "ok" ? "good" : outcome === "error" ? "bad" : outcome === "open" ? "warn" : "");
   const outcomeBadge = (outcome) => `<span class="badge ${h(outcome)}" title="${h(outcomeLabel(outcome))}">${icon(outcome === "ok" ? "check" : outcome === "error" ? "cross" : "dots", 15, 2.2)}</span>`;
   const limitReached = (list, key) => list.length >= (data.limits[key] ?? Infinity);
@@ -135,10 +137,10 @@
     if (health.paused_until) items.push({ tone: "warn", text: `<b>Capture is paused</b> ${health.paused_until === "forever" ? "until you resume it" : `until ${h(full(health.paused_until))}`}. Run <code>agent-mem resume</code>.`, view: "health" });
     for (const [component, info] of Object.entries(health.components ?? {})) {
       const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
-      if (failing) items.push({ tone: "bad", text: `<b>${h(component)} is failing:</b> ${h(firstLine(info.last_error, 140))}`, view: "health" });
+      if (failing) items.push({ tone: "bad", text: `<b>${h(componentLabel(component))} is failing:</b> ${h(firstLine(info.last_error, 140))}`, view: "health" });
     }
     if (health.spool > 0) items.push({ tone: "warn", text: `<b>${plural(health.spool, "event")} waiting in the spool.</b> Run <code>agent-mem index</code>.`, view: "health" });
-    if (health.quarantine > 0) items.push({ tone: "warn", text: `<b>${plural(health.quarantine, "event")} quarantined.</b> They could not be read; see the data directory.`, view: "health" });
+    if (health.quarantine > 0) items.push({ tone: "warn", text: `<b>${plural(health.quarantine, "hook message")} could not be read</b> and ${health.quarantine === 1 ? "was" : "were"} set aside. Everything else was saved.`, view: "health" });
     const proposed = data.rules.filter((rule) => !rule.enabled && inProjectOrGlobal(rule.project_id)).length;
     if (proposed > 0) items.push({ tone: "info", text: `<b>${plural(proposed, "rule")} proposed from your corrections.</b> Review them before enabling.`, view: "learned" });
     for (const warning of health.config_warnings ?? []) items.push({ tone: "warn", text: `<b>Config:</b> ${h(warning)}`, view: "health" });
@@ -226,7 +228,7 @@
     const enabled = rules.filter((rule) => rule.enabled).length;
     const lede = [
       names.length === 0 ? "Nothing captured yet." : `Across ${names.length > 3 ? plural(names.length, "project") : names.join(" and ")}.`,
-      `${plural(valid.length, "memory", "memories")}, ${plural(recipes.length, "error fix", "error fixes")} learned, ${plural(enabled, "rule")} active.`,
+      `agent-mem keeps what your coding agents did and learned, and reminds them in the next session.`,
     ].join(" ");
     const alerts = attention().map((item) => `<div class="alert ${item.tone}">${icon("alert", 20)}<p>${item.text}</p><a class="text-link" href="${hashFor(item.view)}">Show</a></div>`).join("");
 
@@ -235,34 +237,33 @@
     const perDay = new Map(days.map((key) => [key, { turns: 0, errors: 0 }]));
     for (const turn of allTurns) { const entry = perDay.get(dayKey(turn.started_at)); if (entry) { entry.turns += 1; if (turn.outcome === "error") entry.errors += 1; } }
     const peak = Math.max(1, ...[...perDay.values()].map((entry) => entry.turns));
-    const bars = days.map((key) => { const entry = perDay.get(key); return `<span title="${h(dayLabel(key))}: ${plural(entry.turns, "turn")}, ${num(entry.errors)} failed"><i class="${key === today() ? "today" : ""}" style="height:${entry.turns ? Math.max(6, entry.turns / peak * 100) : 3}%"></i>${entry.errors ? `<i class="errors" style="height:${entry.errors / peak * 100}%"></i>` : ""}</span>`; }).join("");
-    const activity = `<section class="block block-yellow"><i class="block-deco deco-tile"></i><h2>Activity</h2><div class="stats">${stat(num(turnCount), `${approx}turns`)}${stat(num(sessionCount), "sessions")}${stat(num(allTurns.filter((t) => t.outcome === "error").length), "failed")}</div><div class="block-foot"><div class="bars" role="img" aria-label="Turns per day over the last 14 days">${bars}</div><div class="bar-axis"><span>${h(dayLabel(days[0]))}</span><span>Today</span></div></div></section>`;
+    const bars = days.map((key) => { const entry = perDay.get(key); return `<span title="${h(dayLabel(key))}: ${plural(entry.turns, "request")}, ${num(entry.errors)} failed"><i class="${key === today() ? "today" : ""}" style="height:${entry.turns ? Math.max(6, entry.turns / peak * 100) : 3}%"></i>${entry.errors ? `<i class="errors" style="height:${entry.errors / peak * 100}%"></i>` : ""}</span>`; }).join("");
+    const activity = `<section class="block block-yellow"><i class="block-deco deco-tile"></i><h2>Activity</h2><div class="stats">${stat(num(turnCount), `${approx}requests`)}${stat(num(sessionCount), "sessions")}${stat(num(allTurns.filter((t) => t.outcome === "error").length), "failed")}</div><div class="block-foot"><div class="bars" role="img" aria-label="Requests per day over the last 14 days">${bars}</div><div class="bar-axis"><span>${h(dayLabel(days[0]))}</span><span>Today</span></div></div></section>`;
 
     const byKind = MEMORY_KINDS.map((kind) => [kind, valid.filter((memory) => memory.kind === kind).length]).filter(([, count]) => count > 0);
-    const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(valid.length)}</b><span>valid${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} superseded` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(readable(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, dead ends and preferences appear as agents work.</span>`}</div></section>`;
+    const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(valid.length)}</b><span>current${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} replaced by newer ones` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(readable(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, dead ends and preferences appear as agents work.</span>`}</div></section>`;
 
     const learning = data.learning;
-    const rate = learning.repetition_rate === null ? "—" : `${Math.round(learning.repetition_rate * 100)}%`;
-    const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learning <a href="${hashFor("learned")}" aria-label="Open learned rules and recipes">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(learning.errors_fixed)}</b><span>errors fixed</span></div><div class="block-foot"><div class="stats">${stat(num(learning.known_errors_recurred), "recurred")}${stat(rate, "repeat rate")}${stat(num(enabled), "rules on")}</div></div></section>`;
+    const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learning <a href="${hashFor("learned")}" aria-label="Open learned rules and recipes">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(learning.errors_fixed)}</b><span>error fixes remembered</span></div><div class="block-foot"><div class="stats">${stat(num(learning.known_errors_recurred), "errors came back")}${stat(num(enabled), "rules active")}</div></div></section>`;
 
     const nodes = data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
-    const graphBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Associations <a href="${hashFor("graph")}" aria-label="Open association graph">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? nodes.length : data.counts.entities)}</b><span>files, commands, errors</span></div><div class="block-foot"><div class="stats">${stat(num(data.counts.edges), "links")}</div></div></section>`;
+    const graphBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Connections <a href="${hashFor("graph")}" aria-label="Open connections">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? nodes.length : data.counts.entities)}</b><span>files, commands and errors</span></div><div class="block-foot"><span class="caption">${num(data.counts.edges)} links between things used in the same request</span></div></section>`;
 
     const list = filteredTurns().slice(0, 9);
-    const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No turns match" : "Nothing captured yet", allTurns.length ? "Try another search or outcome filter." : "Connect a harness with <code>agent-mem setup claude</code> (or codex, copilot, opencode) and start a session.");
+    const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No requests match" : "Nothing captured yet", allTurns.length ? "Try another search or outcome filter." : "Connect a harness with <code>agent-mem setup claude</code> (or codex, copilot, opencode) and start a session.");
     const latest = valid.slice(0, 5).map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><span class="tag kind-${h(memory.kind)}">${h(readable(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memoryText(memory), 110))}</b><span>M${memory.id} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></a>`).join("");
     const componentRows = Object.entries(data.health.components ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(0, 6).map(([component, info]) => {
       const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
-      return `<div class="row"><i class="dot ${failing ? "bad" : "good"}"></i><b>${h(component)}</b><span class="value">${failing ? "failing" : `ok ${h(ago(info.last_ok_at))}`}</span></div>`;
+      return `<div class="row"><i class="dot ${failing ? "bad" : "good"}"></i><b>${h(componentLabel(component))}</b><span class="value">${failing ? "failing" : `ok ${h(ago(info.last_ok_at))}`}</span></div>`;
     }).join("");
-    return `<div class="page-head"><div><h1>${num(turnCount)} ${turnCount === 1 ? "turn" : "turns"} in ${plural(sessionCount, "session")}</h1><p class="lede">${h(lede)}</p></div></div>
+    return `<div class="page-head"><div><h1>${num(turnCount)} ${turnCount === 1 ? "request" : "requests"} in ${plural(sessionCount, "session")}</h1><p class="lede">${h(lede)}</p></div></div>
 ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
 <div class="blocks">${activity}${memoryBlock}${learnBlock}${graphBlock}</div>
 <div class="columns">
-<section class="panel"><div class="panel-head"><h2>Latest turns</h2><span class="spacer"></span>${outcomePills()}</div>${feed}<div class="panel-foot"><a class="text-link" href="${hashFor("timeline")}">Open timeline ${icon("right", 16)}</a></div></section>
+<section class="panel"><div class="panel-head"><h2>Latest requests</h2><span class="spacer"></span>${outcomePills()}</div>${feed}<div class="panel-foot"><a class="text-link" href="${hashFor("timeline")}">Open timeline ${icon("right", 16)}</a></div></section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Recently learned</h2><span class="spacer"></span>${valid.length ? `<a class="text-link" href="${hashFor("memory")}">All</a>` : ""}</div>${latest || empty("No memories yet", "Agents store them with <code>mem_remember</code>; hooks add decisions, corrections and dead ends.")}</section>
-<section class="panel"><div class="panel-head"><h2>Capture</h2><span class="spacer"></span><a class="text-link" href="${hashFor("health")}">Health</a></div>${componentRows || empty("No hooks have run yet", "Run <code>agent-mem doctor</code> after your first session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Running parts</h2><span class="spacer"></span><a class="text-link" href="${hashFor("health")}">Health</a></div>${componentRows || empty("No hooks have run yet", "Run <code>agent-mem doctor</code> after your first session.")}</section>
 </div></div>`;
   }
 
@@ -290,7 +291,7 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
         const actionCount = (data.actions[turn.id] ?? []).length;
         return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header><p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
       }).join("")}</div>`;
-    return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Each turn is one request with the actions the agent took and its result, as captured by the hooks.</p></div>${outcomePills()}</div>
+    return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
 <div class="timeline">
 <div class="session-list">${cards || empty("No sessions", "Sessions appear after a connected harness runs.")}</div>
 <section class="panel">${head}${feed}</section>
@@ -327,17 +328,17 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
     const pool = all.filter((memory) => state.invalid || !memory.invalid_at);
     const counts = new Map(MEMORY_KINDS.map((kind) => [kind, pool.filter((memory) => memory.kind === kind).length]));
     const shown = pool.filter((memory) => (state.kind === "all" || memory.kind === state.kind) && matches([memory.title, memory.body, memory.kind, memory.origin, `M${memory.id}`]));
-    const pills = `<div class="pill-group" role="group" aria-label="Filter by kind"><button type="button" class="pill" data-action="kind" data-value="all" aria-pressed="${state.kind === "all"}">All ${num(pool.length)}</button>${MEMORY_KINDS.filter((kind) => counts.get(kind)).map((kind) => `<button type="button" class="pill" data-action="kind" data-value="${kind}" aria-pressed="${state.kind === kind}">${h(readable(kind))} ${num(counts.get(kind))}</button>`).join("")}<button type="button" class="pill" data-action="invalid" aria-pressed="${state.invalid}">Include superseded</button></div>`;
+    const pills = `<div class="pill-group" role="group" aria-label="Filter by kind"><button type="button" class="pill" data-action="kind" data-value="all" aria-pressed="${state.kind === "all"}">All ${num(pool.length)}</button>${MEMORY_KINDS.filter((kind) => counts.get(kind)).map((kind) => `<button type="button" class="pill" data-action="kind" data-value="${kind}" aria-pressed="${state.kind === kind}">${h(readable(kind))} ${num(counts.get(kind))}</button>`).join("")}<button type="button" class="pill" data-action="invalid" aria-pressed="${state.invalid}">Show replaced</button></div>`;
     const cards = shown.map((memory) => {
-      const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} shown` : memory.used ? `used ${num(memory.used)}×` : "not recalled yet";
+      const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} shown` : memory.used ? `used ${num(memory.used)}×` : "not used yet";
       const text = memoryText(memory);
       const extra = memory.body && !text.startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? memory.body : "";
       return `<article class="memory-card${memory.invalid_at ? " invalid" : ""}${String(memory.id) === state.memory ? " is-selected" : ""}"><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b><span class="muted">${h(when(memory.created_at))}</span></header><h3><a class="card-link" href="${hashFor("memory", { m: String(memory.id) })}">${inline(text)}</a></h3>${extra ? `<p>${h(extra)}</p>` : ""}
-<div class="meter"><span>activation</span><span class="track"><i style="width:${Math.round(memory.activation * 100)}%"></i></span></div>
-<footer>${projectTag(memory.project_id)}${tag(usage)}${memory.turn_id ? `<a class="tag" href="${hashFor("timeline", { turn: String(memory.turn_id) })}">from T${memory.turn_id}</a>` : ""}${memory.invalid_at ? tag(memory.superseded_by ? `superseded by M${memory.superseded_by}` : `invalid since ${dayLabel(dayKey(memory.invalid_at))}`, "warn") : ""}</footer></article>`;
+<div class="meter" title="Rises when agents use this memory, fades when they do not"><span>relevance</span><span class="track"><i style="width:${Math.round(memory.activation * 100)}%"></i></span></div>
+<footer>${projectTag(memory.project_id)}${tag(usage)}${memory.turn_id ? `<a class="tag" href="${hashFor("timeline", { turn: String(memory.turn_id) })}">from T${memory.turn_id}</a>` : ""}${memory.invalid_at ? tag(memory.superseded_by ? `replaced by M${memory.superseded_by}` : `invalid since ${dayLabel(dayKey(memory.invalid_at))}`, "warn") : ""}</footer></article>`;
     }).join("");
     const selected = state.memory === undefined ? undefined : data.memories.find((memory) => String(memory.id) === state.memory);
-    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What agents and hooks decided to keep. Activation rises when a memory is used and fades when it is not; nothing is deleted by fading. Open a memory to copy the command that shows or deletes it.</p></div></div>
+    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents should keep in mind: decisions, facts, preferences and things that did not work. Memories that get used rank higher. Open one to see where it came from or to delete it.</p></div></div>
 ${pills}
 <div class="${selected ? "with-detail" : ""}">
 <div>${cards ? `<div class="cards">${cards}</div>` : empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search or kind." : "Agents write them with the <code>mem_remember</code> MCP tool; hooks add decisions, corrections and dead ends.")}
@@ -356,10 +357,10 @@ ${selected ? memoryDetail(selected) : ""}
   function memoryDetail(memory) {
     const id = `M${memory.id}`;
     const successor = memory.superseded_by ? data.memories.find((item) => item.id === memory.superseded_by) : undefined;
-    const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} times shown` : memory.used ? `used ${num(memory.used)}×` : "not recalled yet";
+    const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} times shown` : memory.used ? `used ${num(memory.used)}×` : "not used yet";
     return `<aside class="detail memory-detail kind-${h(memory.kind)}" aria-label="Memory detail">
 <header><h2>${id} · ${h(readable(memory.kind))}</h2><a class="round-button" href="${hashFor("memory")}" aria-label="Close memory detail">${icon("close", 16)}</a></header>
-<div class="pill-group">${tag(projectName(memory.project_id))}${tag(memory.source)}${memory.origin ? tag(memory.origin) : ""}${tag(`trust ${memory.trust}`)}${memory.invalid_at ? tag("superseded", "warn") : ""}</div>
+<div class="pill-group">${tag(projectName(memory.project_id))}${tag(memory.source)}${memory.origin ? tag(memory.origin) : ""}${tag(`trust ${memory.trust}`)}${memory.invalid_at ? tag("replaced", "warn") : ""}</div>
 <div class="text-box">${inline(memoryText(memory))}${memory.body && !memoryText(memory).startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? `\n\n${h(memory.body)}` : ""}</div>
 ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show ${id}</code> prints all of it.</span></p>` : ""}
 <dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd><dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Importance</dt><dd>${h(Number(memory.importance ?? 0).toFixed(2))}</dd><dt>Activation</dt><dd>${h(Math.round(memory.activation * 100))}%</dd><dt>Recall</dt><dd>${h(usage)}</dd>${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
@@ -384,10 +385,10 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
       const more = items.length > 5 ? `<p class="muted more">${plural(items.length - 5, "more variant")}, used less often</p>` : "";
       return `<div class="pref-group"><span class="section-label">${h(PROFILE_LABEL[key] ?? readable(key))}</span>${rows}${more}</div>`;
     }).join("");
-    return `<div class="page-head"><div><h1>Learned</h1><p class="lede">Rules come from your own corrections, fixes from failing commands that later passed, preferences from repeated choices. No model is involved.</p></div></div>
+    return `<div class="page-head"><div><h1>Learned</h1><p class="lede">What agent-mem worked out by watching: rules from your corrections, fixes for errors, and the commands you use most. No AI model is involved.</p></div></div>
 <section class="panel"><div class="panel-head"><h2>Rules</h2><small>Proposed rules only warn. Enabled rules can block a command.</small></div>${ruleRows ? `<div class="table-wrap"><table><thead><tr><th>Id</th><th>Rule</th><th>State</th><th>Evidence</th><th>Hits</th><th>Overrides</th><th>Project</th><th>Change with</th></tr></thead><tbody>${ruleRows}</tbody></table></div>` : empty("No rules yet", "Say “pnpm instead of npm” a few times and a rule is proposed.")}</section>
 <div class="halves">
-<section class="panel"><div class="panel-head"><h2>Error fixes</h2><small>failing command → edits → same command passes</small></div>${recipeRows || empty("No fixes learned yet", "They appear after a failing command passes again in the same session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Error fixes</h2><small>a command failed, files were changed, then it passed</small></div>${recipeRows || empty("No fixes learned yet", "They appear after a failing command passes again in the same session.")}</section>
 <section class="panel"><div class="panel-head"><h2>Preferences</h2><small>most used first</small></div>${profileRows || empty("No preferences yet", "Repeated choices such as package managers or test commands show up here.")}</section>
 </div>`;
   }
@@ -398,21 +399,21 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     const nodes = data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
     const count = (kind) => nodes.filter((node) => node.kind === kind).length;
     const swatch = (kind) => `<i style="background:var(${ENTITY_COLOR[kind]})"></i>`;
-    return `<div class="page-head"><div><h1>Association graph</h1><p class="lede">Files, commands, errors and packages that occurred in the same turns. Links strengthen with each co-occurrence and decay over time; search walks them with Personalized PageRank.</p></div>
+    return `<div class="page-head"><div><h1>Connections</h1><p class="lede">Files, commands and errors that came up in the same request. Bigger dots come up more often. Click a dot to see what belongs with it.</p></div>
 <div class="pill-group" role="group" aria-label="Show entity kinds">${ENTITY_KINDS.filter((kind) => count(kind)).map((kind) => `<button type="button" class="pill" data-action="entity-kind" data-value="${kind}" aria-pressed="${!state.hiddenKinds.has(kind)}">${h(kind)}s ${num(count(kind))}</button>`).join("")}</div></div>
 <div class="graph-layout">
 <section class="graph-stage" aria-label="Graph canvas"><div id="graph-host" class="graph-host"></div>
 <div class="graph-controls"><button type="button" class="round-button" data-action="zoom" data-value="out" aria-label="Zoom out">${icon("minus", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="fit" aria-label="Fit graph">${icon("fit", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="in" aria-label="Zoom in">${icon("plus", 18)}</button></div>
 <span class="graph-hint">Drag to move · scroll to zoom · F to fit · Esc to clear</span></section>
 <div class="stack"><aside id="graph-inspector" class="inspector" aria-live="polite"></aside>
-<section class="panel"><div class="panel-head"><h3>Legend</h3></div><div class="legend">${ENTITY_KINDS.map((kind) => `<span>${swatch(kind)}${h(kind)}</span>`).join("")}</div>${limitReached(data.graph.nodes, "graph_nodes") ? `<p class="muted" style="margin-top:12px;font-size:13px">Showing the ${num(data.limits.graph_nodes)} most connected of ${num(data.counts.entities)} entities.</p>` : ""}</section></div>
+<section class="panel"><div class="panel-head"><h3>Legend</h3></div><div class="legend">${ENTITY_KINDS.map((kind) => `<span>${swatch(kind)}${h(kind)}</span>`).join("")}</div>${limitReached(data.graph.nodes, "graph_nodes") ? `<p class="muted" style="margin-top:12px;font-size:13px">Showing the ${num(data.limits.graph_nodes)} most connected of ${num(data.counts.entities)} things.</p>` : ""}</section></div>
 </div>`;
   }
 
   function createGraph(host, inspector, sourceNodes, sourceEdges) {
     const describe = (node) => {
       if (!node) {
-        inspector.innerHTML = `<span class="kicker">Association graph</span><h2>How your work connects</h2><p>Select a node to see what it occurs with most often.</p><div class="stats">${stat(num(nodes.length), "nodes")}${stat(num(edges.length), "links")}</div>`;
+        inspector.innerHTML = `<span class="kicker">Connections</span><h2>How your work connects</h2><p>Click a dot to see what comes up with it most often.</p><div class="stats">${stat(num(nodes.length), "things")}${stat(num(edges.length), "links")}</div>`;
         return;
       }
       const links = edges.filter((edge) => edge.a === node.id || edge.b === node.id).sort((x, y) => y.weight - x.weight).slice(0, 8);
@@ -433,7 +434,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
       describe(undefined);
       return { zoomBy() {}, reset() {}, setQuery() {}, setHidden() {}, destroy() {} };
     }
-    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Association graph with ${nodes.length} nodes and ${edges.length} links. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
+    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Connections: ${nodes.length} files, commands and errors with ${edges.length} links. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
     const canvas = host.querySelector("canvas");
     const context = canvas.getContext("2d");
     const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -553,26 +554,26 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     const health = data.health;
     const paused = Boolean(health.paused_until);
     const backupHours = date(health.last_backup_at) ? (Date.now() - date(health.last_backup_at).getTime()) / 36e5 : Infinity;
-    const components = Object.entries(health.components ?? {}).filter(([name]) => matches([name])).sort(([a], [b]) => a.localeCompare(b));
+    const components = Object.entries(health.components ?? {}).filter(([name]) => matches([name, componentLabel(name)])).sort(([a], [b]) => a.localeCompare(b));
     const rows = components.map(([name, info]) => {
       const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
-      return `<tr><td><i class="dot ${failing ? "bad" : "good"}" style="display:inline-block;margin-right:8px"></i><b>${h(name)}</b></td><td>${h(info.last_ok_at ? when(info.last_ok_at) : "never")}</td><td class="num">${num(info.ok_count)}</td><td class="num">${num(info.error_count)}</td><td>${info.last_error ? `<code>${h(firstLine(info.last_error, 160))}</code>` : '<span class="muted">—</span>'}</td></tr>`;
+      return `<tr><td><i class="dot ${failing ? "bad" : "good"}" style="display:inline-block;margin-right:8px"></i><b>${h(componentLabel(name))}</b></td><td>${h(info.last_ok_at ? when(info.last_ok_at) : "never")}</td><td class="num">${num(info.ok_count)}</td><td class="num">${num(info.error_count)}</td><td>${info.last_error ? `<code>${h(firstLine(info.last_error, 160))}</code>` : '<span class="muted">—</span>'}</td></tr>`;
     }).join("");
     const semantic = String(health.semantic ?? "not indexed yet");
-    return `<div class="page-head"><div><h1>Health &amp; privacy</h1><p class="lede">State of capture, indexing and backups when this page was written. <code>agent-mem doctor</code> checks the installation live.</p></div></div>
+    return `<div class="page-head"><div><h1>Health &amp; privacy</h1><p class="lede">Is everything working? Green means yes. This is the state when the page was written; <code>agent-mem doctor</code> checks it right now.</p></div></div>
 <div class="state-grid">
 <section class="block ${paused ? "block-yellow" : "block-green"}"><i class="block-deco deco-triangle"></i><h2>Capture</h2><div class="big-number"><b>${paused ? "Paused" : "Active"}</b></div><span class="caption">${paused ? "Resume with <code>agent-mem resume</code>" : "Pause with <code>agent-mem pause --for 1h</code>"}</span></section>
-<section class="block block-blue"><h2>Semantic search</h2><div class="big-number"><b style="font-size:26px">${h(semantic === "unavailable" ? "Lexical only" : semantic)}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Install with <code>agent-mem models install</code>. FTS5 search works without it." : "E5 embeddings, fused with FTS5 and the graph."}</span></section>
+<section class="block block-blue"><h2>Meaning search</h2><div class="big-number"><b>${semantic === "unavailable" || semantic === "not indexed yet" ? "Off" : "On"}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Word search works. For search by meaning run <code>agent-mem models install</code>." : `Finds memories with other words, too. Model: ${h(semantic.split("/").pop())}`}</span></section>
 <section class="block ${backupHours < 72 ? "block-pink" : "block-coral"}"><h2>Backup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.last_backup_at))}</b></div><span class="caption">${backupHours < 72 ? "Daily backups are kept in the data directory." : "Run <code>agent-mem backup</code>."}</span></section>
-<section class="block block-yellow"><h2>Consolidation</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Decays links, merges preferences, retires outdated facts.</span></section>
+<section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and retires outdated facts.</span></section>
 </div>
 <div class="columns">
-<section class="panel"><div class="panel-head"><h2>Components</h2><small>hooks, indexer and summaries</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Component</th><th>Last ok</th><th>Ok</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Hooks report here after the first captured session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Running parts</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Part</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Hooks report here after the first captured session.")}</section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
 <div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB · schema v${h(health.schema)}</span></div>
-<div class="row"><b>Spool</b><span class="value">${plural(health.spool, "pending event")}</span></div>
-<div class="row"><b>Quarantine</b><span class="value">${plural(health.quarantine, "file")}</span></div>
+<div class="row"><b>Waiting to be saved</b><span class="value">${plural(health.spool, "event")}</span></div>
+<div class="row"><b>Could not be read</b><span class="value">${plural(health.quarantine, "file")}</span></div>
 <div class="row"><b>Data directory</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
 <div class="row"><span class="grow wrap"><b>Not encrypted at rest</b><span>Anyone who can read the data directory or its backups can read your memory.</span></span></div>

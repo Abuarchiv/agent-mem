@@ -4,6 +4,7 @@ import os
 from agent_mem.core import db, identity
 from agent_mem.core.events import Event
 from agent_mem.hooks import capture
+from agent_mem.memory import consolidate
 from tests.conftest import Driver
 
 
@@ -54,6 +55,20 @@ def test_error_fix_recipe_and_hint_in_next_session(driver: Driver, conn, config,
     response = other.bash("c1", "pytest -q", "E   ModuleNotFoundError: No module named 'httpx'", failed=True)
     assert response.context and "requirements.txt" in response.context
     assert conn.execute("SELECT recurrences FROM recipes").fetchone()[0] == 1
+
+
+def test_failure_without_error_line_is_no_recipe(driver: Driver, conn, config):
+    driver.prompt("s1", "find the parser")
+    driver.bash("s1", "grep -rn parse src", "src/lexer.py: tokens = []", failed=True)
+    driver.bash("s1", "grep -rn parse src", "src/parse.py: def parse():")
+    assert conn.execute("SELECT COUNT(*) FROM recipes").fetchone()[0] == 0
+    conn.execute(
+        "INSERT INTO recipes(project_id, error_sig, error_text, command_key, files_json, successes, updated_at) "
+        "VALUES (NULL, 'a', 'context.arc(p.x, p.y)', 'ls', '[]', 1, 't'), "
+        "(NULL, 'b', 'Error: unable to open database', 'sqlite3', '[]', 1, 't')"
+    )
+    consolidate.run(conn, config)
+    assert [r[0] for r in conn.execute("SELECT command_key FROM recipes")] == ["sqlite3"]
 
 
 def test_session_start_context_crosses_harnesses(driver: Driver, conn, config, project):

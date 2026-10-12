@@ -7,6 +7,7 @@
 5. Rules that never fire expire.
 6. A-MEM-style linking: new memories add their key to their nearest neighbours.
 7. Recorded test/build/lint/install commands keep only the part that does the job; scripts are dropped.
+8. Error fixes whose "error" names no error (grep without a match, `| head`) are dropped.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[
         stats["superseded"] = _supersede_duplicates(conn)
         stats["rules_expired"] = _expire_rules(conn, config)
         stats["commands_cleaned"] = _clean_commands(conn)
+        stats["fixes_dropped"] = _drop_non_error_fixes(conn)
     stats["anchors"] = record_anchors(conn)
     stats["invalidated"] = _invalidate_deleted(conn)
     if embedder_matrix is not None:
@@ -96,6 +98,13 @@ def _clean_commands(conn: sqlite3.Connection) -> int:
             )
         changed += 1
     return changed
+
+
+def _drop_non_error_fixes(conn: sqlite3.Connection) -> int:
+    rows = conn.execute("SELECT id, error_text FROM recipes").fetchall()
+    junk = [(row["id"],) for row in rows if not signals.looks_like_error(row["error_text"] or "")]
+    conn.executemany("DELETE FROM recipes WHERE id = ?", junk)
+    return len(junk)
 
 
 def _promote_preferences(conn: sqlite3.Connection) -> int:
