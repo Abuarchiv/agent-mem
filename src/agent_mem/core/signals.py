@@ -297,6 +297,11 @@ def analyze_tool(tool: str, tool_input: Any) -> ToolSignal:
     )
 
 
+def looks_like_error(line: str) -> bool:
+    """True when the line names an error; a bare non-zero exit (grep without match, `| head`) does not."""
+    return bool(_ERROR_START.search(line))
+
+
 def error_signature(text: str | None) -> tuple[str, str] | None:
     """Stable signature of an error: (hash, representative line)."""
     if not text:

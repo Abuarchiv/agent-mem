@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -50,13 +49,12 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
                 "hookSpecificOutput": {"hookEventName": event.raw_kind, "additionalContext": response.context}
             }
             if harness == "claude" and event.kind in {"session_start", "prompt"}:
-                # One line in the user's terminal; the context itself goes only to the model.
-                lines = [line for line in response.context.splitlines() if line.startswith("- ")]
-                ids = [m.group(1) for line in lines if (m := re.match(r"- \[([A-Z]\d+) ", line))]
-                cited = f"{', '.join(ids)}; " if ids else ""
-                out["systemMessage"] = (
-                    f"agent-mem: {len(lines)} item{'s' * (len(lines) != 1)} injected ({cited}~{inject.tokens(response.context)} tokens)"
-                )
+                # The user's terminal gets a readable view of exactly what the model got (claude-mem does the same).
+                if event.kind == "session_start":
+                    heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
+                else:
+                    heading = "matches for this prompt"
+                out["systemMessage"] = inject.terminal(response.context, heading, color="NO_COLOR" not in os.environ)
             return out
         return None
     if harness == "copilot":

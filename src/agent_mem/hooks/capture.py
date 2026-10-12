@@ -35,6 +35,15 @@ class Response:
     stored: bool = False
 
 
+def _reusable(command: str, kind: str) -> bool:
+    """A command worth suggesting again: one short line whose program itself does the job.
+
+    `grep … tests/` or a heredoc script mention a test but are not the project's test command.
+    """
+    key = signals.command_key(command)
+    return "\n" not in command and len(command) <= 100 and key is not None and signals.command_kind(key) == kind
+
+
 def dedupe_key(event: Event) -> str:
     if event.native_event_id:
         suffix = event.native_event_id
@@ -479,6 +488,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
             tool_signal.command_kind in {"test", "build", "lint", "install"}
             and project_id is not None
             and tool_signal.command
+            and _reusable(tool_signal.command, tool_signal.command_kind)
         ):
             conn.execute(
                 "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, ?, ?, 1, ?) "

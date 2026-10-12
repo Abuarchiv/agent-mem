@@ -9,10 +9,11 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 
 from agent_mem.core import spool, timeutil
 from agent_mem.core.config import Config
-from agent_mem.core.signals import first_line
+from agent_mem.core.signals import first_line, looks_like_error
 from agent_mem.memory import learn, search
 from agent_mem.memory.store import owner_label
 
@@ -115,7 +116,9 @@ def _health_lines(conn: sqlite3.Connection, config: Config) -> list[str]:
 
 def _profile_line(conn: sqlite3.Connection, project_id: str) -> str | None:
     rows = conn.execute(
-        "SELECT key, value FROM profile WHERE project_id = ? AND key LIKE 'cmd:%' ORDER BY count DESC",
+        # Only reusable one-liners; scripts and long chains were recorded before capture filtered them.
+        "SELECT key, value FROM profile WHERE project_id = ? AND key LIKE 'cmd:%' "
+        "AND instr(value, char(10)) = 0 AND value NOT LIKE '%[truncated]%' AND length(value) <= 100 ORDER BY count DESC",
         (project_id,),
     ).fetchall()
     best: dict[str, str] = {}
@@ -138,14 +141,17 @@ def _last_session_lines(
         return []
     turns = conn.execute(
         "SELECT id, started_at, prompt, answer FROM turns WHERE session_id = ? AND outcome != 'open' "
-        "ORDER BY id DESC LIMIT 2",
+        "AND prompt NOT LIKE '<task-notification>%' ORDER BY id DESC LIMIT 2",
         (session["id"],),
     ).fetchall()
     lines = []
     for turn in reversed(turns):
-        text = f"- [T{turn['id']} · {timeutil.day(turn['started_at'])} · last session, {session['harness']}] {first_line(turn['prompt'], 120)}"
-        if turn["answer"]:
-            text += f" → {first_line(turn['answer'], 140)}"
+        parts = [first_line(turn["prompt"], 120), first_line(turn["answer"] or "", 140)]
+        if not any(parts):
+            continue
+        # A turn opened by a tool call has no prompt; then the answer alone says what happened.
+        text = f"- [T{turn['id']} · {timeutil.day(turn['started_at'])} · last session, {session['harness']}] "
+        text += " → ".join(part for part in parts if part)
         lines.append((text, ("t", int(turn["id"]))))
     return lines
 
@@ -164,11 +170,13 @@ def _open_errors(
     for row in rows:
         if timeutil.hours_between(row["ts"]) > 72 or not row["command_key"] or row["command_key"] in seen:
             continue
-        seen.add(row["command_key"])
         try:
             error = json.loads(row["payload"]).get("error_line") or ""
         except ValueError:
             error = ""
+        if not looks_like_error(error):
+            continue
+        seen.add(row["command_key"])
         owner = ("t", int(row["turn_id"])) if row["turn_id"] else None
         label = f"T{row['turn_id']} · " if row["turn_id"] else ""
         lines.append((f"- [{label}unresolved] `{row['command_key']}` failed: {error[:120]}", owner))
@@ -279,6 +287,8 @@ def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block 
             error = json.loads(row["payload"]).get("error_line") or ""
         except ValueError:
             error = ""
+        if not looks_like_error(error):
+            continue
         lines.append((f"- Still failing: `{row['command_key']}` {error[:100]}", None))
     files: list[str] = []
     for turn in turns:
@@ -308,3 +318,94 @@ def warnings_block(lines: list[tuple[str, tuple[str, int] | None]], config: Conf
 
 def label(owner: tuple[str, int]) -> str:
     return owner_label(*owner)
+
+
+_ENTRY = re.compile(r"- \[(?:(?P<id>[A-Z]\d+) · )?(?:(?P<day>\d{4}-\d{2}-\d{2}) · )?(?P<kind>[^\]]+)\] (?P<text>.*)")
+# Glyph and ANSI colour per kind: what the eye needs to tell a rule from a fact at a glance.
+_STYLE = {
+    "decision": ("◆", "35"),
+    "dead_end": ("✗", "31"),
+    "correction": ("↺", "33"),
+    "preference": ("★", "33"),
+    "lesson": ("✓", "32"),
+    "rule": ("§", "33"),
+    "fact": ("●", "36"),
+    "summary": ("≡", "34"),
+    "native_note": ("✎", "34"),
+    "unresolved": ("!", "31"),
+}
+_GOAL = re.compile(r"- Session goal \((?P<id>[A-Z]\d+)\): (?P<text>.*)")
+_RULE = "─" * 64
+
+
+def _day_name(iso_day: str) -> str:
+    today = datetime.now(UTC).date()
+    names = {today.isoformat(): "Today", (today - timedelta(days=1)).isoformat(): "Yesterday"}
+    return names.get(iso_day) or date.fromisoformat(iso_day).strftime("%a %d %b %Y")
+
+
+def _clip(text: str, limit: int) -> str:
+    line = first_line(text, limit + 1)
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def terminal(context: str, heading: str, color: bool = True) -> str:
+    """The injected block as the user sees it in the terminal: grouped by day, one row per memory.
+
+    Built from the context lines themselves, so the terminal never shows something the model did not get.
+    """
+
+    def paint(code: str, text: str) -> str:
+        return f"\x1b[{code}m{text}\x1b[0m" if color else text
+
+    def row(ident: str, glyph: str, code: str, label: str, text: str) -> str:
+        kind = f"{label:<11}" if label else ""
+        return f"  {paint('2', ident.ljust(5))} {paint(code, glyph)} {paint(code, kind)}{_clip(text, 88)}"
+
+    groups: dict[str, list[str]] = {}
+    warnings: list[str] = []
+    commands = files = ""
+    ids: list[str] = []
+    for line in context.splitlines():
+        if line.startswith("! "):
+            warnings.append(paint("31", line[2:]))
+        elif line.startswith("- Commands that worked here: "):
+            commands = line.split(": ", 1)[1]
+        elif line.startswith("- Files touched: "):
+            files = line.split(": ", 1)[1]
+        elif line.startswith("- Still failing: "):
+            groups.setdefault("Open errors", []).append(row("", "!", "31", "", line[17:]))
+        elif goal := _GOAL.match(line):
+            ids.append(goal["id"])
+            groups.setdefault("This session", []).append(row(goal["id"], "◎", "1", "goal", goal["text"]))
+        elif match := _ENTRY.match(line):
+            kind, text, ident = match["kind"], match["text"], match["id"] or ""
+            if ident:
+                ids.append(ident)
+            if kind == "unresolved":
+                group = "Open errors"
+            elif kind.startswith("last session"):
+                group = "Last session" + (f" · {kind.split(', ', 1)[1]}" if ", " in kind else "")
+                kind = "turn"
+            else:
+                # Only the compaction block lists memories without a day: they are from this session.
+                group = _day_name(match["day"]) if match["day"] else "This session"
+            glyph, code = _STYLE.get(kind, ("›", "2"))
+            label = "" if kind in {"turn", "unresolved"} else kind.replace("_", " ")
+            groups.setdefault(group, []).append(row(ident, glyph, code, label, text))
+    count = sum(len(rows) for rows in groups.values())
+    summary = f"· {heading} · {count} item{'s' * (count != 1)} · ~{tokens(context)} tokens"
+    out = [
+        f"{paint('1;36', 'agent-mem')} {paint('2', summary)}",
+        paint("2", _RULE),
+        *warnings,
+    ]
+    for group, rows in groups.items():
+        out += [paint("1", group), *rows]
+    if commands:
+        out.append(f"{paint('1', 'Commands')}  {_clip(commands, 100)}")
+    if files:
+        out.append(f"{paint('1', 'Files')}  {_clip(files, 100)}")
+    hint = f"agent-mem show {ids[-1]}" if ids else "agent-mem search <words>"
+    out += [paint("2", _RULE), paint("2", f"Details: {hint} · all memories: agent-mem view")]
+    return "\n".join(out)

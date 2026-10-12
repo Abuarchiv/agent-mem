@@ -12,7 +12,7 @@ import pytest
 from agent_mem.core import db, spool
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event
-from agent_mem.hooks import capture, hook
+from agent_mem.hooks import capture, hook, inject
 from agent_mem.memory import indexer
 
 
@@ -51,7 +51,7 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
 
     start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "compact"}
     data = json.loads(hook.run("claude", None, json.dumps(start), config))
-    assert data["systemMessage"].startswith("agent-mem: ") and "tokens" in data["systemMessage"]
+    assert data["systemMessage"].startswith("\x1b[1;36magent-mem") and "This session" in data["systemMessage"]
 
 
 def test_prompt_injection_shows_terminal_line_with_ids():
@@ -60,7 +60,7 @@ def test_prompt_injection_shows_terminal_line_with_ids():
         "<agent-mem>\nMemory:\n- [M3 · 2026-10-12 · fact] uses uv\n- [T7 · 2026-10-11 · turn] parser done\n</agent-mem>"
     )
     out = hook.render("claude", event, capture.Response(context=context))
-    assert out["systemMessage"].startswith("agent-mem: 2 items injected (M3, T7; ~")
+    assert "matches for this prompt · 2 items" in out["systemMessage"] and "uses uv" in out["systemMessage"]
     assert "systemMessage" not in hook.render("codex", event, capture.Response(context=context))
 
 
@@ -241,3 +241,21 @@ def test_subagent_start_gets_context(config: Config, project: Path, conn):
     data = json.loads(hook.run("codex", None, json.dumps(payload), config))
     assert data["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
     assert "retry policy" in data["hookSpecificOutput"]["additionalContext"]
+
+
+def test_terminal_view_groups_what_the_model_got():
+    context = (
+        "<agent-mem>\nMemory:\n! agent-mem: claude hooks failing (x). Run `agent-mem doctor`.\n"
+        "- Commands that worked here: test: `uv run pytest`\n"
+        "- [M3 · 2026-10-01 · decision] use uv, not pip\n- [M4 · 2026-10-01 · dead_end] pip install broke the venv\n"
+        "- [T9 · unresolved] `pytest` failed: AssertionError\n"
+        "- [T7 · 2026-10-02 · last session, codex] fix parser → done, tests pass\n</agent-mem>"
+    )
+    view = inject.terminal(context, "shop", color=False)
+    lines = view.splitlines()
+    assert lines[0] == f"agent-mem · shop · 4 items · ~{inject.tokens(context)} tokens"
+    assert "Thu 01 Oct 2026" in lines and "Open errors" in lines and "Last session · codex" in lines
+    assert "  M3    ◆ decision   use uv, not pip" in lines and "  T7    › fix parser → done, tests pass" in lines
+    assert "claude hooks failing" in view and "Commands  test: `uv run pytest`" in view
+    assert lines[-1] == "Details: agent-mem show T7 · all memories: agent-mem view"
+    assert "\x1b[" not in view and "\x1b[" in inject.terminal(context, "shop")
