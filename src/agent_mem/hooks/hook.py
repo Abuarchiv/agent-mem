@@ -208,7 +208,7 @@ class _Worker(threading.Thread):
                 spawn_viewer(self.config)
                 if self.event.harness == "claude":
                     self.problems = problems(conn)
-                    self.facts = inject.overview(conn, f"claude:{self.event.session_id}")
+                    self.facts = inject.overview(conn, f"claude:{self.event.session_id}", self.config)
                     self.recent = inject.recent_work(conn, f"claude:{self.event.session_id}")
             elif self.event.kind == "session_end" and self.event.harness == "claude":
                 self.summary = inject.session_summary(conn, f"claude:{self.event.session_id}", _color())

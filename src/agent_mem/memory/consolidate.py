@@ -101,8 +101,12 @@ def _clean_commands(conn: sqlite3.Connection) -> int:
 
 
 def _drop_non_error_fixes(conn: sqlite3.Connection) -> int:
-    rows = conn.execute("SELECT id, error_text FROM recipes").fetchall()
-    junk = [(row["id"],) for row in rows if not signals.looks_like_error(row["error_text"] or "")]
+    rows = conn.execute("SELECT id, error_text, command_key FROM recipes").fetchall()
+    junk = [
+        (row["id"],)
+        for row in rows
+        if not signals.looks_like_error(row["error_text"] or "") or not signals.fixable(row["command_key"])
+    ]
     conn.executemany("DELETE FROM recipes WHERE id = ?", junk)
     return len(junk)
 

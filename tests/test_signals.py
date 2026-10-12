@@ -9,6 +9,11 @@ def test_command_keys():
     assert signals.command_key("uv run ruff check .") == "uv run ruff"
     assert signals.command_key("cargo test --all") == "cargo test"
     assert signals.command_key("/usr/bin/git status") == "git status"
+    # the working part, not the shell setup in front of it
+    assert signals.command_key("cd app && uv run pytest -q") == "uv run pytest"
+    assert signals.command_key("S=/tmp; cd $S && python -m pytest") == "python -m pytest"
+    assert signals.command_key("f=$(ls -t logs/* | head -1); grep x $f") == "grep"
+    assert not signals.fixable("cat") and not signals.fixable("grep") and signals.fixable("uv run pytest")
 
 
 def test_command_kinds():

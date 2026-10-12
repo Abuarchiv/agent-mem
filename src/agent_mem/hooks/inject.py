@@ -450,9 +450,9 @@ def _clip(text: str, limit: int) -> str:
     return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
 
 
-def overview(conn: sqlite3.Connection, session_id: str) -> list[str]:
+def overview(conn: sqlite3.Connection, session_id: str, config: Config | None = None) -> list[str]:
     """Where this project's memory stands, for the terminal panel at session start (never sent to the model)."""
-    row = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    row = conn.execute("SELECT project_id, harness FROM sessions WHERE id = ?", (session_id,)).fetchone()
     project_id = row[0] if row else None
     if project_id is None:
         return []
@@ -466,12 +466,30 @@ def overview(conn: sqlite3.Connection, session_id: str) -> list[str]:
     lines = [f"{memories} memories ({new} new today) · {sessions} sessions · {turns} turns in this project"]
     with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
         waiting = conn.execute("SELECT COUNT(*) FROM observe_queue WHERE state = 'pending'").fetchone()[0]
+        line = _facts_line(conn, config, row[1]) if config is not None else None
         if waiting:
-            lines.append(f"{waiting} turn{'s' * (waiting != 1)} waiting for fact extraction in the background")
+            line = f"{line + ' · ' if line else ''}{waiting} turn{'s' * (waiting != 1)} waiting"
+        if line:
+            lines.append(line)
     paused = conn.execute("SELECT value FROM meta WHERE key = 'paused_until'").fetchone()
     if paused:
         lines.append(f"capture paused until {paused[0]} (`agent-mem resume` turns it back on)")
     return lines
+
+
+def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str | None:
+    """Which model turns this session's requests into facts, or why none does."""
+    if not config.observe.enabled:
+        return None
+    found = config.observe.stage_for(harness)
+    if found is None:
+        return f"facts: no model for {harness} turns (`{harness}` CLI not found); requests are kept as written"
+    paused = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause.{found[0]}",)).fetchone()
+    if paused and paused[0] > timeutil.iso():
+        when = timeutil.parse(paused[0])
+        until = when.astimezone().strftime("%H:%M") if when else paused[0]
+        return f"facts: {found[0]} paused until {until} (quota or login); requests stay queued"
+    return f"facts by {found[1]} via {found[0]}"
 
 
 def session_summary(conn: sqlite3.Connection, session_id: str, color: bool = True) -> str | None:

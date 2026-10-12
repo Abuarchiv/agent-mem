@@ -148,7 +148,13 @@
       if (failing) items.push({ tone: "bad", text: `<b>${h(componentLabel(component))} is failing:</b> ${h(firstLine(info.last_error, 140))}`, view: "health" });
     }
     if (health.spool > 0) items.push({ tone: "warn", text: `<b>${plural(health.spool, "event")} waiting in the spool.</b> Run <code>agent-mem index</code>.`, view: "health" });
-    if (health.quarantine > 0) items.push({ tone: "warn", text: `<b>${plural(health.quarantine, "hook message")} could not be read</b> and ${health.quarantine === 1 ? "was" : "were"} set aside. Everything else was saved.`, view: "health" });
+    // An old unreadable message stays visible on the health page; the banner is for fresh ones.
+    const latest = data.quarantine_latest;
+    const fresh = latest?.ts && Date.now() - (date(latest.ts)?.getTime() ?? 0) < 864e5;
+    if (health.quarantine > 0 && fresh) items.push({ tone: "warn", text: `<b>${plural(health.quarantine, "hook message")} could not be read</b> and ${health.quarantine === 1 ? "was" : "were"} set aside. Everything else was saved.`, view: "health" });
+    for (const agent of data.agents ?? []) {
+      if (agent.connected && agent.paused_until) items.push({ tone: "warn", text: `<b>Fact extraction for ${h(agent.label)} is paused</b> until ${h(clock(agent.paused_until))} (quota or login of <code>${h(agent.stage)}</code>). Requests stay queued.`, view: "health" });
+    }
     const proposed = data.rules.filter((rule) => !rule.enabled && inProjectOrGlobal(rule.project_id)).length;
     if (proposed > 0) items.push({ tone: "info", text: `<b>${plural(proposed, "rule")} proposed from your corrections.</b> Review them before enabling.`, view: "learned" });
     for (const warning of health.config_warnings ?? []) items.push({ tone: "warn", text: `<b>Config:</b> ${h(warning)}`, view: "health" });
@@ -560,6 +566,18 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 
   /* ---------------------------------------------------------------- health */
 
+  function agentRow(agent) {
+    const recording = agent.connected ? '<i class="dot good"></i> Connected' : agent.cli ? '<i class="dot warn"></i> Not connected' : '<span class="muted">Not installed</span>';
+    let facts = '<span class="muted">kept as written (no model)</span>';
+    if (!agent.enabled) facts = '<span class="muted">off in config</span>';
+    else if (agent.stage) facts = `<code>${h(agent.model)}</code> <span class="muted">via ${h(agent.stage)}</span>${agent.paused_until ? ` ${tag(`paused until ${clock(agent.paused_until)}`, "warn")}` : ""}`;
+    const today = agent.facts_ok_today || agent.facts_failed_today ? `${num(agent.facts_ok_today)} runs${agent.facts_failed_today ? ` · ${num(agent.facts_failed_today)} failed` : ""}` : '<span class="muted">—</span>';
+    let next = '<span class="muted">—</span>';
+    if (agent.cli && !agent.connected) next = `<code>agent-mem setup ${h(agent.harness)} --write</code>`;
+    else if (agent.connected && !agent.stage && agent.enabled) next = agent.harness === "opencode" ? 'Add <code>"ollama"</code> to <code>observe.providers</code> for facts' : `Install the <code>${h(agent.harness)}</code> CLI for facts`;
+    return `<tr><td><b>${h(agent.label)}</b></td><td>${recording}</td><td>${facts}</td><td>${today}</td><td>${next}</td></tr>`;
+  }
+
   function healthView() {
     const health = data.health;
     const paused = Boolean(health.paused_until);
@@ -570,6 +588,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
       return `<tr><td><i class="dot ${failing ? "bad" : "good"}" style="display:inline-block;margin-right:8px"></i><b>${h(componentLabel(name))}</b></td><td>${h(info.last_ok_at ? when(info.last_ok_at) : "never")}</td><td class="num">${num(info.ok_count)}</td><td class="num">${num(info.error_count)}</td><td>${info.last_error ? `<code>${h(firstLine(info.last_error, 160))}</code>` : '<span class="muted">—</span>'}</td></tr>`;
     }).join("");
     const semantic = String(health.semantic ?? "not indexed yet");
+    const agentRows = (data.agents ?? []).filter((agent) => matches([agent.label, agent.stage, agent.model])).map(agentRow).join("");
     return `<div class="page-head"><div><h1>Health &amp; privacy</h1><p class="lede">Is everything working? Green means yes. This is the state when the page was written; <code>agent-mem doctor</code> checks it right now.</p></div></div>
 <div class="state-grid">
 <section class="block ${paused ? "block-yellow" : "block-green"}"><i class="block-deco deco-triangle"></i><h2>Capture</h2><div class="big-number"><b>${paused ? "Paused" : "Active"}</b></div><span class="caption">${paused ? "Resume with <code>agent-mem resume</code>" : "Pause with <code>agent-mem pause --for 1h</code>"}</span></section>
@@ -577,17 +596,18 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 <section class="block ${backupHours < 72 ? "block-pink" : "block-coral"}"><h2>Backup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.last_backup_at))}</b></div><span class="caption">${backupHours < 72 ? "Daily backups are kept in the data directory." : "Run <code>agent-mem backup</code>."}</span></section>
 <section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and retires outdated facts.</span></section>
 </div>
+<section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which model turns their requests into facts</small></div><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
 <div class="columns">
 <section class="panel"><div class="panel-head"><h2>Running parts</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Part</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Hooks report here after the first captured session.")}</section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
 <div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB · schema v${h(health.schema)}</span></div>
 <div class="row"><b>Waiting to be saved</b><span class="value">${plural(health.spool, "event")}</span></div>
-<div class="row"><b>Could not be read</b><span class="value">${plural(health.quarantine, "file")}</span></div>
+<div class="row"><span class="grow wrap"><b>Could not be read</b>${data.quarantine_latest ? `<span>Latest ${h(when(data.quarantine_latest.ts))}: ${h(data.quarantine_latest.reason)}</span>` : ""}</span><span class="value">${plural(health.quarantine, "file")}</span></div>
 <div class="row"><b>Data directory</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
 <div class="row"><span class="grow wrap"><b>Not encrypted at rest</b><span>Anyone who can read the data directory or its backups can read your memory.</span></span></div>
-<div class="row"><span class="grow wrap"><b>This page is a local file</b><span>It holds a copy of recent data and makes no network requests. <code>agent-mem purge</code> deletes it too, unless you wrote it elsewhere with <code>--output</code>.</span></span></div>
+<div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer listens on 127.0.0.1 and makes no requests to the internet. Pages saved with <code>agent-mem view --output</code> hold a copy of recent data.</span></span></div>
 <div class="row"><span class="grow wrap"><b>Redaction</b><span>Secrets are redacted and private sections dropped before anything is stored.</span></span></div></section>
 </div></div>`;
   }

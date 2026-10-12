@@ -80,7 +80,7 @@ def _count(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> 
 
 def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | None = None) -> dict[str, Any]:
     """Bounded, JSON-safe snapshot of the database. ``project_id`` limits every list to one project."""
-    from agent_mem.cli.health import status
+    from agent_mem.cli.health import agents, quarantine_latest, status
 
     scoped = project_id is not None
     where = "WHERE project_id = ?" if scoped else ""
@@ -293,6 +293,8 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 "config_warnings",
             )
         },
+        "agents": agents(conn, config),
+        "quarantine_latest": quarantine_latest(config),
         "sessions": sessions,
         "turns": turns,
         "actions": actions,

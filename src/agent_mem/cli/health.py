@@ -62,6 +62,63 @@ def harness_installed(harness: str) -> bool:
     return any(_mentions(path, needle) for path in HARNESS_MARKERS[harness])
 
 
+LABELS = {"claude": "Claude Code", "codex": "Codex", "copilot": "Copilot CLI", "opencode": "OpenCode"}
+
+
+def fact_stage(conn: sqlite3.Connection, config: Config, harness: str) -> dict[str, Any]:
+    """Which model turns from ``harness`` go to for facts, and whether it is paused."""
+    found = config.observe.stage_for(harness)
+    paused = db.get_meta(conn, f"observe.pause.{found[0]}") if found else None
+    return {
+        "stage": found[0] if found else None,
+        "model": found[1] if found else None,
+        "paused_until": paused if paused and paused > timeutil.iso() else None,
+        "enabled": config.observe.enabled,
+    }
+
+
+def agents(conn: sqlite3.Connection, config: Config) -> list[dict[str, Any]]:
+    """One row per harness for the viewer: connected, CLI on PATH, fact model, today's fact runs."""
+    from agent_mem.cli import install
+
+    today = timeutil.iso()[:10]
+    calls: dict[str, tuple[int, int, str]] = {}
+    with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
+        for row in conn.execute(
+            "SELECT provider, SUM(ok), SUM(NOT ok), MAX(ts) FROM observe_calls WHERE ts >= ? GROUP BY provider",
+            (today,),
+        ):
+            calls[row[0]] = (int(row[1] or 0), int(row[2] or 0), row[3])
+    rows = []
+    for name in install.HARNESSES:
+        stage = fact_stage(conn, config, name)
+        ok, failed, last = calls.get(stage["stage"] or "", (0, 0, None))
+        rows.append(
+            {
+                "harness": name,
+                "label": LABELS[name],
+                "cli": shutil.which(name) is not None,
+                "connected": harness_installed(name),
+                **stage,
+                "facts_ok_today": ok,
+                "facts_failed_today": failed,
+                "last_fact_at": last,
+            }
+        )
+    return rows
+
+
+def quarantine_latest(config: Config) -> dict[str, Any] | None:
+    """The newest record set aside, so the viewer can say what it was instead of only a count."""
+    files = sorted(config.quarantine_dir.glob("*.json")) if config.quarantine_dir.exists() else []
+    if not files:
+        return None
+    with contextlib.suppress(OSError, ValueError):
+        record = json.loads(files[-1].read_text(encoding="utf-8"))
+        return {"ts": record.get("ts"), "reason": str(record.get("reason") or record.get("type") or "")[:160]}
+    return None
+
+
 def status(conn: sqlite3.Connection, config: Config) -> dict[str, Any]:
     def count(sql: str) -> int:
         return int(conn.execute(sql).fetchone()[0])

@@ -55,6 +55,25 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     assert data["systemMessage"].startswith("\x1b[1;36magent-mem") and "This session" in data["systemMessage"]
 
 
+def test_panel_names_the_fact_model_or_why_there_is_none(config: Config, project: Path, monkeypatch):
+    import shutil
+
+    from agent_mem.core import db
+
+    start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"}
+    monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}" if name == "claude" else None)
+    panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
+    assert "facts by haiku via claude" in panel
+    conn = db.connect(config)
+    db.set_meta(conn, "observe.pause.claude", "2999-01-01T10:00:00.000Z")
+    conn.close()
+    panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
+    assert "facts: claude paused until" in panel and "stay queued" in panel
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
+    assert "facts: no model for claude turns" in panel
+
+
 def test_prompt_injection_stays_out_of_the_terminal(config: Config, project: Path):
     # The terminal shows a panel at session start, compaction and session end; ordinary prompts stay quiet.
     for harness in ("claude", "codex"):

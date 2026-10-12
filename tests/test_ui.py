@@ -44,6 +44,10 @@ def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver:
     actions = snapshot["actions"][str(first["id"])]
     assert [action["failed"] for action in actions if action["tool"] == "Bash"] == [True, False]
     assert actions[0]["resolved"] and "AssertionError" in (actions[0]["error_line"] or "")
+    agents = {row["harness"]: row for row in snapshot["agents"]}
+    assert set(agents) == {"claude", "codex", "copilot", "opencode"}
+    assert all(row["enabled"] and "connected" in row and "facts_ok_today" in row for row in agents.values())
+    assert agents["opencode"]["stage"] is None  # its turns are kept as written unless ollama is opted in
     assert snapshot["recipes"] and snapshot["recipes"][0]["command_key"]
     assert snapshot["learning"]["errors_fixed"] >= 1
     assert snapshot["projects"][0]["name"] == "demo"

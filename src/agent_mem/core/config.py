@@ -118,6 +118,18 @@ class Observe:
     contradiction_max_pairs: int = 15
     pause_minutes: int = 60
 
+    def stage_for(self, harness: str) -> tuple[str, str] | None:
+        """The stage and model turns from ``harness`` go to first, as in ``observe.providers.chain`` (without
+        pauses, which live in the database). Each harness CLI is its own vendor (D12)."""
+        import shutil
+
+        if not self.enabled:
+            return None
+        for name in self.providers:
+            if (self.cross_vendor or name in {"ollama", harness}) and shutil.which(name):
+                return name, getattr(self, f"{name}_model", "") or "CLI default"
+        return None
+
 
 @dataclass
 class Viewer:

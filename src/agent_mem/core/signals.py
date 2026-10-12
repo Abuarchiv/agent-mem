@@ -185,11 +185,71 @@ def _split(command: str) -> list[str]:
         return segment.split()
 
 
+# Segments that only prepare the shell; the command is the next one ("cd app && pytest" is pytest).
+_SETUP = {"cd", "pushd", "popd", "export", "source", ".", "set", "unset", "alias", "true", ":"}
+# Commands that only look at things. One failing ("cat: no such file") and the next one passing is not an
+# error that a change fixed.
+INSPECTION = {
+    "cat",
+    "less",
+    "head",
+    "tail",
+    "sed",
+    "awk",
+    "grep",
+    "egrep",
+    "rg",
+    "ag",
+    "ls",
+    "find",
+    "fd",
+    "tree",
+    "wc",
+    "echo",
+    "printf",
+    "which",
+    "type",
+    "file",
+    "stat",
+    "pwd",
+    "diff",
+    "cmp",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "jq",
+    "sleep",
+    "test",
+    "[",
+    "open",
+    "du",
+    "df",
+    "ps",
+    "env",
+    "date",
+}
+
+
 def command_key(command: str) -> str | None:
-    tokens = [t for t in _split(command) if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t)]
-    while tokens and tokens[0] in {"sudo", "time", "env", "exec", "nohup", "command"}:
+    first_line = command.strip().splitlines()[0] if command.strip() else ""
+    for segment in re.split(r"\s*(?:&&|\|\||;)\s*", first_line):
+        key = _segment_key(segment.split("|", 1)[0])
+        if key is not None:
+            return key
+    return None
+
+
+def _segment_key(segment: str) -> str | None:
+    try:
+        tokens = shlex.split(segment, posix=True)
+    except ValueError:
+        tokens = segment.split()
+    tokens = [t for t in tokens if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t)]
+    while tokens and tokens[0] in {"sudo", "time", "env", "exec", "nohup", "command", "nice"}:
         tokens = tokens[1:]
-    if not tokens:
+    # "f=$(ls -t x | head -1)" leaves "-t": an assignment, not a command.
+    if not tokens or tokens[0] in _SETUP or tokens[0].startswith(("-", "$", "(", ")")):
         return None
     program = PurePosixPath(tokens[0].replace("\\", "/")).name.lower()
     rest = [t for t in tokens[1:] if not t.startswith("-")]
@@ -204,6 +264,11 @@ def command_key(command: str) -> str | None:
     if program in _MULTI and rest:
         return f"{program} {rest[0]}"
     return program
+
+
+def fixable(command_key: str | None) -> bool:
+    """A failure of this command can be fixed by a change (a test, a build), not just retried with other words."""
+    return bool(command_key) and command_key.split()[0] not in INSPECTION
 
 
 def command_kind(command: str) -> str | None:
