@@ -68,7 +68,7 @@ Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `
 | `memory/semantic.py` | fastembed embeddings (MiniLM default, e5 prefixes for e5 models), vector search, PageRank, time windows |
 | `memory/learn.py`, `memory/consolidate.py` | ACT-R activation, usefulness, Hebbian edges; decay, superseding, anchors |
 | `observe/queue.py` | `observe_queue`: lease, finish, fail with backoff, retry, status |
-| `observe/bundle.py` | Turns to model input: prompt, answer, tool names/commands/files/errors, bounded; no `tool_external` |
+| `observe/bundle.py` | Turns to model input: prompt, answer, tool names/commands/files/errors, subagent answers, bounded; no `tool_external` |
 | `observe/providers.py` | Stages `claude`, `codex`, `copilot`, `ollama`, `fake`; quota and login detection; vendor-faithful chain |
 | `observe/mem0_adapter.py` | The only import point of mem0: `extract`, `add_raw`, `search`, `forget`, `reindex` |
 | `observe/contradiction.py` | Candidate pairs, one judge call, verdicts applied in SQLite and Qdrant |
@@ -97,7 +97,7 @@ B = ln Σ t_j^-0.5            (ACT-R, hours since each access)
 usefulness = (used + 1) / (shown + 2)
 ```
 
-Automatic injection also requires a minimum score and term coverage. Vector candidates count only above `retrieval.min_vector_score` (0.3 for MiniLM, calibrated in `docs/PLAN.md` B.23).
+Automatic injection (prompt hook) is lexical and also requires a minimum score and term coverage; question words and filler verbs are not terms, hyphenated words are searched as their parts, and one inflection ending is dropped. Vector candidates (MCP server, CLI) count only above `retrieval.min_vector_score` (0.3 for MiniLM, calibrated in `docs/PLAN.md` B.23). `agent-mem eval --fixture` reports both paths (`hit@1`, `abstention` and `injected_*`, B.28).
 
 ## Why mem0 search is not the retrieval path
 

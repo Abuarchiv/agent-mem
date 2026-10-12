@@ -10,6 +10,15 @@
 - New tables `observe_queue`, `observe_calls`, `observe_forget` (migration 002). `mem_forget` and `purge` remove facts from Qdrant as well. `agent-mem observe --status|--retry-failed|--reprocess-raw|--reindex`.
 - Facts appear in the next session's briefing as `[M<id> · fact]` without changes to the injection path.
 
+### Quality against claude-mem and agentmemory (Phase 6)
+
+- The prompt hook injected the right memory for 9 of 20 answerable fixture questions; now 18 of 20, with 19 of 20 unanswerable questions still silent. Question words and filler verbs are no search terms, hyphenated words are searched as their parts, one inflection ending is dropped ("deployt" finds "deploy").
+- Dates: "April 8th 2026", "8. April" and "3.4.2026" (day first) are understood; a named day is that day in UTC instead of the evening before. Every turn of the named day is a candidate. agentmemory's coding benchmark `coding-agent-life-v1` (in `tests/fixtures/`, Apache-2.0): 15 of 15 with all gold sessions in the top 5.
+- Injection lists memories oldest first and says that the newer entry holds when two disagree. If the budget is short, the weakest hit is dropped, not the newest.
+- Claude Code shows one terminal line at session start with the number of injected items and tokens. `status` shows injected tokens today, over seven days and per session.
+- With a working observer, corrections and decisions in prompts are no longer stored by pattern; the model writes them. Facts are tagged ([decision], [rule], [dead_end], [fact]); "Use X instead of Y" becomes a rule. The prompt excludes states that change soon (test counts, commits, scores, next steps); on 20 real turns garbage without duplicates fell from 29 to 1 to 3 facts of about 110. Subagent answers enter the bundle.
+- `eval` reports `All@k` and what the prompt hook would inject (`injected_hit@1`, `injected_abstention`); the fixture has 20 abstention cases instead of 5.
+
 ### Retrieval
 
 - Default embedder is now `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (same Recall@5 on LongMemEval as embeddinggemma at a fifth of the size, better than e5-small). `retrieval.min_vector_score` default 0.3, calibrated for it; `query:`/`passage:` prefixes are applied only to e5 models. An embedder change re-embeds everything on the next indexer run and rebuilds the mem0 index on the next worker run.
@@ -32,6 +41,8 @@
 
 ### Fixes
 
+- "immer noch", "wie immer", "noch nie" and "never mind" no longer count as a rule or correction. Rule names lose a sentence-final period ("pip." never matched `pip install`).
+- Compaction context: the session goal is the first turn with text, "still failing" only lists failures of the last three turns.
 - A worker without an embedder (no semantic extra) falls back to the raw stage instead of failing every bundle.
 - The nearest old fact is always judged for a contradiction; in a young index mem0's normalised scores fell under any threshold and the first correction of a project was missed.
 - mem0 telemetry and home directory are fixed before import, so no `~/.mem0` is created and two processes no longer collide on a migration store.

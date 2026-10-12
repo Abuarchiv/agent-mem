@@ -30,8 +30,8 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 
 | Moment | What happens |
 | --- | --- |
-| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, the last session. |
-| You send a prompt | Up to three matching memories, only when the match is strong. |
+| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, the last session, oldest first so an update reads as one. Claude Code shows one line in your terminal: `agent-mem: 5 items injected (~310 tokens)`. |
+| You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
 | Turn ends | The turn is stored. A detached worker extracts facts from it in the background and exits when the queue is empty. |
@@ -41,7 +41,7 @@ All harnesses write into the same memory. What Claude Code learned is available 
 
 ### Facts, without an API key
 
-After each turn the Stop hook starts `agent-mem observe` as a detached process. The worker bundles up to five turns of a session, runs mem0's extraction with a prompt tuned for coding work (conventions, decisions, dead ends, preferences; no generic knowledge, no secrets, in your language), and stores the facts in SQLite with a mirror in a local Qdrant index. For every new fact it checks similar old facts once per bundle and asks the model: KEEP, SUPERSEDE or DUPLICATE. A correction such as "we switched from pytest to nox" invalidates the old fact and removes it from the index.
+After each turn the Stop hook starts `agent-mem observe` as a detached process. The worker bundles up to five turns of a session, runs mem0's extraction with a prompt tuned for coding work (conventions, decisions, dead ends, preferences; no generic knowledge, no secrets, in your language), and stores the facts in SQLite with a mirror in a local Qdrant index. Each fact is tagged as decision, rule, dead end or fact; a rule written as "Use pnpm instead of npm" becomes the same rule as a typed correction. Final answers of subagents are part of the bundle. For every new fact it checks similar old facts once per bundle and asks the model: KEEP, SUPERSEDE or DUPLICATE. A correction such as "we switched from pytest to nox" invalidates the old fact and removes it from the index.
 
 The model is the CLI you already pay for, started under your login with no tools, no MCP servers and no settings:
 
@@ -59,12 +59,12 @@ A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Quota or l
 - **Activation (ACT-R):** memories used often and recently rank higher; unused ones fade but are never deleted.
 - **Implicit feedback:** a recalled memory counts as useful when the agent opens it, edits its files or cites its id.
 - **Error to fix recipes:** a failing command, edits, the same command passing: that becomes a recipe.
-- **Corrections to rules:** "use pnpm instead of npm" becomes a proposed rule; enabled, it blocks `npm` with the reason shown to the agent.
+- **Corrections to rules:** "use pnpm instead of npm" (typed, or extracted by the worker) becomes a proposed rule: a note before the next `npm` command; enabled, it blocks `npm` with the reason shown to the agent.
 - **Dead ends:** reverted changes become warnings for the same files.
 - **Association graph:** files, commands, errors and packages that occur together are linked and searched with Personalized PageRank.
 - **Consolidation:** daily, in the background: decay, global preferences, superseding, stale anchors.
 
-Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern" or "last week" filter by date.
+Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" filter by date and list every turn of that day.
 
 ## Commands
 
