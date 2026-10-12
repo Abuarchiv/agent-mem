@@ -13,8 +13,8 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-from .. import privacy
-from ..config import Config
+from agent_mem.core import privacy
+from agent_mem.core.config import Config
 
 CHARS_PER_TOKEN = 4
 

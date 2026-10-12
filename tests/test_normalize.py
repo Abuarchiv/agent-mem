@@ -1,7 +1,7 @@
 import pytest
 
-from agent_mem.events import Event, PayloadError
-from agent_mem.normalize import normalize
+from agent_mem.core.events import Event, PayloadError
+from agent_mem.hooks.normalize import normalize
 
 
 def test_claude_events():

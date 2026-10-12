@@ -6,9 +6,8 @@ of design decisions; measurements go to its Appendix B and are never edited afte
 - **R1 Boundary.** No daemon, no HTTP server, no open ports. The viewer writes a static page that
   works offline. Generative model calls are made only by the `observe` worker, always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.
   Agent Mem goes online only to download models.
-- **R2 Hook path.** `hook`, `capture`, `db`, `config`, `privacy`, `signals`, `identity`, `inject`,
-  `search`, `learn`, `store`, `spool`, `normalize/*`, `events`, `timeutil`, `logutil` import only the
-  standard library. mem0, qdrant, fastembed, numpy, dateparser and mcp are imported lazily outside the
+- **R2 Hook path.** `core/*`, `hooks/*` and the `memory` modules they use (`store`, `search`,
+  `learn`) import only the standard library. mem0, qdrant, fastembed, numpy, dateparser and mcp are imported lazily outside the
   hook path (`tests/test_observe.py` checks this). Hooks never block or crash the agent: deadline,
   spool on error, silent output on error.
 - **R3 Write paths.** Events are written only through `capture.apply` (live hooks, spool replay,
@@ -21,10 +20,10 @@ of design decisions; measurements go to its Appendix B and are never edited afte
   External content (`tool_external`) is never injected automatically, never becomes a rule or
   preference, and never enters an observer bundle. Rules and preferences come only from the user's
   prompts. Packets stay within `config.Budgets`.
-- **R6 Schema.** Every schema change is a new numbered file in `src/agent_mem/schema/` with a
+- **R6 Schema.** Every schema change is a new numbered file in `src/agent_mem/core/schema/` with a
   migration test.
 - **R7 Plugins.** Manifests in `plugins/` carry the package version (a test checks this).
-- **R8 Viewer.** `ui/` (the `agent-mem view` page) is loaded only by the CLI, escapes every stored string; `purge` deletes
+- **R8 Viewer.** `ui/` (the `agent-mem view` page) is loaded only by `cli/`, escapes every stored string; `purge` deletes
   written pages.
 - **R9 Development.** `uv sync --all-extras`, `uv run pytest -m "not local"`, `uv run ruff check src
   tests && uv run ruff format --check src tests && uv run pyright`. Tests marked `local` need the

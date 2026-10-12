@@ -3,8 +3,9 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
-from agent_mem import consolidate, db, semantic, store, timeutil
-from agent_mem.config import Config
+from agent_mem.core import db, timeutil
+from agent_mem.core.config import Config
+from agent_mem.memory import consolidate, semantic, store
 from tests.conftest import Driver
 
 

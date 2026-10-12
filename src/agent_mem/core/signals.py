@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from .privacy import strip_control
+from agent_mem.core.privacy import strip_control
 
 IMPORTANCE = {
     "read": 0.1,

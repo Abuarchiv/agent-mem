@@ -14,8 +14,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from . import db, identity, spool, store, timeutil, views
-from .config import Config
+from agent_mem.core import db, identity, spool, timeutil
+from agent_mem.core.config import Config
+from agent_mem.memory import store, views
 
 
 def dispatch(ns: argparse.Namespace, config: Config) -> int:
@@ -54,7 +55,7 @@ def _unknown_project(directory: str) -> int:
 
 
 def cmd_status(ns: argparse.Namespace, config: Config) -> int:
-    from .health import status
+    from agent_mem.cli.health import status
 
     with _conn(config) as conn:
         data = status(conn, config)
@@ -86,7 +87,7 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_search(ns: argparse.Namespace, config: Config) -> int:
-    from . import semantic
+    from agent_mem.memory import semantic
 
     with _conn(config) as conn:
         project = _project(conn, ns.project)
@@ -217,7 +218,7 @@ def _purge_spooled(config: Config, matches: Callable[[dict[str, Any]], bool]) ->
 
 
 def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
-    from . import ui
+    from agent_mem import ui
 
     # A written page holds a copy of the data; it must not outlive a purge. It is discarded only
     # once the purge is confirmed.
@@ -310,7 +311,7 @@ def cmd_backup(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_consolidate(ns: argparse.Namespace, config: Config) -> int:
-    from .indexer import run
+    from agent_mem.memory.indexer import run
 
     print(json.dumps(run(config, force_consolidate=True, allow_download=False), indent=2, default=str))
     return 0
@@ -381,7 +382,7 @@ def cmd_lessons(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_models(ns: argparse.Namespace, config: Config) -> int:
-    from . import semantic
+    from agent_mem.memory import semantic
 
     embedder, reason = semantic.load_embedder_verbose(config, allow_download=ns.action == "install")
     if embedder is None:
@@ -392,7 +393,7 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_view(ns: argparse.Namespace, config: Config) -> int:
-    from . import ui
+    from agent_mem import ui
 
     with _conn(config) as conn:
         # Look the project up only; viewing must not register a directory as a new project.
@@ -413,10 +414,11 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
 
 def plugins_dir() -> Path:
     """Plugin files ship inside the wheel (agent_mem/plugins) and live in ./plugins in a checkout."""
-    packaged = Path(__file__).resolve().parent / "plugins"
+    package = Path(__file__).resolve().parents[1]  # src/agent_mem
+    packaged = package / "plugins"
     if packaged.is_dir():
         return packaged
-    return Path(__file__).resolve().parents[2] / "plugins"
+    return package.parents[1] / "plugins"
 
 
 SETUP = {
@@ -464,7 +466,7 @@ def _detect_table(found: dict[str, Any]) -> str:
 
 
 def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
-    from . import install
+    from agent_mem.cli import install
 
     folder = plugins_dir()
     found = install.detect()
@@ -480,7 +482,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
     if ns.harness == "codex":
         print("  Codex asks you to trust the hooks once: start codex and run /hooks.")
     if found["extras"]["semantic"] and not ns.no_models:
-        from . import semantic
+        from agent_mem.memory import semantic
 
         embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
         print(
@@ -500,7 +502,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
-    from . import install
+    from agent_mem.cli import install
 
     touched = install.remove(ns.harness)
     if touched:

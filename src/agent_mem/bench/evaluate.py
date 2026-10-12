@@ -24,9 +24,11 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import capture, db, semantic, timeutil
-from .config import Config, load
-from .events import Event
+from agent_mem.core import db, timeutil
+from agent_mem.core.config import Config, load
+from agent_mem.core.events import Event
+from agent_mem.hooks import capture
+from agent_mem.memory import semantic
 
 Session = list[dict[str, Any]]
 
@@ -119,7 +121,7 @@ class Mem0Backend:
         llm_model: str | None,
         custom_instructions: str | None,
     ) -> None:
-        from .observe.mem0_adapter import Mem0Adapter
+        from agent_mem.observe.mem0_adapter import Mem0Adapter
 
         self.raw = llm == "none"  # E3: no extraction, mem0 hybrid search over the raw turns
         self.adapter = Mem0Adapter(

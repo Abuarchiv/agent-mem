@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_mem import db, hook
-from agent_mem.config import Config
+from agent_mem.core import db
+from agent_mem.core.config import Config
+from agent_mem.hooks import hook
 
 
 def _payload(project: Path, session: str, **fields: object) -> str:
@@ -140,7 +141,7 @@ def test_worker_without_embedder_stores_raw(config: Config, monkeypatch) -> None
 
 def test_doctor_and_capture_survive_a_database_without_observer_tables(config: Config, project: Path) -> None:
     """A database whose version says current but lacks the observer tables (foreign lineage) must not crash."""
-    from agent_mem import health
+    from agent_mem.cli import health
 
     conn = db.connect(config)
     conn.execute("DROP TABLE observe_queue")

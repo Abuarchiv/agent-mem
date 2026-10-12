@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_mem import capture, db, hook, indexer, spool
-from agent_mem.config import Config
+from agent_mem.core import db, spool
+from agent_mem.core.config import Config
+from agent_mem.hooks import capture, hook
+from agent_mem.memory import indexer
 
 
 def _prompt_payload(project: Path, session: str, text: str) -> str:

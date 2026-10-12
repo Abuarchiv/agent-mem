@@ -35,30 +35,46 @@ SQLite (WAL)       the truth: sessions, turns, events, memories (facts), queue, 
 - A turn only goes to the vendor that already saw it (Claude turn to Claude, Codex turn to Codex, Copilot turn to Copilot). `observe.cross_vendor` opens the full chain. Ollama is an opt-in stage.
 - SQLite is the truth. Everything in `mem0/` can be rebuilt from valid facts without a model call. A changed embedder triggers that rebuild on the next worker run and a full re-embedding on the next indexer run.
 
-## Modules
+## Package layout
+
+```
+src/agent_mem/
+  core/      config, db + schema/, events, identity, privacy, signals, spool, timeutil, logutil
+             standard library only; shared by every path
+  hooks/     hook (entry point), normalize/ (Claude Code, Codex, Copilot CLI, OpenCode), capture, inject
+             the hook path: payload in, SQLite write, context out; standard library only
+  memory/    store, search, semantic, learn, consolidate, views, indexer
+             memories, retrieval, embeddings, learning, background indexer
+  observe/   queue, bundle, providers, mem0_adapter, contradiction, worker, coding_instructions.md
+             the background fact worker; the only place that imports mem0 and qdrant
+  mcp/       server: the stdio MCP server used by the plugins
+  cli/       argument parsing, commands, install (setup --write, uninstall), health (status, doctor)
+  ui/        the self-contained HTML page written by `agent-mem view`
+  bench/     evaluate: fixture and LongMemEval-S runner (not used at runtime)
+```
+
+Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `bench` ← `cli`. Nothing in `core`, `hooks` or `memory` imports from `observe`, `cli` or `ui`.
 
 | Module | Responsibility |
 | --- | --- |
-| `normalize/` | Harness payload to `Event` (Claude Code, Codex, Copilot CLI, OpenCode) |
-| `capture.py` | Single write path: sessions, turns, events, recipes, rules, dead ends; enqueues finished turns |
+| `hooks/normalize/` | Harness payload to `Event` |
+| `hooks/capture.py` | Single write path: sessions, turns, events, recipes, rules, dead ends; enqueues finished turns |
+| `hooks/inject.py` | Context blocks within budgets, facts included as `[M<id> · fact]` |
+| `core/signals.py` | Deterministic signals: tool categories, command keys, error signatures, corrections, decisions |
+| `core/privacy.py` | Redaction, private sections, exclude globs, size limits |
+| `core/identity.py` | Project identity (remote URL or repository root, worktrees shared) |
+| `memory/store.py` | Memories, search keys, entities, links, deletion (queues `observe_forget` for facts) |
+| `memory/search.py` | FTS5 + graph candidates, RRF, scoring, abstention (standard library) |
+| `memory/semantic.py` | fastembed embeddings (MiniLM default, e5 prefixes for e5 models), vector search, PageRank, time windows |
+| `memory/learn.py`, `memory/consolidate.py` | ACT-R activation, usefulness, Hebbian edges; decay, superseding, anchors |
 | `observe/queue.py` | `observe_queue`: lease, finish, fail with backoff, retry, status |
 | `observe/bundle.py` | Turns to model input: prompt, answer, tool names/commands/files/errors, bounded; no `tool_external` |
 | `observe/providers.py` | Stages `claude`, `codex`, `copilot`, `ollama`, `fake`; quota and login detection; vendor-faithful chain |
-| `observe/mem0_adapter.py` | The only import point of mem0: `extract`, `add_raw`, `search`, `forget`, `reindex`; our embedder and CLI LLMs registered in mem0's factories |
+| `observe/mem0_adapter.py` | The only import point of mem0: `extract`, `add_raw`, `search`, `forget`, `reindex` |
 | `observe/contradiction.py` | Candidate pairs, one judge call, verdicts applied in SQLite and Qdrant |
 | `observe/worker.py` | The loop, stats, `observe_calls`, forget propagation, reindex on embedder change |
-| `signals.py` | Deterministic signals: tool categories, command keys, error signatures, corrections, decisions |
-| `privacy.py` | Redaction, private sections, exclude globs, size limits |
-| `identity.py` | Project identity (remote URL or repository root, worktrees shared) |
-| `store.py` | Memories, search keys, entities, links, deletion (queues `observe_forget` for facts) |
-| `search.py` | FTS5 + graph candidates, RRF, scoring, abstention (standard library) |
-| `semantic.py` | fastembed embeddings (MiniLM default, e5 prefixes when an e5 model is configured), vector search, PageRank, time windows |
-| `learn.py`, `consolidate.py` | ACT-R activation, usefulness, Hebbian edges; decay, superseding, anchors |
-| `inject.py` | Context blocks within budgets, facts included as `[M<id> · fact]` |
-| `install.py` | `setup --write` and `uninstall`: hook files with the absolute binary path, MCP entries, detection |
-| `health.py` | `status`, `doctor` (observer queue, providers, index size, hook binary paths) |
-| `evaluate.py` | Fixture and LongMemEval-S runner, `--backend sqlite|mem0` |
-| `indexer.py`, `db.py`, `spool.py`, `mcp_server.py`, `cli.py`, `commands.py`, `ui/` (the `view` page) | As before |
+| `cli/install.py` | `setup --write` and `uninstall`: hook files with the absolute binary path, MCP entries, detection |
+| `cli/health.py` | `status`, `doctor` (observer queue, providers, index size, hook binary paths) |
 
 ## Data model
 

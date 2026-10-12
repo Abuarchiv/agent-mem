@@ -17,7 +17,7 @@ def _rule_id(text: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args[:1] == ["hook"]:
-        from .hook import main as hook_main
+        from agent_mem.hooks.hook import main as hook_main
 
         return hook_main(args[1:])
     return _main(args)
@@ -28,8 +28,8 @@ def _main(args: list[str]) -> int:
     import json
     from pathlib import Path
 
-    from . import __version__
-    from .config import load
+    from agent_mem import __version__
+    from agent_mem.core.config import load
 
     parser = argparse.ArgumentParser(prog="agent-mem", description="Local, self-learning memory for coding agents.")
     parser.add_argument(
@@ -128,13 +128,13 @@ def _main(args: list[str]) -> int:
     config = load(ns.data_dir) if ns.data_dir else load()
 
     if ns.command == "mcp":
-        from .mcp_server import main as mcp_main
+        from agent_mem.mcp.server import main as mcp_main
 
         return mcp_main()
     if ns.command == "observe":
         if ns.status:
-            from . import db
-            from .observe import queue
+            from agent_mem.core import db
+            from agent_mem.observe import queue
 
             conn = db.connect(config)
             try:
@@ -143,31 +143,31 @@ def _main(args: list[str]) -> int:
                 conn.close()
             return 0
         if ns.reindex:
-            from .observe.worker import reindex
+            from agent_mem.observe.worker import reindex
 
             print(json.dumps(reindex(config), indent=2))
             return 0
-        from .observe.worker import run as observe_run
+        from agent_mem.observe.worker import run as observe_run
 
         stats = observe_run(config, drain=not ns.once, retry_failed=ns.retry_failed, reprocess_raw=ns.reprocess_raw)
         if not ns.quiet:
             print(json.dumps(stats, indent=2, default=str))
         return 0
     if ns.command == "index":
-        from .indexer import run
+        from agent_mem.memory.indexer import run
 
         stats = run(config, allow_download=not ns.no_download)
         if not ns.quiet:
             print(json.dumps(stats, indent=2, default=str))
         return 0
     if ns.command == "doctor":
-        from .health import doctor, format_checks, to_json
+        from agent_mem.cli.health import doctor, format_checks, to_json
 
         checks = doctor(config, fix=ns.fix)
         print(to_json(checks) if ns.json else format_checks(checks))
         return 0 if all(c.ok or c.warn_only for c in checks) else 1
     if ns.command == "eval":
-        from .evaluate import Runner
+        from agent_mem.bench.evaluate import Runner
 
         runner = Runner(
             ns.backend,
@@ -203,7 +203,7 @@ def _main(args: list[str]) -> int:
         )
         return 0
     if ns.command == "restore":
-        from . import db
+        from agent_mem.core import db
 
         source = ns.file or (db.latest_backup(config) if ns.latest else None)
         if source is None:
@@ -213,7 +213,7 @@ def _main(args: list[str]) -> int:
         print(f"Restored {source}.")
         return 0
 
-    from . import commands
+    from agent_mem.cli import commands
 
     return commands.dispatch(ns, config)
 

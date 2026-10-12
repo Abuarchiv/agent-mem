@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import timedelta
 
-from .. import timeutil
+from agent_mem.core import timeutil
 
 BACKOFF = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=30), timedelta(hours=6))
 MAX_ATTEMPTS = len(BACKOFF)

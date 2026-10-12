@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_mem import capture, db
-from agent_mem.config import Config
-from agent_mem.events import Event
+from agent_mem.core import db
+from agent_mem.core.config import Config
+from agent_mem.core.events import Event
+from agent_mem.hooks import capture
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +60,7 @@ class Driver:
     def _ts(self) -> str:
         from datetime import timedelta
 
-        from agent_mem import timeutil
+        from agent_mem.core import timeutil
 
         self.counter += 1
         return timeutil.iso(timeutil.now() - timedelta(minutes=500) + timedelta(seconds=self.counter))

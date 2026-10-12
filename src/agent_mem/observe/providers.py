@@ -212,7 +212,7 @@ def available(name: str) -> bool:
 
 
 def paused_until(conn: Any, name: str) -> str | None:
-    from .. import db
+    from agent_mem.core import db
 
     return db.get_meta(conn, f"observe.pause.{name}")
 
@@ -223,7 +223,7 @@ def note_failure(conn: Any, config: Any, name: str, error: ProviderError) -> Non
         return
     from datetime import timedelta
 
-    from .. import db, timeutil
+    from agent_mem.core import db, timeutil
 
     until = timeutil.iso(timeutil.now() + timedelta(minutes=config.observe.pause_minutes))
     db.set_meta(conn, f"observe.pause.{name}", until)
@@ -231,7 +231,7 @@ def note_failure(conn: Any, config: Any, name: str, error: ProviderError) -> Non
 
 def chain(config: Any, harness: str, conn: Any) -> list[str]:
     """Stages a turn from ``harness`` may use, in order, minus missing binaries and paused stages."""
-    from .. import timeutil
+    from agent_mem.core import timeutil
 
     names = list(config.observe.providers)
     if "fake" in names:

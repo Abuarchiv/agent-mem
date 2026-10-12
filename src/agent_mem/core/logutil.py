@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from . import timeutil
+from agent_mem.core import timeutil
 
 MAX_BYTES = 1_000_000
 KEEP = 5

@@ -15,9 +15,11 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
-from . import capture, consolidate, db, logutil, spool, timeutil
-from .config import Config
-from .events import Event, PayloadError
+from agent_mem.core import db, logutil, spool, timeutil
+from agent_mem.core.config import Config
+from agent_mem.core.events import Event, PayloadError
+from agent_mem.hooks import capture
+from agent_mem.memory import consolidate
 
 
 def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, Any]) -> None:
@@ -127,7 +129,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
 
     embedder = None
     if config.semantic.enabled:
-        from . import semantic
+        from agent_mem.memory import semantic
 
         embedder = semantic.load_embedder(config, allow_download=allow_download)
         previous = db.get_meta(conn, "semantic")

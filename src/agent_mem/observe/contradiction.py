@@ -13,8 +13,9 @@ import re
 import sqlite3
 from dataclasses import dataclass
 
-from .. import store, timeutil
-from .mem0_adapter import Fact, Mem0Adapter
+from agent_mem.core import timeutil
+from agent_mem.memory import store
+from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 PROMPT = """You check a coding project's memory for contradictions and duplicates.
 Each line below pairs a NEW fact with an OLD fact that is similar to it. For every pair decide:

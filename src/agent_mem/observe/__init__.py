@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-from ..config import default_data_dir
+from agent_mem.core.config import default_data_dir
 
 os.environ.setdefault("MEM0_TELEMETRY", "False")
 os.environ.setdefault("MEM0_DIR", str(default_data_dir() / "mem0"))

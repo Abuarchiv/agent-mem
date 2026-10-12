@@ -1,4 +1,4 @@
-from agent_mem import privacy
+from agent_mem.core import privacy
 
 # Fake credentials, assembled at runtime so that secret scanners do not flag this file.
 _BODY = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"

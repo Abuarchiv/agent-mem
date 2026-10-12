@@ -217,7 +217,7 @@ Insgesamt 22 Arbeitstage plus 2 Wochen Dogfooding. Es wird nichts gepusht, deplo
 
 | Modul | Schicksal |
 | --- | --- |
-| `hook`, `capture`, `normalize/*`, `events`, `spool`, `privacy`, `identity`, `signals`, `timeutil`, `logutil`, `config`, `db` | behalten. `capture` legt Queue-Eintrag an, `config` erhält Worker-Optionen. |
+| `hook`, `capture`, `normalize/*`, `events`, `spool`, `privacy`, `identity`, `signals`, `timeutil`, `logutil`, `config`, `db` | behalten; seit 2026-10-12 in den Paketen `core/` und `hooks/` (Struktur in `ARCHITECTURE.md`). `capture` legt Queue-Eintrag an, `config` erhält Worker-Optionen. |
 | `store`, `search`, `inject`, `learn`, `consolidate`, `health`, `views`, `ui/*`, `mcp_server`, `cli`, `commands` | behalten (Viewer-Abhängigkeiten). `inject` und `search` lesen Fakten. |
 | `summarize`, `federate`, `importers` | **gelöscht am 2026-10-12** auf Wunsch des Nutzers: Session-Zusammenfassungen ersetzt der Observer, fremde Notizen (`native_note`) und Importe aus claude-mem/agentmemory gehören nicht zum neuen Kern. Schema-Spalten bleiben (keine Migration nötig). |
 | `evaluate` | behalten, erhält `--backend {sqlite,mem0}` und Teilmengen-Option (§8). |
@@ -264,7 +264,7 @@ Diese Regeln stammen aus der früheren `AGENTS.md`, die im Arbeitsbaum durch „
 - **R3 Schreibwege.** Events werden nur über `capture.apply` geschrieben (Live-Hooks, Spool-Replay, Importe), idempotent über Dedupe-Schlüssel. Erinnerungen nur über `store.add_memory`, das Titel und Text bereinigt.
 - **R4 Privacy.** Alles Gespeicherte läuft durch `privacy.clean_text`. Rohe Host-Payloads werden nie gespeichert. Laufzeitdaten, Zugangsdaten, Logs, Backups und Modell-Caches liegen außerhalb von Git.
 - **R5 Vertrauen.** Host-Eingaben und abgerufener Text sind nicht vertrauenswürdig; injizierter Kontext wird als Daten gerahmt. Externe Inhalte (`tool_external`) werden nie automatisch injiziert und nie zu Regeln oder Präferenzen. Regeln und Präferenzen stammen nur aus den Prompts des Nutzers. Pakete bleiben innerhalb von `config.Budgets`.
-- **R6 Schema.** Jede Schemaänderung ist eine neue nummerierte Datei in `src/agent_mem/schema/` mit Migrationstest.
+- **R6 Schema.** Jede Schemaänderung ist eine neue nummerierte Datei in `src/agent_mem/core/schema/` mit Migrationstest.
 - **R7 Plugins.** Manifeste in `plugins/` tragen die Paketversion (Test prüft das).
 - **R8 Viewer.** `ui/` wird nur vom CLI geladen, escaped jeden gespeicherten String; `purge` löscht geschriebene Seiten.
 - **R9 Entwicklung.** `uv sync --all-extras`, `uv run pytest`, `uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright`. `uv.lock` gehört ins Repository, damit Pins reproduzierbar sind. Vor einem Release: CI grün auf Linux, macOS (arm64, x64) und Windows, dazu je Harness eine echte Session von Hand (Capture, Recall in neuer Session, Compaction, Deinstallation).

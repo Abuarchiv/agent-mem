@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from . import consolidate, learn, search, timeutil
-from .signals import first_line
-from .store import owner_label, parse_owner
+from agent_mem.core import timeutil
+from agent_mem.core.signals import first_line
+from agent_mem.memory import consolidate, learn, search
+from agent_mem.memory.store import owner_label, parse_owner
 
 
 def search_lines(hits: list[search.Hit]) -> str:

@@ -8,8 +8,10 @@ from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
 
-from . import __version__, db, identity, semantic, store, views
-from .config import Config, load
+from agent_mem import __version__
+from agent_mem.core import db, identity
+from agent_mem.core.config import Config, load
+from agent_mem.memory import semantic, store, views
 
 INSTRUCTIONS = (
     "Local memory shared across coding sessions and agents. Search first (mem_search returns a compact index), "
@@ -68,7 +70,7 @@ def build(config: Config | None = None) -> MCPServer:
         """Store an explicit memory. Use supersedes='M12' to replace an outdated one of this project.
 
         Preferences are learned only from the user's own prompts and cannot be stored here."""
-        from .privacy import clean_text
+        from agent_mem.core.privacy import clean_text
 
         body = clean_text(text, 4000)
         if not body.strip():

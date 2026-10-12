@@ -17,9 +17,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import PurePosixPath
 
-from . import db, identity, inject, learn, privacy, signals, store, timeutil
-from .config import Config, env_flag, load_project_settings
-from .events import Event
+from agent_mem.core import db, identity, privacy, signals, timeutil
+from agent_mem.core.config import Config, env_flag, load_project_settings
+from agent_mem.core.events import Event
+from agent_mem.hooks import inject
+from agent_mem.memory import learn, store
 
 _CITED = re.compile(r"\b([TM])(\d{1,9})\b")
 _OVERRIDE = re.compile(r"(?i)\b(trotzdem|egal|ignore (the|that) rule|anyway|do it anyway|mach es trotzdem)\b")

@@ -1,6 +1,6 @@
 import math
 
-from agent_mem import learn, search
+from agent_mem.memory import learn, search
 from tests.conftest import Driver
 
 

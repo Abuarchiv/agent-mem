@@ -1,4 +1,4 @@
-from agent_mem import signals
+from agent_mem.core import signals
 
 
 def test_command_keys():

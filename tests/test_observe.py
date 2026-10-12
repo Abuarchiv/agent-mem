@@ -37,7 +37,7 @@ def test_hook_path_does_not_import_observer() -> None:
     import sys
 
     code = (
-        "import sys, agent_mem.hook, agent_mem.capture, agent_mem.inject, agent_mem.store, agent_mem.search;"
+        "import sys, agent_mem.hooks.hook, agent_mem.hooks.capture, agent_mem.hooks.inject, agent_mem.memory.store, agent_mem.memory.search;"
         "bad = [m for m in sys.modules if m.startswith(('mem0', 'qdrant_client', 'fastembed', 'agent_mem.observe'))];"
         "print(','.join(bad))"
     )

@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_mem import cli, db
-from agent_mem import config as config_module
-from agent_mem.config import Config
+from agent_mem import cli
+from agent_mem.core import config as config_module
+from agent_mem.core import db
+from agent_mem.core.config import Config
 from tests.conftest import Driver
 
 
@@ -16,7 +17,7 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 
 
 def test_mcp_tools(conn, config: Config, project: Path, driver: Driver, monkeypatch: pytest.MonkeyPatch):
-    from agent_mem import mcp_server
+    from agent_mem.mcp import server as mcp_server
 
     driver.prompt("s1", "Set up the nightly backup job with restic")
     driver.edit("s1", "backup.sh")
@@ -82,7 +83,7 @@ def test_cli_commands(config: Config, project: Path, driver: Driver, capsys, mon
 
 
 def test_eval_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from agent_mem import evaluate
+    from agent_mem.bench import evaluate
 
     monkeypatch.setenv("AGENT_MEM_DATA_DIR", str(tmp_path / "evaldata"))
     dataset = tmp_path / "lme.json"

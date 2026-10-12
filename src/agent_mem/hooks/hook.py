@@ -18,10 +18,11 @@ import threading
 import time
 from typing import Any
 
-from . import capture, db, logutil, spool, timeutil
-from .config import Config, env_flag, load
-from .events import Event, PayloadError
-from .normalize import normalize
+from agent_mem.core import db, logutil, spool, timeutil
+from agent_mem.core.config import Config, env_flag, load
+from agent_mem.core.events import Event, PayloadError
+from agent_mem.hooks import capture
+from agent_mem.hooks.normalize import normalize
 
 INDEXER_THROTTLE_SECONDS = 60
 

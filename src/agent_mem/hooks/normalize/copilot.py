@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import timeutil
-from ..events import (
+from agent_mem.core import timeutil
+from agent_mem.core.events import (
     Event,
     PayloadError,
     exit_code_of,

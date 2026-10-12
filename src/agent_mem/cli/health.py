@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import db, spool, timeutil
-from .config import Config
-from .install import claude_home, codex_home
+from agent_mem.cli.install import claude_home, codex_home
+from agent_mem.core import db, spool, timeutil
+from agent_mem.core.config import Config
 
 HARNESS_MARKERS = {
     "claude": [claude_home() / "plugins", claude_home() / "settings.json"],
@@ -167,7 +167,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
             checks.append(
                 Check("full-text search (FTS5 trigram)", False, str(error), "Use a Python with SQLite ≥ 3.34.")
             )
-        from . import semantic
+        from agent_mem.memory import semantic
 
         embedder, reason = semantic.load_embedder_verbose(config)
         checks.append(
@@ -234,7 +234,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
         conn.close()
     checks.extend(_hook_checks())
     if fix:
-        from . import indexer
+        from agent_mem.memory import indexer
 
         with contextlib.suppress(Exception):
             indexer.run(config, allow_download=False)
@@ -243,7 +243,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
 
 def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     """docs/PLAN.md §14 I5: observer extra, queue, last worker run, providers, index size."""
-    from . import install
+    from agent_mem.cli import install
 
     checks: list[Check] = []
     if not install.extras()["observer"]:
@@ -295,7 +295,7 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
             warn_only=True,
         )
     )
-    from .observe import mem0_adapter
+    from agent_mem.observe import mem0_adapter
 
     checks.append(
         Check(
@@ -328,7 +328,7 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
 
 def _hook_checks() -> list[Check]:
     """docs/PLAN.md §14 I2/I5: hook commands point at an existing binary."""
-    from . import install
+    from agent_mem.cli import install
 
     checks: list[Check] = []
     for harness in install.HARNESSES:

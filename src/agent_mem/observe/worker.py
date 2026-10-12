@@ -19,11 +19,12 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
-from .. import db, logutil, store, timeutil
-from ..config import Config
-from . import bundle as bundling
-from . import contradiction, providers, queue
-from .mem0_adapter import Fact, Mem0Adapter
+from agent_mem.core import db, logutil, timeutil
+from agent_mem.core.config import Config
+from agent_mem.memory import store
+from agent_mem.observe import bundle as bundling
+from agent_mem.observe import contradiction, providers, queue
+from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 POLL_SECONDS = 2.0
 

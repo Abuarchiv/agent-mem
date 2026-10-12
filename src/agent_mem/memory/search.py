@@ -14,10 +14,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from . import learn, timeutil
-from .config import Config
-from .signals import first_line
-from .store import owner_label
+from agent_mem.core import timeutil
+from agent_mem.core.config import Config
+from agent_mem.core.signals import first_line
+from agent_mem.memory import learn
+from agent_mem.memory.store import owner_label
 
 Owner = tuple[str, int]
 

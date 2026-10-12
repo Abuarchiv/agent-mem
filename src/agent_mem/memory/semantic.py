@@ -13,8 +13,9 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from . import search, timeutil
-from .config import Config
+from agent_mem.core import timeutil
+from agent_mem.core.config import Config
+from agent_mem.memory import search
 
 Owner = tuple[str, int]
 

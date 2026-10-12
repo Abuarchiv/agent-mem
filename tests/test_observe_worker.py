@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_mem import db, hook
-from agent_mem.config import Config
+from agent_mem.core import db
+from agent_mem.core.config import Config
+from agent_mem.hooks import hook
 
 if importlib.util.find_spec("mem0") is None:
     pytest.skip("observer extra not installed", allow_module_level=True)
@@ -32,7 +33,7 @@ def _turn(config: Config, project: Path, session: str, prompt: str, answer: str)
 
 @pytest.fixture
 def observe_config(config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
-    from agent_mem.config import load
+    from agent_mem.core.config import load
 
     real = load()  # the user's model cache, so no download happens in tests
     config.semantic.enabled = True
@@ -123,7 +124,7 @@ def test_raw_stage_when_no_provider(observe_config: Config, project: Path) -> No
 
 
 def test_forget_reaches_mem0(observe_config: Config, project: Path) -> None:
-    from agent_mem import store
+    from agent_mem.memory import store
 
     _turn(observe_config, project, "s1", "Realm heißt intern.", "ok")
     conn = db.connect(observe_config)

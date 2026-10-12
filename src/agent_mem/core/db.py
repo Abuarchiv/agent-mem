@@ -13,8 +13,8 @@ from collections.abc import Iterator
 from importlib import resources
 from pathlib import Path
 
-from . import timeutil
-from .config import Config
+from agent_mem.core import timeutil
+from agent_mem.core.config import Config
 
 BUSY_TIMEOUT_MS = 150
 
@@ -33,7 +33,7 @@ class MigrationPendingError(RuntimeError):
 
 def _migrations() -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
-    for entry in resources.files("agent_mem.schema").iterdir():
+    for entry in resources.files("agent_mem.core.schema").iterdir():
         name = entry.name
         if name.endswith(".sql") and name[:3].isdigit():
             found.append((int(name[:3]), entry.read_text(encoding="utf-8")))

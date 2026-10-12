@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import timeutil
+from agent_mem.core import timeutil
 
 
 @dataclass(frozen=True)

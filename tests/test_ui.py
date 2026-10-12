@@ -8,8 +8,9 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from agent_mem import cli, db, identity, ui
-from agent_mem.config import Config
+from agent_mem import cli, ui
+from agent_mem.core import db, identity
+from agent_mem.core.config import Config
 from tests.conftest import Driver
 
 INJECTION = "</script><script>alert(1)</script><!--"

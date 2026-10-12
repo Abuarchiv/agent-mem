@@ -24,7 +24,7 @@ The provider `fake` answers from a JSON file named in `AGENT_MEM_FAKE_LLM` (a li
 
 ## Changing the schema
 
-Add a new numbered file in `src/agent_mem/schema/` and a migration test. Never edit an existing file.
+Add a new numbered file in `src/agent_mem/core/schema/` and a migration test. Never edit an existing file.
 
 ## Changing the embedder or mem0
 

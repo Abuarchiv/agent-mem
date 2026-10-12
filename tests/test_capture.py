@@ -1,8 +1,9 @@
 import json
 import os
 
-from agent_mem import capture, db, identity
-from agent_mem.events import Event
+from agent_mem.core import db, identity
+from agent_mem.core.events import Event
+from agent_mem.hooks import capture
 from tests.conftest import Driver
 
 
@@ -152,7 +153,7 @@ def test_is_within_handles_prefixes_and_case(tmp_path):
 
 
 def test_pre_compaction_context_for_opencode(conn, config, project):
-    from agent_mem import hook
+    from agent_mem.hooks import hook
 
     oc = Driver(conn, config, project, harness="opencode")
     oc.prompt("o1", "Port the scheduler to asyncio")

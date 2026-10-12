@@ -8,7 +8,7 @@ mem0 validates provider names in its pydantic configs (A.2). We register our own
 factories and set the provider name after validation, so no placeholder provider is ever
 instantiated (no Ollama or OpenAI client is created for Claude-only installs).
 
-Embeddings come from the project's own :mod:`agent_mem.semantic` embedder so that the mem0 index and
+Embeddings come from the project's own :mod:`agent_mem.memory.semantic` embedder so that the mem0 index and
 the SQLite vectors use identical vectors (fair comparison in §8, one model cache, E5 prefixes kept).
 """
 
@@ -25,8 +25,8 @@ from mem0.configs.llms.base import BaseLlmConfig
 from mem0.embeddings.base import EmbeddingBase
 from mem0.utils.factory import EmbedderFactory, LlmFactory
 
-from .. import semantic
-from ..config import Config
+from agent_mem.core.config import Config
+from agent_mem.memory import semantic
 
 COLLECTION = "agent_mem"
 EMBEDDER_PROVIDER = "agent_mem"
@@ -50,7 +50,7 @@ class Fact:
 
 
 class SemanticEmbedder(EmbeddingBase):
-    """mem0 ``EmbeddingBase`` over :class:`agent_mem.semantic.Embedder` (looked up by handle)."""
+    """mem0 ``EmbeddingBase`` over :class:`agent_mem.memory.semantic.Embedder` (looked up by handle)."""
 
     def __init__(self, config: BaseEmbedderConfig) -> None:
         super().__init__(config)

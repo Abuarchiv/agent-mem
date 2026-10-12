@@ -14,8 +14,9 @@ import re
 import sqlite3
 from pathlib import Path
 
-from . import db, identity, learn, store, timeutil
-from .config import Config
+from agent_mem.core import db, identity, timeutil
+from agent_mem.core.config import Config
+from agent_mem.memory import learn, store
 
 _NORMALIZE = re.compile(r"[\W_]+")  # Unicode-aware: Cyrillic, CJK etc. keep their letters
 
@@ -164,7 +165,7 @@ def link_neighbours(conn: sqlite3.Connection, model: str, since: str | None, thr
     """New memories add their title as an extra search key to their nearest existing neighbours."""
     import numpy as np
 
-    from .semantic import from_blob
+    from agent_mem.memory.semantic import from_blob
 
     new_rows = conn.execute(
         "SELECT m.id, m.title, m.project_id, v.vec FROM memories m JOIN vectors v ON v.owner_type = 'm' AND v.owner_id = m.id "

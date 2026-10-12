@@ -9,24 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from agent_mem import (
-    capture,
-    cli,
-    consolidate,
-    db,
-    hook,
-    identity,
-    inject,
-    search,
-    semantic,
-    signals,
-    spool,
-    store,
-    timeutil,
-)
-from agent_mem.config import Config
-from agent_mem.events import Event
-from agent_mem.normalize import normalize
+from agent_mem import cli
+from agent_mem.core import db, identity, signals, spool, timeutil
+from agent_mem.core.config import Config
+from agent_mem.core.events import Event
+from agent_mem.hooks import capture, hook, inject
+from agent_mem.hooks.normalize import normalize
+from agent_mem.memory import consolidate, search, semantic, store
 from tests.conftest import Driver
 
 # --- hook path -------------------------------------------------------------------
@@ -207,7 +196,7 @@ def test_again_question_is_a_correction():
 
 
 def test_mcp_cannot_store_preferences_or_supersede_user_memories(conn, config: Config, project: Path, monkeypatch):
-    from agent_mem import mcp_server
+    from agent_mem.mcp import server as mcp_server
 
     monkeypatch.chdir(project)
     server = mcp_server.build(config)
@@ -272,7 +261,7 @@ def test_declined_purge_keeps_the_view_page(config: Config, monkeypatch):
 
 
 def test_doctor_reports_a_migration_in_progress(config: Config, monkeypatch):
-    from agent_mem import health
+    from agent_mem.cli import health
 
     def busy(*args, **kwargs):
         raise db.MigrationInProgressError("database is locked")

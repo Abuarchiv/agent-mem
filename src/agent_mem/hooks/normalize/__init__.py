@@ -1,11 +1,11 @@
-"""Translate harness-specific hook payloads into :class:`agent_mem.events.Event`."""
+"""Translate harness-specific hook payloads into :class:`agent_mem.core.events.Event`."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..events import Event, PayloadError
-from . import claude, codex, copilot, opencode
+from agent_mem.core.events import Event, PayloadError
+from agent_mem.hooks.normalize import claude, codex, copilot, opencode
 
 _NORMALIZERS = {
     "claude": claude.normalize,

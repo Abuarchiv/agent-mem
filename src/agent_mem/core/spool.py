@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .db import ensure_private_dir
+from agent_mem.core.db import ensure_private_dir
 
 
 class PermanentError(Exception):

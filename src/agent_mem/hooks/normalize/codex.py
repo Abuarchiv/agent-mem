@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..events import Event
-from . import claude
+from agent_mem.core.events import Event
+from agent_mem.hooks.normalize import claude
 
 
 def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event | None:

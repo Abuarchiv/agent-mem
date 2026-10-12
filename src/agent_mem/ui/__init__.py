@@ -20,8 +20,10 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from .. import __version__, learn, timeutil
-from ..config import Config
+from agent_mem import __version__
+from agent_mem.core import timeutil
+from agent_mem.core.config import Config
+from agent_mem.memory import learn
 
 LIMITS = {
     "sessions": 150,
@@ -78,7 +80,7 @@ def _count(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> 
 
 def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | None = None) -> dict[str, Any]:
     """Bounded, JSON-safe snapshot of the database. ``project_id`` limits every list to one project."""
-    from ..health import status
+    from agent_mem.cli.health import status
 
     scoped = project_id is not None
     where = "WHERE project_id = ?" if scoped else ""
@@ -344,7 +346,7 @@ def write(config: Config, html: str, output: Path | None = None) -> Path:
     """Write the page atomically; the default location is private to the user."""
     if output is None:
         folder = view_dir(config)
-        from ..db import ensure_private_dir
+        from agent_mem.core.db import ensure_private_dir
 
         ensure_private_dir(config.data_dir)
         ensure_private_dir(folder)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_mem import install
+from agent_mem.cli import install
 
 PLUGINS = Path(__file__).resolve().parents[1] / "plugins"
 EXE = "/opt/agent-mem/bin/agent-mem"

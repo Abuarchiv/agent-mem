@@ -7,7 +7,8 @@ import json
 import sqlite3
 from pathlib import PurePosixPath
 
-from . import learn, privacy, timeutil
+from agent_mem.core import privacy, timeutil
+from agent_mem.memory import learn
 
 MAX_KEY_CHARS = 12_000
 

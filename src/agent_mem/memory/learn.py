@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from . import timeutil
+from agent_mem.core import timeutil
 
 DECAY = 0.5
 RETRIEVAL_KINDS = ("created", "injected", "get", "used", "cited")

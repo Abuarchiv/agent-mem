@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from agent_mem import __version__
-from agent_mem.normalize import claude, copilot, opencode
+from agent_mem.hooks.normalize import claude, copilot, opencode
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGINS = ROOT / "plugins"
