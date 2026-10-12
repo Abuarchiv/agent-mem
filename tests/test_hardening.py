@@ -352,3 +352,20 @@ def test_cli_errors_are_one_line_with_a_next_step(config: Config, tmp_path: Path
     assert "is a file where agent-mem needs a folder" in capsys.readouterr().err
     assert cli.main(["--data-dir", str(config.data_dir), "eval", str(tmp_path / "missing.json")]) == 1
     assert "file not found" in capsys.readouterr().err
+
+
+def test_a_repository_without_remote_keeps_its_memory_after_a_move(tmp_path: Path, conn) -> None:
+    import shutil
+
+    repo = tmp_path / "old-name"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "start"], check=True)
+    before = identity.resolve(conn, repo)
+    moved = tmp_path / "new-name"
+    shutil.move(str(repo), str(moved))
+    assert identity.resolve(conn, moved).id == before.id  # type: ignore[union-attr]
+    empty = tmp_path / "no-commits"
+    subprocess.run(["git", "init", "-q", str(empty)], check=True)
+    assert identity.resolve(conn, empty) is not None  # nothing to walk yet: the path names it

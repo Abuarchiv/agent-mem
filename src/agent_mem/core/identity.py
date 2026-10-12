@@ -122,6 +122,11 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
     remote = normalize_remote(remote_raw) if remote_raw else None
     if remote:
         identity_source = f"remote:{remote}"
+    elif toplevel and (first := _git(root, "rev-list", "--max-parents=0", "HEAD")):
+        # Without a remote the path named the project, so a moved or renamed folder started over with no memory.
+        # The first commit stays the same across moves, renames, clones and worktrees.
+        # ponytail: in a huge history the walk can pass git's 2 s timeout and the path names it, as before.
+        identity_source = f"root:{min(first.split())}"
     elif toplevel:
         common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
         main_root = Path(common).parent if common else root
