@@ -212,7 +212,14 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
         conn.execute("DELETE FROM events WHERE turn_id = ?", (owner_id,))
         cursor = conn.execute("DELETE FROM turns WHERE id = ?", (owner_id,))
     else:
+        linked = [r[0] for r in conn.execute("SELECT concept_id FROM concept_links WHERE memory_id = ?", (owner_id,))]
         cursor = conn.execute("DELETE FROM memories WHERE id = ?", (owner_id,))
+        # A concept is a word from the memory ("Müllerbau"); once no memory names it, it goes with them.
+        for concept_id in linked:
+            conn.execute(
+                "DELETE FROM concepts WHERE id = ? AND NOT EXISTS (SELECT 1 FROM concept_links WHERE concept_id = ?)",
+                (concept_id, concept_id),
+            )
     return cursor.rowcount > 0
 
 

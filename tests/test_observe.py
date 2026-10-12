@@ -113,7 +113,7 @@ def test_concept_model_downloads_into_the_model_dir_and_checks_its_checksum(conf
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("de_core_news_sm/de_core_news_sm-3.8.0/config.cfg", "[nlp]")
         archive.writestr("de_core_news_sm-3.8.0.dist-info/METADATA", "x")
-    monkeypatch.setattr(concepts.urllib.request, "urlretrieve", lambda url, path: path.write_bytes(wheel.read_bytes()))
+    monkeypatch.setattr(concepts, "_fetch", lambda url, path: path.write_bytes(wheel.read_bytes()))
     assert concepts.model_path(config) is None
     with pytest.raises(ValueError, match="checksum"):
         concepts.download_model(config)  # the pinned hash is the real wheel's

@@ -300,3 +300,54 @@ def test_forgetting_a_turn_takes_what_was_drawn_from_it(config: Config, project:
     assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["a1"]
     assert tuple(conn.execute("SELECT title, summary_json FROM sessions").fetchone()) == (None, None)
     conn.close()
+
+
+def test_linking_concepts_never_holds_the_write_lock_while_spacy_runs(config: Config):
+    import sqlite3
+
+    from agent_mem.memory import store
+    from agent_mem.observe import concepts
+
+    conn = db.connect(config)
+    store.add_memory(
+        conn, project_id=None, kind="fact", title="Codex runs the Viewer", body="x", source="agent", trust="observer"
+    )
+    blocked: list[bool] = []
+
+    def extract(text: str) -> list[tuple[str, str]]:
+        other = sqlite3.connect(config.db_path, timeout=0, isolation_level=None)  # a hook in another session
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+            blocked.append(False)
+        except sqlite3.OperationalError:
+            blocked.append(True)
+        finally:
+            other.close()
+        return [("PROPER", "Codex"), ("PROPER", "Viewer")]
+
+    assert concepts.link_new(conn, extract, str, lambda text: {"codex", "viewer"}) == 1
+    assert blocked == [False]
+    assert sorted(r[0] for r in conn.execute("SELECT label FROM concepts")) == ["Codex", "Viewer"]
+    conn.close()
+
+
+def test_forgetting_a_memory_removes_concepts_no_other_memory_names(config: Config):
+    from agent_mem.memory import store
+    from agent_mem.observe import concepts
+
+    conn = db.connect(config)
+    secret = store.add_memory(
+        conn, project_id=None, kind="fact", title="Client Muellerbau pays", body="x", source="agent", trust="observer"
+    )
+    store.add_memory(
+        conn, project_id=None, kind="fact", title="Codex reads it", body="y", source="agent", trust="observer"
+    )
+    words = {"Client Muellerbau pays\nx": ["Muellerbau", "Codex"], "Codex reads it\ny": ["Codex"]}
+    concepts.link_new(
+        conn, lambda text: [("PROPER", w) for w in words[text]], str, lambda text: {"muellerbau", "codex"}
+    )
+    with db.transaction(conn):
+        store.delete_owner(conn, "m", int(secret or 0))
+    assert [r[0] for r in conn.execute("SELECT label FROM concepts")] == ["Codex"]  # still named by the other one
+    conn.close()

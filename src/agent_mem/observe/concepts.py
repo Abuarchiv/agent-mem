@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import sqlite3
 import tempfile
 import urllib.request
@@ -54,6 +55,12 @@ def model_path(config: Config) -> Path | None:
     return path if (path / "config.cfg").is_file() else None
 
 
+def _fetch(url: str, path: Path) -> None:
+    """With a timeout: urlretrieve has none and waits for good on a stalled connection."""
+    with urllib.request.urlopen(url, timeout=60) as response, open(path, "wb") as out:
+        shutil.copyfileobj(response, out)
+
+
 def download_model(config: Config) -> Path:
     """Fetch the wheel of ``observe.entity_model`` from spaCy's releases and unpack the model directory.
     Known models are checked against a pinned SHA-256."""
@@ -63,7 +70,7 @@ def download_model(config: Config) -> Path:
     target = config.model_dir / "spacy" / name
     with tempfile.TemporaryDirectory() as tmp:
         wheel = Path(tmp) / "model.whl"
-        urllib.request.urlretrieve(SPACY_URL.format(name=name, v=SPACY_VERSION), wheel)
+        _fetch(SPACY_URL.format(name=name, v=SPACY_VERSION), wheel)
         expected = SPACY_SHA256.get(name)
         if expected and hashlib.sha256(wheel.read_bytes()).hexdigest() != expected:
             raise ValueError(f"{name}: download does not match the pinned checksum")
@@ -117,34 +124,44 @@ def link_new(
     rows = conn.execute(
         "SELECT id, project_id, title, body FROM memories WHERE id > ? ORDER BY id LIMIT ?", (last, BATCH)
     ).fetchall()
+    # spaCy first, without a lock: inside the write transaction it held every hook of every session for seconds
+    # (200 memories took 8 s, a hook gives up after 400 ms and its event goes to the spool).
+    found: list[tuple[int, str, list[tuple[str, str, str, int]]]] = []
+    for row in rows:
+        seen: set[str] = set()
+        concepts: list[tuple[str, str, str, int]] = []
+        text_of_memory = f"{row['title'] or ''}\n{row['body'] or ''}".strip()
+        proper = names(text_of_memory)
+        for kind, text in extract(text_of_memory):
+            surface = text.strip().strip("`'\"")
+            # Only a single plain word gets its base form; the lemmatizer splits paths ("src -- agent_mem")
+            # and cuts compounds ("SQLite-Such").
+            label = (base(surface) or surface) if surface.isalpha() else surface
+            if label.lower() == surface.lower():
+                label = surface  # same word, keep its spelling ("Viewer", not "viewer")
+            key = normalize(label)
+            # "When" opening an English sentence is tagged as a proper noun; question and filler words never
+            # name a thing.
+            if key in seen or key in STOPWORDS or not _USEFUL.fullmatch(key) or len(key) > 80:
+                continue
+            seen.add(key)
+            concepts.append((key, label, kind.lower(), int(specific(surface, kind, proper))))
+        found.append((int(row["id"]), row["project_id"] or "", concepts))
     with db.transaction(conn):
-        for row in rows:
-            seen: set[str] = set()
-            text_of_memory = f"{row['title'] or ''}\n{row['body'] or ''}".strip()
-            proper = names(text_of_memory)
-            for kind, text in extract(text_of_memory):
-                surface = text.strip().strip("`'\"")
-                # Only a single plain word gets its base form; the lemmatizer splits paths ("src -- agent_mem")
-                # and cuts compounds ("SQLite-Such").
-                label = (base(surface) or surface) if surface.isalpha() else surface
-                if label.lower() == surface.lower():
-                    label = surface  # same word, keep its spelling ("Viewer", not "viewer")
-                key = normalize(label)
-                # "When" opening an English sentence is tagged as a proper noun; question and filler words never
-                # name a thing.
-                if key in seen or key in STOPWORDS or not _USEFUL.fullmatch(key) or len(key) > 80:
-                    continue
-                seen.add(key)
+        for memory_id, project_id, concepts in found:
+            if conn.execute("SELECT 1 FROM memories WHERE id = ?", (memory_id,)).fetchone() is None:
+                continue  # forgotten meanwhile
+            for key, label, kind, is_specific in concepts:
                 conn.execute(
                     "INSERT INTO concepts(project_id, key, label, type, specific) VALUES (?, ?, ?, ?, ?) "
                     "ON CONFLICT(project_id, key) DO UPDATE SET specific = max(specific, excluded.specific)",
-                    (row["project_id"] or "", key, label, kind.lower(), int(specific(surface, kind, proper))),
+                    (project_id, key, label, kind, is_specific),
                 )
                 concept = conn.execute(
-                    "SELECT id FROM concepts WHERE project_id = ? AND key = ?", (row["project_id"] or "", key)
+                    "SELECT id FROM concepts WHERE project_id = ? AND key = ?", (project_id, key)
                 ).fetchone()[0]
                 conn.execute(
-                    "INSERT OR IGNORE INTO concept_links(concept_id, memory_id) VALUES (?, ?)", (concept, row["id"])
+                    "INSERT OR IGNORE INTO concept_links(concept_id, memory_id) VALUES (?, ?)", (concept, memory_id)
                 )
         if rows:
             db.set_meta(conn, _META, str(rows[-1]["id"]))
