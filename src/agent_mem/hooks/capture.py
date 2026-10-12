@@ -528,6 +528,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
 
     if tool_signal.command_kind == "revert" and not event.tool_failed:
         _record_dead_end(conn, project_id, session_id, turn_id, tool_signal)
+        store.guards_exist(config)
 
     if tool_signal.category == "edit" and files and project_id is not None:
         _feedback_used(conn, project_id, session_id, files)

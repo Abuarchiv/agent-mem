@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "agent-mem"
+from agent_mem.core.paths import default_data_dir
+
 PROJECT_FILE = ".agent-mem.json"
 
 DEFAULT_EXCLUDE_GLOBS = [
@@ -184,20 +184,6 @@ class Config:
     @property
     def config_path(self) -> Path:
         return self.data_dir / "config.json"
-
-
-def default_data_dir() -> Path:
-    override = os.environ.get("AGENT_MEM_DATA_DIR")
-    if override:
-        return Path(override).expanduser()
-    home = Path.home()
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        return Path(base) / APP_NAME if base else home / "AppData" / "Local" / APP_NAME
-    if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / APP_NAME
-    xdg = os.environ.get("XDG_DATA_HOME")
-    return (Path(xdg) if xdg else home / ".local" / "share") / APP_NAME
 
 
 def _merge(target: Any, values: dict[str, Any], prefix: str, warnings: list[str]) -> None:

@@ -10,7 +10,6 @@ import os
 import sqlite3
 import sys
 from collections.abc import Iterator
-from importlib import resources
 from pathlib import Path
 
 from agent_mem.core import timeutil
@@ -32,8 +31,9 @@ class MigrationPendingError(RuntimeError):
 
 
 def _migrations() -> list[tuple[int, str]]:
+    # Plain file reads: importlib.resources alone cost every hook call 11 ms (it pulls in inspect and tempfile).
     found: list[tuple[int, str]] = []
-    for entry in resources.files("agent_mem.core.schema").iterdir():
+    for entry in (Path(__file__).resolve().parent / "schema").iterdir():
         name = entry.name
         if name.endswith(".sql") and name[:3].isdigit():
             found.append((int(name[:3]), entry.read_text(encoding="utf-8")))

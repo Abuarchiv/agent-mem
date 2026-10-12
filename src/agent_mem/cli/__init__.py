@@ -17,9 +17,19 @@ def _rule_id(text: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args[:1] == ["hook"]:
+        import os
+
+        from agent_mem.core import paths
+
+        raw = None
+        if args[1:2] not in ([], ["-h"], ["--help"]):  # typed by a person: the hook explains itself, no stdin
+            raw = sys.stdin.buffer.read(paths.STDIN_CAP + 1)
+            # Before the hook module loads: most Bash and Edit calls have nothing to check.
+            if paths.pre_tool_has_nothing_to_check(args[2] if len(args) > 2 else None, raw):
+                os._exit(0)
         from agent_mem.hooks.hook import main as hook_main
 
-        return hook_main(args[1:])
+        return hook_main(args[1:], raw)
     try:
         return _main(args)
     except KeyboardInterrupt:

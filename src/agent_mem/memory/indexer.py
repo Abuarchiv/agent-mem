@@ -7,6 +7,7 @@ consolidation, optional summaries, retention, backups, housekeeping.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import sqlite3
 from collections.abc import Callable
@@ -15,7 +16,7 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
-from agent_mem.core import db, logutil, spool, timeutil
+from agent_mem.core import db, logutil, paths, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
@@ -119,6 +120,23 @@ def run(config: Config, *, force_consolidate: bool = False, allow_download: bool
     return stats
 
 
+def _mark_guards(conn: sqlite3.Connection, config: Config) -> None:
+    """What the pre-tool hook can check, so it skips the rest (``core/paths.pre_tool_has_nothing_to_check``)."""
+    rules = conn.execute("SELECT EXISTS (SELECT 1 FROM rules)").fetchone()[0]
+    files = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT DISTINCT e.key FROM entities e JOIN links l ON l.entity_id = e.id AND l.owner_type = 'm' "
+            "JOIN memories m ON m.id = l.owner_id WHERE e.kind = 'file' AND m.kind = 'dead_end' AND m.invalid_at IS NULL"
+        )
+    ]
+    target = config.data_dir / paths.GUARDS
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    with contextlib.suppress(OSError):
+        temporary.write_text(json.dumps({"rules": bool(rules), "files": files}), encoding="utf-8")
+        os.replace(temporary, target)
+
+
 def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, allow_download: bool) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     applied, quarantined = spool.drain(
@@ -126,6 +144,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     )
     stats["spool_applied"], stats["spool_quarantined"] = applied, quarantined
     stats["stale_turns_closed"] = capture.close_stale_turns(conn, config)
+    _mark_guards(conn, config)
 
     embedder = None
     if config.semantic.enabled:

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sqlite3
 from pathlib import PurePosixPath
 
-from agent_mem.core import privacy, timeutil
+from agent_mem.core import paths, privacy, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import learn
 
@@ -204,12 +205,19 @@ def owner_label(owner_type: str, owner_id: int) -> str:
     return f"{owner_type.upper()}{owner_id}"
 
 
+def guards_exist(config: Config) -> None:
+    """A rule or a dead end may now exist: the pre-tool hook must look again (``core/paths.GUARDS``)."""
+    with contextlib.suppress(OSError):
+        (config.data_dir / paths.GUARDS).unlink()
+
+
 def learn_rule(
     conn: sqlite3.Connection, config: Config, project_id: str | None, avoid: str, prefer: str | None, turn_id: int
 ) -> None:
     """Record one statement "use X instead of Y" (or "avoid X"); a preference memory follows from
     ``rules.min_corrections`` statements. Called by the prompt hook and by the observer."""
     message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
+    guards_exist(config)
     # UPDATE first with ``IS``: a UNIQUE constraint never matches NULL project ids, so an upsert would
     # insert a new row for every correction made outside a project.
     updated = conn.execute(

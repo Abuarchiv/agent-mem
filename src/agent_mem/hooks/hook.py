@@ -28,8 +28,8 @@ from agent_mem.hooks.normalize import normalize
 INDEXER_THROTTLE_SECONDS = 60
 
 
-def _read_stdin(limit: int) -> str:
-    data = sys.stdin.buffer.read(limit + 1)
+def _read_stdin(limit: int, preread: bytes | None = None) -> str:
+    data = sys.stdin.buffer.read(limit + 1) if preread is None else preread
     if len(data) > limit:
         raise PayloadError("payload too large")
     return data.decode("utf-8", errors="replace")
@@ -248,13 +248,19 @@ class _Worker(threading.Thread):
                 self.error = f"{self.error}; spool failed: {error}"
 
 
-def run(harness: str, event_name: str | None, stdin_text: str | None = None, config: Config | None = None) -> str:
+def run(
+    harness: str,
+    event_name: str | None,
+    stdin_text: str | None = None,
+    config: Config | None = None,
+    stdin_bytes: bytes | None = None,
+) -> str:
     """Process one hook invocation. Returns the text to print (possibly empty)."""
     if env_flag("AGENT_MEM_INTERNAL") or env_flag("AGENT_MEM_DISABLE"):
         return ""
     config = config or load()
     try:
-        raw = stdin_text if stdin_text is not None else _read_stdin(config.limits.stdin_bytes)
+        raw = stdin_text if stdin_text is not None else _read_stdin(config.limits.stdin_bytes, stdin_bytes)
         payload = json.loads(raw) if raw.strip() else {}
         event = normalize(harness, payload, event_name)
     except (PayloadError, ValueError) as error:
@@ -345,7 +351,7 @@ def _quarantine_note(config: Config, harness: str, event_name: str | None, reaso
         )
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], stdin_bytes: bytes | None = None) -> int:
     harness = argv[0] if argv else ""
     event_name = argv[1] if len(argv) > 1 else None
     if harness in {"", "-h", "--help"}:  # typed by a person: explain instead of waiting on stdin
@@ -353,7 +359,7 @@ def main(argv: list[str]) -> int:
         print("Called by the harness hooks with the event JSON on stdin. Set up with `agent-mem setup all --write`.")
         return 0
     try:
-        text = run(harness, event_name)
+        text = run(harness, event_name, stdin_bytes=stdin_bytes)
     except Exception as error:  # the agent must never see a crash
         with contextlib.suppress(Exception):
             logutil.write(load().log_dir, "hook", harness=harness, error=f"unexpected {type(error).__name__}")
