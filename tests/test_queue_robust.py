@@ -103,3 +103,46 @@ def test_mem_search_does_not_hold_the_write_lock_hooks_wait_for(config: Config, 
     monkeypatch.setattr(mcp_server.semantic.Retriever, "search", search)
     asyncio.run(server.call_tool("mem_search", {"query": "viewer launch agent"}))
     assert writes == [True]
+
+
+def test_a_replayed_stop_answers_the_turn_it_happened_in(config: Config, project: Path):
+    from agent_mem.core import spool
+    from agent_mem.core.events import Event
+    from agent_mem.memory import indexer
+
+    base = {"session_id": "s1", "cwd": str(project)}
+    hook.run("claude", None, json.dumps({**base, "hook_event_name": "UserPromptSubmit", "prompt": "first"}), config)
+    # The Stop of the first turn hit a locked database and went to the spool ...
+    late = Event(
+        harness="claude",
+        kind="stop",
+        session_id="s1",
+        ts="2000-01-01T00:00:00.000Z",
+        cwd=str(project),
+        answer="answer to the first",
+        raw_kind="Stop",
+    )
+    conn = db.connect(config)
+    first_started = conn.execute("SELECT started_at FROM turns").fetchone()[0]
+    late.ts = first_started  # it happened while the first turn was open
+    tool = Event(
+        harness="claude",
+        kind="tool",
+        session_id="s1",
+        ts=first_started,
+        cwd=str(project),
+        tool="Bash",
+        tool_input={"command": "pytest -q"},
+        tool_output="1 passed",
+        raw_kind="PostToolUse",
+        tool_use_id="t1",
+    )
+    spool.write(config.spool_dir, {"type": "event", "event": tool.to_dict()})
+    spool.write(config.spool_dir, {"type": "event", "event": late.to_dict()})
+    # ... and the next prompt came first.
+    hook.run("claude", None, json.dumps({**base, "hook_event_name": "UserPromptSubmit", "prompt": "second"}), config)
+    indexer.run(config, allow_download=False)
+    rows = {r["prompt"]: (r["answer"], r["commands_json"]) for r in conn.execute("SELECT * FROM turns")}
+    assert rows["first"][0] == "answer to the first" and "pytest" in rows["first"][1]
+    assert rows["second"] == ("", "[]")
+    conn.close()

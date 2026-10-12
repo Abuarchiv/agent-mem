@@ -269,8 +269,22 @@ def _close_turn(conn: sqlite3.Connection, turn_id: int, outcome: str, ts: str) -
         )
 
 
+def _turn_at(conn: sqlite3.Connection, session_id: str, ts: str) -> sqlite3.Row | None:
+    """The turn an event belongs to by its time. Live, that is the open turn; replayed from the spool after the next
+    prompt already arrived, it is the earlier turn the event happened in, not the one open now."""
+    return conn.execute(
+        "SELECT * FROM turns WHERE session_id = ? AND started_at <= ? ORDER BY started_at DESC, id DESC LIMIT 1",
+        (session_id, ts),
+    ).fetchone()
+
+
 def _turn_for_tool(conn: sqlite3.Connection, session_id: str, project_id: str | None, ts: str) -> int:
     turn = _open_turn(conn, session_id)
+    if turn is not None and turn["started_at"] <= ts:
+        return int(turn["id"])
+    earlier = _turn_at(conn, session_id, ts)
+    if earlier is not None:
+        return int(earlier["id"])
     if turn is not None:
         return int(turn["id"])
     return _new_turn(conn, session_id, project_id, ts, "")
@@ -660,7 +674,7 @@ def _feedback_used(conn: sqlite3.Connection, project_id: str, session_id: str, f
 
 
 def _on_stop(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    turn = _open_turn(conn, session_id)
+    turn = _turn_at(conn, session_id, event.ts)
     if turn is None:
         turn = conn.execute(
             "SELECT * FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)
