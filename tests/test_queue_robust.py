@@ -428,3 +428,32 @@ def test_a_worker_killed_during_the_work_log_does_not_extract_the_bundle_again(
     assert conn.execute("SELECT state FROM observe_queue").fetchone()[0] == "done"
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE dedupe_key = 'mem0:f1'").fetchone()[0] == 1
     conn.close()
+
+
+def test_forgotten_and_purged_text_leaves_mem0_history(config: Config, project: Path, tmp_path: Path):
+    import types
+
+    import pytest
+
+    storage = pytest.importorskip("mem0.memory.storage")
+    from agent_mem.memory import store
+    from agent_mem.observe import worker
+    from agent_mem.observe.mem0_adapter import Mem0Adapter
+
+    history = storage.SQLiteManager(str(tmp_path / "history.db"))
+    history.add_history("f1", None, "secret fact", "ADD")
+    history.add_history("f1", "secret fact", None, "DELETE")
+    history.add_history("f2", None, "kept fact", "ADD")
+    history.save_messages([{"role": "user", "content": "purged prompt"}], "user_id=me")
+    adapter = object.__new__(Mem0Adapter)
+    adapter.memory = types.SimpleNamespace(db=history, delete=lambda mem0_id: None)  # type: ignore[assignment]
+
+    _turn(config, project, "s1", "purged prompt")
+    conn = db.connect(config)
+    store.delete_owner(conn, "t", int(conn.execute("SELECT id FROM turns").fetchone()[0]))
+    worker.Worker(config, conn, adapter=adapter).drain_forget()
+    texts = [r[0] for r in history.connection.execute("SELECT COALESCE(new_memory, old_memory) FROM history")]
+    assert texts == ["kept fact"]
+    assert history.connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    assert db.get_meta(conn, store.SCRUB_MESSAGES) is None
+    conn.close()

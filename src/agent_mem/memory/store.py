@@ -198,6 +198,9 @@ def retire(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
         )
 
 
+SCRUB_MESSAGES = "observe.scrub_messages"
+
+
 def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bool:
     """Hard delete including keys, vectors, links, anchors and access history."""
     if owner_type == "m":
@@ -222,6 +225,10 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
         )
         conn.execute("DELETE FROM events WHERE turn_id = ?", (owner_id,))
         cursor = conn.execute("DELETE FROM turns WHERE id = ?", (owner_id,))
+        # mem0 keeps the latest bundle messages and reads them into the next extraction: the worker clears them.
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = '1'", (SCRUB_MESSAGES,)
+        )
     else:
         linked = [r[0] for r in conn.execute("SELECT concept_id FROM concept_links WHERE memory_id = ?", (owner_id,))]
         cursor = conn.execute("DELETE FROM memories WHERE id = ?", (owner_id,))

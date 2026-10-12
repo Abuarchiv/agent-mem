@@ -243,7 +243,8 @@ class Worker:
     # --- loop ----------------------------------------------------------------------------------
     def drain_forget(self) -> None:
         rows = self.conn.execute("SELECT mem0_id FROM observe_forget").fetchall()
-        if not rows:
+        purged = db.get_meta(self.conn, store.SCRUB_MESSAGES) == "1"
+        if not rows and not purged:
             return
         for row in rows:
             try:
@@ -254,6 +255,13 @@ class Worker:
                 continue
             self.conn.execute("DELETE FROM observe_forget WHERE mem0_id = ?", (row[0],))
             self.stats["forgotten"] += 1
+        try:
+            self.adapter.scrub(messages=purged)
+        except Exception as error:  # retried with the next forget or purge
+            logutil.write(self.config.log_dir, "observe", error=f"scrub: {type(error).__name__}: {error}"[:200])
+            return
+        if purged:
+            self.conn.execute("DELETE FROM meta WHERE key = ?", (store.SCRUB_MESSAGES,))
 
     def step(self) -> bool:
         """Process one leased bundle. Returns False when nothing was due."""

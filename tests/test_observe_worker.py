@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,9 @@ def test_forget_reaches_mem0(observe_config: Config, project: Path) -> None:
     worker.run(drain=False)  # drains observe_forget first
     assert conn.execute("SELECT COUNT(*) FROM observe_forget").fetchone()[0] == 0
     assert worker.stats["forgotten"] == 1
+    history = sqlite3.connect(observe_config.mem0_dir / "history.db")
+    assert history.execute("SELECT COUNT(*) FROM history WHERE memory_id = ?", (mem0_id,)).fetchone()[0] == 0
+    history.close()
     worker.close()
     conn.close()
 

@@ -213,12 +213,27 @@ class Mem0Adapter:
         return facts[:k]
 
     def forget(self, mem0_id: str) -> bool:
-        """Remove a fact from Qdrant, entity links and history. False if mem0 no longer has it."""
+        """Remove a fact from Qdrant and entity links (``scrub`` clears its history). False if mem0 no longer has it."""
         try:
             self.memory.delete(mem0_id)
         except ValueError:
             return False
         return True
+
+    def scrub(self, *, messages: bool) -> None:
+        """mem0's history.db keeps the text of every deleted fact (ADD and DELETE rows) and the latest bundle
+        messages per project, which it reads into the next extraction. Forgotten or purged text stayed on disk
+        and could come back as a new fact."""
+        history = self.memory.db
+        connection = history.connection if history is not None else None
+        if history is None or connection is None:
+            return
+        with history._lock, connection:
+            connection.execute(
+                "DELETE FROM history WHERE memory_id IN (SELECT memory_id FROM history WHERE event = 'DELETE')"
+            )
+            if messages:
+                connection.execute("DELETE FROM messages")
 
     def reindex(self, facts: list[tuple[str, str, dict[str, Any]]]) -> int:
         """``facts`` are (text, namespace, metadata). Wipes the index and re-adds without a model call."""
