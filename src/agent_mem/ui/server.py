@@ -144,6 +144,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if hit is not None and hit[0] == stamp and time.monotonic() - hit[1] < 60:
             return hit[2]
         body = self._page(project_id).encode("utf-8")
+        if len(self.server.cache) >= 16:  # the key comes from the address; any string must not grow it for good
+            self.server.cache.clear()
         self.server.cache[project_id] = (stamp, time.monotonic(), body)
         return body
 

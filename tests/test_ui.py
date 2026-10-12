@@ -293,3 +293,15 @@ def test_login_item_removes_itself_once_agent_mem_is_uninstalled(config: Config,
     gone = subprocess.run([*argv[:4], str(tmp_path / "missing-python"), "-m", "agent_mem"], env=env, check=False)
     assert gone.returncode == 0 and not target.exists()
     assert (tmp_path / "launchctl.log").read_text().startswith("bootout gui/")
+
+
+def test_viewer_cache_stays_bounded_whatever_the_address_says(config: Config, driver: Driver):
+    _teach(driver)
+    httpd = _serve(config)
+    try:
+        for n in range(40):
+            assert _get(config, f"/?project=unknown-{n}")[0] == 200
+        assert len(httpd.cache) <= 16
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
