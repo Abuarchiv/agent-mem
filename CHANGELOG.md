@@ -1,37 +1,33 @@
 # Changelog
 
-## Unreleased
+## Unreleased (2.0 track)
 
-- Repeated corrections no longer pile up near-identical preference memories ("… (corrected 2x)", "… (corrected 3x)", …). The newest one supersedes the earlier ones, so briefings and search show it once.
-- Removed the unused `privacy.error_lines`.
+### Facts in the background (new)
 
-Fixes from a production-readiness review:
+- A detached worker (`agent-mem observe`) extracts facts from finished turns with mem0 2.2.1 and the harness CLI you are already logged into: `claude -p` (Haiku), `codex exec`, `copilot -s`. No API key is read or stored. The worker holds one lock, runs at low priority and exits after 90 s without work. Turns go only to the vendor that already saw them; Ollama is an opt-in fallback stage.
+- Coding-specific extraction prompt (conventions, decisions, dead ends, preferences; the developer's language; at most 8 facts per bundle). Measured garbage rate 14 % against 27 % with mem0's default prompt on 20 real turns.
+- Contradiction and duplicate handling on top of mem0's add-only store: one model verdict per bundle (KEEP, SUPERSEDE, DUPLICATE); superseded facts get `invalid_at` and are removed from the vector index. 9 of 10 fixture corrections resolved, 1.9 model calls per bundle.
+- New tables `observe_queue`, `observe_calls`, `observe_forget` (migration 002). `mem_forget` and `purge` remove facts from Qdrant as well. `agent-mem observe --status|--retry-failed|--reprocess-raw|--reindex`.
+- Facts appear in the next session's briefing as `[M<id> · fact]` without changes to the injection path.
 
-- **Projects:** a plain (non-git) directory registered as a project no longer swallows git repositories nested below it. Excluded, paused and opted-out projects leave no path in the database, and read-only commands (`search`, `export`, `lessons`) no longer register the current directory as a project.
-- **Safety:** stored text can no longer close the `<agent-mem>` data frame (nested or case-varied tags). Error text from web and third-party MCP tools is no longer shown in compaction context or prompt hints. Agents can no longer store preferences through `mem_remember`, and they can supersede only agent memories of their own project. Only preferences learned from the user's prompts are promoted to global ones. `agent-mem import claude` skips subagent transcripts, so an agent's prompts no longer become the user's rules.
-- **Hooks:** an older database is migrated by the background indexer instead of inside the hook deadline, and backups are written atomically, so an interrupted backup never counts as one. Out-of-range timestamps and malformed Codex event names no longer drop events. Repeated Copilot CLI subagents of the same type each get a briefing. Tool names and ids from hosts are cleaned and bounded like all other stored text. The OpenCode plugin decodes multi-byte output correctly.
-- **Learning:** rules and error→fix recipes outside a project now gather evidence instead of adding a new row per correction. Consolidation no longer supersedes unrelated memories with non-Latin titles. "again?" is recognized as a correction.
-- **Search:** version numbers such as `1.2.3` are no longer read as dates. "last month" ends on the first of the current month. A whitespace-only prompt no longer breaks search. Token budgets count CJK and other wide characters correctly.
-- **CLI:** `export`/`search --project` with an unknown directory fail instead of exporting or searching everything. `purge` also deletes quarantined events and the copy kept by `restore`, and it keeps the view page when you decline the confirmation. Odd ids (`T²`, huge numbers) and durations are rejected cleanly, and `doctor` reports a migration in progress instead of crashing.
-- **Summaries:** when the summarizing harness is not installed, sessions stay pending and no daily budget is used.
-- **Imports:** agentmemory items without an id and claude-mem rows from different databases are no longer dropped as duplicates.
-- **Packaging:** the sdist includes the marketplace manifests, so its test suite passes. CI builds the sdist and runs the tests from it, and the release workflow runs lint and type checks.
+### Retrieval
 
-## 1.0.0 — 2026-09-29
+- Default embedder is now `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (same Recall@5 on LongMemEval as embeddinggemma at a fifth of the size, better than e5-small). `retrieval.min_vector_score` default 0.3, calibrated for it; `query:`/`passage:` prefixes are applied only to e5 models. An embedder change re-embeds everything on the next indexer run and rebuilds the mem0 index on the next worker run.
+- `agent-mem eval` gained `--backend sqlite|mem0`, `--fixture`, `--subset`, `--embedder`, `--vector-floor`, `--llm none|claude|codex|copilot|ollama`, `--progress`. New fixture with 25 cases and 10 contradiction pairs under `tests/fixtures/`.
 
-First release.
+### Installation
 
-- Automatic capture through native hooks for Claude Code, Codex, Copilot CLI and OpenCode; one shared memory for all of them.
-- Turn-based episodic memory with provenance; decisions, dead ends, corrections, preferences and lessons as semantic memory.
-- Learning without LLM calls: ACT-R activation, implicit feedback, error→fix recipes, rules learned from corrections (opt-in blocking), Hebbian association graph with Personalized PageRank, daily consolidation.
-- Context injection at session start, subagent start, prompt, before risky actions, after failures and around compaction, always within token budgets and behind an abstention threshold.
-- Hybrid retrieval: SQLite FTS5 (trigram), optional multilingual E5 embeddings (fastembed, no PyTorch), graph, reciprocal rank fusion, time filters ("gestern", "last week"). Scales to large histories (prompt hook ~100 ms with 20,000 stored turns).
-- Federation: reads Claude Code auto memory and Codex memories so every harness can use them.
-- stdio MCP server with five tools: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `mem_forget` (MCP Python SDK 2.x).
-- Reliability: hook deadline, write-behind spool, idempotent replay, migrations with automatic backup, downgrade protection, daily backups, corruption recovery.
-- Privacy: redaction, private sections, exclude globs, per-project opt-out, pause, purge including backups and spool.
-- CLI: `status`, `doctor`, `search`, `show`, `rules`, `lessons`, `pause`, `resume`, `import` (Claude Code, Codex, claude-mem, agentmemory), `export`, `purge`, `backup`, `restore`, `consolidate`, `models`, `setup`, `eval`.
-- `agent-mem view`: a read-only HTML page of the local memory (overview, timeline, memories, rules, error fixes, preferences, association graph, capture health). One self-contained file in the private data directory, no server, no open port; a Content Security Policy blocks all network requests. Bundled fonts under the SIL Open Font License. `purge` deletes the page as well.
-- Plugins and marketplaces for Claude Code (`.claude-plugin`), Codex (`.agents/plugins`), Copilot CLI (`.github/plugin`) and an OpenCode plugin.
-- Python 3.11–3.14 on Linux, macOS and Windows.
-- Optional, off by default: session summaries through the user's own harness.
+- `agent-mem setup <harness> --write` registers hooks and the MCP server with the absolute path of the binary (Claude Code `settings.json`, Codex `hooks.json` and `config.toml`, Copilot `hooks/agent-mem.json` and `mcp-config.json`, OpenCode plugin and `opencode.json`), downloads the embedding model and prints what it detected. `agent-mem uninstall <harness>` removes exactly that.
+- `doctor` checks the observer extra, queue and last model call, available provider stages, index size and whether every hook command points at an existing binary.
+- Extras: `semantic` (fastembed) and `observer` (mem0, qdrant). Install scripts install both.
+- Manifests no longer claim "No LLM calls". Issue template asks for `doctor --json` and the last log lines.
+
+### Fixes
+
+- A worker without an embedder (no semantic extra) falls back to the raw stage instead of failing every bundle.
+- The nearest old fact is always judged for a contradiction; in a young index mem0's normalised scores fell under any threshold and the first correction of a project was missed.
+- mem0 telemetry and home directory are fixed before import, so no `~/.mem0` is created and two processes no longer collide on a migration store.
+
+## 1.0.0 (2026-09-29)
+
+First release: capture through native hooks for Claude Code, Codex, Copilot CLI and OpenCode; turn-based episodic memory; learning without model calls (ACT-R activation, implicit feedback, error-fix recipes, rules from corrections, Hebbian graph with Personalized PageRank, daily consolidation); context injection within budgets; hybrid retrieval (FTS5, embeddings, graph, RRF, time filters); stdio MCP server with five tools; reliability (deadline, spool, migrations with backup, corruption recovery); privacy (redaction, private sections, exclude globs, purge); CLI; read-only HTML viewer; plugins and marketplaces for all four harnesses; Python 3.11 to 3.14 on Linux, macOS and Windows.
