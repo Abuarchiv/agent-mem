@@ -24,7 +24,7 @@ from agent_mem.core import db, logutil, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store
 from agent_mem.observe import bundle as bundling
-from agent_mem.observe import contradiction, providers, queue
+from agent_mem.observe import contradiction, providers, queue, summary
 from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 POLL_SECONDS = 2.0
@@ -130,7 +130,15 @@ class Worker:
         self.config = config
         self.conn = conn
         self._adapter = adapter
-        self.stats: dict[str, int] = {"bundles": 0, "facts": 0, "raw": 0, "failed": 0, "superseded": 0, "forgotten": 0}
+        self.stats: dict[str, int] = {
+            "bundles": 0,
+            "facts": 0,
+            "raw": 0,
+            "failed": 0,
+            "superseded": 0,
+            "forgotten": 0,
+            "titled": 0,
+        }
 
     @property
     def adapter(self) -> Mem0Adapter:
@@ -196,10 +204,31 @@ class Worker:
             mirror(self.conn, self.config, b, facts)
             self.stats["facts"] += len(facts)
             self._contradictions(b, facts, llm, name, namespace)
+            self._summarize(b, llm, name)
             return name
         if last_error:
             raise providers.ProviderError(last_error)
         return "raw"
+
+    def _summarize(self, b: bundling.Bundle, llm: Any, provider: str) -> None:
+        """Turn titles and the session summary. Facts are stored already; a failure here loses nothing."""
+        started = time.perf_counter()
+        try:
+            titled = summary.summarize(self.conn, llm, b.session_id, b.turn_ids)
+        except Exception as error:
+            _record_call(
+                self.conn,
+                provider,
+                "summary",
+                time.perf_counter() - started,
+                False,
+                0,
+                b.turn_ids,
+                f"{type(error).__name__}: {error}"[:300],
+            )
+            return
+        _record_call(self.conn, provider, "summary", time.perf_counter() - started, True, 0, b.turn_ids, None)
+        self.stats["titled"] += titled
 
     def _contradictions(self, b: bundling.Bundle, facts: list[Fact], llm: Any, provider: str, namespace: str) -> None:
         pairs = contradiction.candidates(

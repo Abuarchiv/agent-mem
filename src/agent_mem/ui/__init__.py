@@ -95,13 +95,19 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
     sessions = _rows(
         conn,
         "SELECT s.id, s.harness, s.project_id, s.branch, s.started_at, s.ended_at, s.last_event_at, s.summarized_at, "
+        "s.title, s.summary_json, "
         "(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id) AS turns "
         f"FROM sessions s {'WHERE s.project_id = ?' if scoped else ''} ORDER BY s.last_event_at DESC LIMIT ?",
         (*params, LIMITS["sessions"]),
     )
+    for session in sessions:
+        try:
+            session["summary"] = json.loads(session.pop("summary_json") or "{}")
+        except ValueError:
+            session["summary"] = {}
     turns: list[dict[str, Any]] = []
     for row in conn.execute(
-        "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, importance, trust, "
+        "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, importance, trust, title, type, "
         f"files_json, commands_json, errors_json FROM turns {where} ORDER BY started_at DESC, id DESC LIMIT ?",
         (*params, LIMITS["turns"]),
     ):
@@ -118,6 +124,8 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 "answer": answer,
                 "truncated": prompt_cut or answer_cut,
                 "outcome": row["outcome"],
+                "title": row["title"],
+                "type": row["type"],
                 "importance": row["importance"],
                 "trust": row["trust"],
                 "files": _json_list(row["files_json"])[:20],

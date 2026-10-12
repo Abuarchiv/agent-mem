@@ -358,3 +358,7 @@ code.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .page-head .pill-group { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.session-summary { padding: 0 0 16px; display: grid; gap: 6px; }
+.session-summary p { margin: 0; }
+.summary-list { margin: 0; padding-left: 18px; display: grid; gap: 2px; }

@@ -192,6 +192,7 @@ class _Worker(threading.Thread):
         self.error: str | None = None
         self.problems: list[str] = []
         self.facts: list[str] = []
+        self.recent: list[tuple[str, str, str, str]] = []
         self.summary: str | None = None
         self._spool_lock = threading.Lock()
 
@@ -208,6 +209,7 @@ class _Worker(threading.Thread):
                 if self.event.harness == "claude":
                     self.problems = problems(conn)
                     self.facts = inject.overview(conn, f"claude:{self.event.session_id}")
+                    self.recent = inject.recent_work(conn, f"claude:{self.event.session_id}")
             elif self.event.kind == "session_end" and self.event.harness == "claude":
                 self.summary = inject.session_summary(conn, f"claude:{self.event.session_id}", _color())
         except db.MigrationPendingError as error:
@@ -308,7 +310,9 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
         context = worker.response.context if worker.response is not None else None
         viewer = f"http://localhost:{config.viewer.port}/" if config.viewer.enabled else None
         notices = [failure] if failure else worker.problems
-        return inject.terminal(context or "", heading, _color(), facts=worker.facts, notices=notices, viewer=viewer)
+        return inject.terminal(
+            context or "", heading, _color(), facts=worker.facts, notices=notices, viewer=viewer, recent=worker.recent
+        )
     if event.kind == "session_end" and worker.summary:
         return worker.summary
     if failure and _notice_due(config, failure):

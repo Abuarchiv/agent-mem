@@ -133,21 +133,40 @@ def _profile_line(conn: sqlite3.Connection, project_id: str) -> str | None:
 
 def _last_session_lines(
     conn: sqlite3.Connection, project_id: str, session_id: str
-) -> list[tuple[str, tuple[str, int]]]:
+) -> list[tuple[str, tuple[str, int] | None]]:
     session = conn.execute(
-        "SELECT id, harness FROM sessions WHERE project_id = ? AND id != ? ORDER BY last_event_at DESC LIMIT 1",
+        "SELECT id, harness, title, summary_json FROM sessions WHERE project_id = ? AND id != ? "
+        "ORDER BY last_event_at DESC LIMIT 1",
         (project_id, session_id),
     ).fetchone()
     if session is None:
         return []
     turns = conn.execute(
-        "SELECT id, started_at, prompt, answer FROM turns WHERE session_id = ? AND outcome != 'open' "
+        "SELECT id, started_at, prompt, answer, title FROM turns WHERE session_id = ? AND outcome != 'open' "
         "ORDER BY id DESC LIMIT 2",
         (session["id"],),
     ).fetchall()
+    if session["title"] and turns:
+        # The observer's running summary: what the next session needs, not the last two prompts.
+        last = turns[0]
+        lines: list[tuple[str, tuple[str, int] | None]] = [
+            (
+                f"- [T{last['id']} · {timeutil.day(last['started_at'])} · last session, {session['harness']}] "
+                f"{session['title']}",
+                ("t", int(last["id"])),
+            )
+        ]
+        summary = json.loads(session["summary_json"] or "{}")
+        for key, label in (("completed", "Done"), ("next_steps", "Next steps")):
+            items = [str(item) for item in summary.get(key) or []][:3]
+            if items:
+                lines.append((f"- {label}: " + "; ".join(items), None))
+        return lines
     lines = []
     for turn in reversed(turns):
-        parts = [first_line(request_text(turn["prompt"]), 120), first_line(turn["answer"] or "", 140)]
+        parts = [turn["title"] or first_line(request_text(turn["prompt"]), 120)]
+        if not turn["title"]:
+            parts.append(first_line(turn["answer"] or "", 140))
         if not any(parts):
             continue
         # A turn opened by a tool call has no prompt; then the answer alone says what happened.
@@ -155,6 +174,19 @@ def _last_session_lines(
         text += " → ".join(part for part in parts if part)
         lines.append((text, ("t", int(turn["id"]))))
     return lines
+
+
+def recent_work(conn: sqlite3.Connection, session_id: str, limit: int = 8) -> list[tuple[str, str, str, str]]:
+    """(id, time, type, title) of the latest titled turns in this project, oldest first: the terminal's work log."""
+    row = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if row is None or row[0] is None:
+        return []
+    rows = conn.execute(
+        "SELECT id, started_at, type, title FROM turns WHERE project_id = ? AND title IS NOT NULL "
+        "ORDER BY started_at DESC, id DESC LIMIT ?",
+        (row[0], limit),
+    ).fetchall()
+    return [(f"T{r['id']}", str(r["started_at"]), str(r["type"] or "change"), str(r["title"])) for r in reversed(rows)]
 
 
 def _open_errors(
@@ -343,6 +375,15 @@ _STYLE = {
     "native_note": ("✎", "34"),
     "unresolved": ("!", "31"),
 }
+# The observer's turn types (schema v3), as in a work log.
+_WORK = {
+    "bugfix": ("●", "31"),
+    "feature": ("◆", "32"),
+    "change": ("✓", "36"),
+    "discovery": ("○", "34"),
+    "decision": ("⚖", "35"),
+    "question": ("?", "2"),
+}
 _GOAL = re.compile(r"- Session goal \((?P<id>[A-Z]\d+)\): (?P<text>.*)")
 _RULE = "─" * 64
 
@@ -409,11 +450,13 @@ def terminal(
     facts: list[str] | None = None,
     notices: list[str] | None = None,
     viewer: str | None = None,
+    recent: list[tuple[str, str, str, str]] | None = None,
 ) -> str:
     """The injected block as the user sees it in the terminal: grouped by day, one row per memory.
 
     Built from the context lines themselves, so the terminal never shows something the model did not get.
-    ``facts`` (project state), ``notices`` (failures to act on) and ``viewer`` are for the user only.
+    ``facts`` (project state), ``notices`` (failures to act on), ``recent`` (the work log from ``recent_work``)
+    and ``viewer`` are for the user only.
     """
 
     def paint(code: str, text: str) -> str:
@@ -434,6 +477,11 @@ def terminal(
             commands = line.split(": ", 1)[1]
         elif line.startswith("- Files touched: "):
             files = line.split(": ", 1)[1]
+        elif line.startswith(("- Done: ", "- Next steps: ")):
+            label, text = line[2:].split(": ", 1)
+            glyph, code = ("✓", "32") if label == "Done" else ("→", "33")
+            last = next((group for group in reversed(groups) if group.startswith("Last session")), "Last session")
+            groups.setdefault(last, []).append(row("", glyph, code, label.lower(), text))
         elif line.startswith("- Still failing: "):
             groups.setdefault("Open errors", []).append(row("", "!", "31", "", line[17:]))
         elif goal := _GOAL.match(line):
@@ -463,9 +511,18 @@ def terminal(
         *warnings,
         *(paint("31", f"! {line}") for line in notices or []),
     ]
+    if recent:
+        out.append(paint("1", "Recent work"))
+        for ident, started, kind, title in recent:
+            glyph, code = _WORK.get(kind, ("›", "2"))
+            stamp = timeutil.parse(started)
+            when = stamp.astimezone().strftime("%d.%m %H:%M") if stamp else ""
+            out.append(
+                f"  {paint('2', ident.ljust(5))} {paint('2', when.ljust(11))} {paint(code, glyph)} {_clip(title, 78)}"
+            )
     for group, rows in groups.items():
         out += [paint("1", group), *rows]
-    if not groups:
+    if not groups and not recent:
         out.append(paint("2", "Nothing to recall here yet; this session is being recorded."))
     if commands:
         out.append(f"{paint('1', 'Commands')}  {_clip(commands, 100)}")

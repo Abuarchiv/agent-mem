@@ -24,6 +24,8 @@ def test_migration_002_applies_to_existing_v1_database(config: Config) -> None:
     conn.execute("PRAGMA user_version = 1")
     for table in ("observe_queue", "observe_calls", "observe_forget"):
         conn.execute(f"DROP TABLE {table}")
+    for table, column in (("turns", "title"), ("turns", "type"), ("sessions", "title"), ("sessions", "summary_json")):
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")  # added by migration 003
     conn.close()
     conn = db.connect(config)
     assert db.user_version(conn) == db.SCHEMA_VERSION >= 2

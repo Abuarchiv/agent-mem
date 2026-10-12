@@ -121,7 +121,15 @@
   const turns = () => data.turns.filter((turn) => inProject(turn.project_id));
   const sessions = () => data.sessions.filter((session) => inProject(session.project_id));
   const memories = () => data.memories.filter((memory) => inProjectOrGlobal(memory.project_id));
-  const turnMatches = (turn) => matches([turn.prompt, turn.answer, ...turn.files, ...turn.commands, ...turn.errors, `T${turn.id}`]);
+  // The observer's title says what was done; without one the request stands in for it.
+  const headline = (turn) => turn.title || firstLine(request(turn.prompt));
+  const sessionSummary = (session) => {
+    const summary = session.summary || {};
+    const part = (label, items) => (items && items.length ? `<span class="section-label">${label}</span><ul class="summary-list">${items.map((item) => `<li>${h(item)}</li>`).join("")}</ul>` : "");
+    const body = part("Done", summary.completed) + part("Learned", summary.learned) + part("Next steps", summary.next_steps);
+    return session.title || body ? `<div class="session-summary">${session.title ? `<p><b>${h(session.title)}</b></p>` : ""}${body}</div>` : "";
+  };
+  const turnMatches = (turn) => matches([turn.title, turn.prompt, turn.answer, ...turn.files, ...turn.commands, ...turn.errors, `T${turn.id}`]);
   const filteredTurns = () => turns().filter((turn) => (state.outcome === "all" || turn.outcome === state.outcome) && turnMatches(turn));
 
   function outcomePills() {
@@ -210,7 +218,7 @@
     return [...groups.entries()].map(([sessionId, items]) => {
       const session = data.sessions.find((item) => item.id === sessionId);
       return `<div class="session-head">${icon("session", 17)}<b>${h(harnessLabel(session?.harness))}</b>${projectTag(items[0].project_id)}${session?.branch ? tag(session.branch, "mono") : ""}<span class="muted">${h(sessionRange(session, items))}</span></div>` +
-        items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${h(firstLine(request(turn.prompt)) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
+        items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${turn.type ? tag(turn.type) : ""}${h(headline(turn) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
     }).join("");
   }
 
@@ -284,12 +292,12 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
     }).join("");
     const session = data.sessions.find((item) => item.id === active);
     const feedTurns = list.filter((turn) => turn.session_id === active).slice().reverse();
-    const head = session ? `<div class="panel-head"><h2>${h(harnessLabel(session.harness))}</h2>${projectTag(session.project_id)}${session.branch ? tag(session.branch, "mono") : ""}<small>${h(sessionRange(session, []))}${session.summarized_at ? " · summarized" : ""}</small></div>` : `<div class="panel-head"><h2>Turns</h2></div>`;
+    const head = session ? `<div class="panel-head"><h2>${h(harnessLabel(session.harness))}</h2>${projectTag(session.project_id)}${session.branch ? tag(session.branch, "mono") : ""}<small>${h(sessionRange(session, []))}</small></div>${sessionSummary(session)}` : `<div class="panel-head"><h2>Turns</h2></div>`;
     const feed = feedTurns.length === 0
       ? empty(filtering ? "Nothing matches in this session" : "No loaded turns for this session", filtering ? "Clear the search or outcome filter." : `The page holds the latest ${num(data.limits.turns)} turns.`)
       : `<div class="feed">${feedTurns.map((turn) => {
         const actionCount = (data.actions[turn.id] ?? []).length;
-        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header><p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
+        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${outcomeTag(turn.outcome)}${turn.type ? tag(turn.type) : ""}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header>${turn.title ? `<p><b>${h(turn.title)}</b></p>` : ""}<p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
       }).join("")}</div>`;
     return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
 <div class="timeline">
