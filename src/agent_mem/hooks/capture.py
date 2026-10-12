@@ -145,7 +145,16 @@ def _apply(
     if not with_context:
         response.context = None
         response.deny = None
+    elif response.context:
+        _count_injection(conn, event.ts, inject.tokens(response.context))
     return response
+
+
+def _count_injection(conn: sqlite3.Connection, ts: str, tokens: int) -> None:
+    """Per day: blocks and estimated tokens injected (`agent-mem status`)."""
+    key = f"injected:{timeutil.day(ts)}"
+    blocks, total = (int(x) for x in (db.get_meta(conn, key) or "0,0").split(","))
+    db.set_meta(conn, key, f"{blocks + 1},{total + tokens}")
 
 
 # --- helpers -----------------------------------------------------------------

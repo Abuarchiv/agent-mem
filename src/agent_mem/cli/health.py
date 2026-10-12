@@ -10,6 +10,7 @@ import sqlite3
 import stat
 import sys
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,29 @@ def status(conn: sqlite3.Connection, config: Config) -> dict[str, Any]:
         "consolidated_at": db.get_meta(conn, "consolidated_at"),
         "components": harnesses,
         "config_warnings": config.warnings,
+        "injected": _injected(conn),
+    }
+
+
+def _injected(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
+    """Blocks and estimated tokens injected into sessions today and over the last ``days`` days."""
+    today = timeutil.now()
+    since = (today - timedelta(days=days - 1)).date().isoformat()
+    blocks = total = today_tokens = 0
+    for row in conn.execute(
+        "SELECT key, value FROM meta WHERE key >= ? AND key LIKE 'injected:%'", (f"injected:{since}",)
+    ):
+        n, tokens = (int(x) for x in row["value"].split(","))
+        blocks, total = blocks + n, total + tokens
+        if row["key"] == f"injected:{today.date().isoformat()}":
+            today_tokens = tokens
+    sessions = int(conn.execute("SELECT COUNT(*) FROM sessions WHERE started_at >= ?", (since,)).fetchone()[0])
+    return {
+        "today_tokens": today_tokens,
+        "days": days,
+        "blocks": blocks,
+        "tokens": total,
+        "tokens_per_session": round(total / sessions) if sessions else None,
     }
 
 

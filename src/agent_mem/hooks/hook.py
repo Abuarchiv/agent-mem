@@ -21,7 +21,7 @@ from typing import Any
 from agent_mem.core import db, logutil, spool, timeutil
 from agent_mem.core.config import Config, env_flag, load
 from agent_mem.core.events import Event, PayloadError
-from agent_mem.hooks import capture
+from agent_mem.hooks import capture, inject
 from agent_mem.hooks.normalize import normalize
 
 INDEXER_THROTTLE_SECONDS = 60
@@ -51,7 +51,7 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
             if harness == "claude" and event.kind == "session_start":
                 # One line in the user's terminal; the context itself goes only to the model.
                 items = sum(1 for line in response.context.splitlines() if line.startswith("- "))
-                out["systemMessage"] = f"agent-mem: {items} items injected (~{len(response.context) // 4} tokens)"
+                out["systemMessage"] = f"agent-mem: {items} items injected (~{inject.tokens(response.context)} tokens)"
             return out
         return None
     if harness == "copilot":

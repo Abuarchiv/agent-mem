@@ -73,6 +73,11 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         f" · repetition rate {learning['repetition_rate'] if learning['repetition_rate'] is not None else '-'}"
     )
     print(f"semantic: {data['semantic']} · spool {data['spool']} · quarantine {data['quarantine']}")
+    injected = data["injected"]
+    print(
+        f"injected: today ~{injected['today_tokens']} tokens · last {injected['days']} days {injected['blocks']} blocks,"
+        f" ~{injected['tokens']} tokens, ~{injected['tokens_per_session'] or '-'} per session"
+    )
     print(f"last backup {data['last_backup_at'] or 'never'} · last consolidation {data['consolidated_at'] or 'never'}")
     if data["paused_until"]:
         print(f"capture paused until {data['paused_until']}")

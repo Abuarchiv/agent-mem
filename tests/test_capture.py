@@ -79,6 +79,24 @@ def test_prompt_hints_respect_threshold(driver: Driver, conn, config, project):
     assert unrelated.context is None
 
 
+def test_prompt_hints_oldest_first_best_kept(driver: Driver, conn, config, project):
+    driver.prompt("s1", "The staging database runs Postgres 14")
+    driver.stop("s1", "Staging database on Postgres 14.")
+    driver.prompt("s2", "We upgraded the staging database to Postgres 16")
+    driver.stop("s2", "Staging database now on Postgres 16.")
+    other = Driver(conn, config, project, harness="codex")
+    context = other.prompt("c1", "Which Postgres version runs the staging database?").context or ""
+    assert "oldest first" in context and context.index("Postgres 14") < context.index("Postgres 16")
+    from agent_mem.cli.health import status
+
+    injected = status(conn, config)["injected"]
+    assert injected["blocks"] >= 1 and injected["today_tokens"] > 0 and injected["tokens_per_session"]
+
+    config.budgets.prompt = 60  # room for one hit: the best-ranked one stays
+    context = other.prompt("c1", "Which Postgres version runs the staging database now, after the upgrade?").context
+    assert context and context.count("\n- [") == 1
+
+
 def test_compaction_context(driver: Driver, conn):
     driver.prompt("s1", "Refactor the auth module")
     driver.edit("s1", "auth.py")
