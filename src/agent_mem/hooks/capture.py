@@ -349,7 +349,8 @@ def _on_session_start(conn, config, event, project, project_id, session_id, even
 def _on_prompt(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
     prompt = str(payload.get("prompt") or "")
     previous = _open_turn(conn, session_id)
-    if previous is not None:
+    # A prompt replayed from the spool after a later one must not close that later turn, which is still running.
+    if previous is not None and previous["started_at"] <= event.ts:
         _close_turn(conn, int(previous["id"]), "unknown", event.ts)
     last = conn.execute(
         "SELECT id, prompt, commands_json FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)

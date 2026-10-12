@@ -160,3 +160,30 @@ def test_tools_of_a_spooled_prompt_never_land_in_the_finished_turn_before(config
     first = conn.execute("SELECT commands_json FROM turns WHERE prompt = 'first'").fetchone()[0]
     assert first == "[]"
     conn.close()
+
+
+def test_a_replayed_prompt_does_not_close_the_turn_running_now(config: Config, project: Path):
+    from agent_mem.core import spool
+    from agent_mem.core.events import Event
+    from agent_mem.memory import indexer
+
+    late = Event(
+        harness="claude",
+        kind="prompt",
+        session_id="s1",
+        ts="2000-01-01T00:00:00.000Z",
+        cwd=str(project),
+        prompt="spooled earlier",
+        raw_kind="UserPromptSubmit",
+    )
+    spool.write(config.spool_dir, {"type": "event", "event": late.to_dict()})
+    base = {"session_id": "s1", "cwd": str(project)}
+    hook.run(
+        "claude", None, json.dumps({**base, "hook_event_name": "UserPromptSubmit", "prompt": "running now"}), config
+    )
+    indexer.run(config, allow_download=False)
+    hook.run("claude", None, json.dumps({**base, "hook_event_name": "Stop", "last_assistant_message": "done"}), config)
+    conn = db.connect(config)
+    rows = {r["prompt"]: (r["outcome"], r["answer"]) for r in conn.execute("SELECT * FROM turns")}
+    assert rows["running now"] == ("ok", "done")
+    conn.close()
