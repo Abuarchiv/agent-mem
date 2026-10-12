@@ -8,6 +8,7 @@ through ``store.add_memory``, which cleans them the same way.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -228,10 +229,11 @@ def _close_turn(conn: sqlite3.Connection, turn_id: int, outcome: str, ts: str) -
     conn.execute("UPDATE turns SET outcome = ?, ended_at = ? WHERE id = ?", (final, ts, turn_id))
     store.index_turn(conn, turn_id)
     # Same transaction as the close: the observer worker picks it up later (docs/PLAN.md §4.2).
-    conn.execute(
-        "INSERT OR IGNORE INTO observe_queue(turn_id, state, next_try, updated_at) VALUES (?, 'pending', ?, ?)",
-        (turn_id, ts, ts),
-    )
+    with contextlib.suppress(sqlite3.OperationalError):  # a database without the observer tables still captures
+        conn.execute(
+            "INSERT OR IGNORE INTO observe_queue(turn_id, state, next_try, updated_at) VALUES (?, 'pending', ?, ?)",
+            (turn_id, ts, ts),
+        )
 
 
 def _turn_for_tool(conn: sqlite3.Connection, session_id: str, project_id: str | None, ts: str) -> int:

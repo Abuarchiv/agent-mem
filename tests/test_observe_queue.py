@@ -135,3 +135,31 @@ def test_worker_without_embedder_stores_raw(config: Config, monkeypatch) -> None
     )
     assert w.process(b) == "raw"
     conn.close()
+
+
+def test_doctor_and_capture_survive_a_database_without_observer_tables(config: Config, project: Path) -> None:
+    """A database whose version says current but lacks the observer tables (foreign lineage) must not crash."""
+    from agent_mem import health
+
+    conn = db.connect(config)
+    conn.execute("DROP TABLE observe_queue")
+    conn.commit()
+    conn.close()
+    hook.run(
+        "claude",
+        None,
+        json.dumps({"session_id": "s", "cwd": str(project), "hook_event_name": "UserPromptSubmit", "prompt": "hi"}),
+        config,
+    )
+    hook.run(
+        "claude",
+        None,
+        json.dumps({"session_id": "s", "cwd": str(project), "hook_event_name": "Stop", "last_assistant_message": "ok"}),
+        config,
+    )
+    conn = db.connect(config)
+    assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 1
+    conn.close()
+    checks = health.doctor(config)
+    bad = [c for c in checks if c.name == "observer queue"]
+    assert bad and not bad[0].ok and "observer tables" in bad[0].detail

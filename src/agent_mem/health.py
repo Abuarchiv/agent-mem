@@ -260,7 +260,18 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     if not config.observe.enabled:
         checks.append(Check("observer", True, "disabled in config.json"))
         return checks
-    states = dict(conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall())
+    try:
+        states = dict(conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall())
+    except sqlite3.OperationalError as error:  # schema says current, table missing: a foreign or hand-edited database
+        checks.append(
+            Check(
+                "observer queue",
+                False,
+                f"{error}; schema v{db.user_version(conn)} without the observer tables",
+                "Move the data directory aside (`agent-mem paths`) or run `agent-mem restore --latest`; the queue table is created by migration 002.",
+            )
+        )
+        return checks
     pending, failed = int(states.get("pending", 0)), int(states.get("failed", 0))
     last = conn.execute("SELECT ts, provider, ok FROM observe_calls ORDER BY id DESC LIMIT 1").fetchone()
     detail = f"queue pending {pending}, done {states.get('done', 0)}, raw {states.get('raw', 0)}, failed {failed}"
