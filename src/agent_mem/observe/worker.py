@@ -202,7 +202,11 @@ class Worker:
                 last_error = f"{name}: {type(error).__name__}: {error}"
                 continue
             _record_call(self.conn, name, "extract", time.perf_counter() - started, True, b.chars, b.turn_ids, None)
-            mirror(self.conn, self.config, b, facts)
+            # Facts and `done` in one transaction, before the slow work-log call: a worker killed in between
+            # extracted the bundle again, and mem0 kept both wordings of every fact.
+            with db.transaction(self.conn):
+                mirror(self.conn, self.config, b, facts)
+                queue.finish(self.conn, b.turn_ids, "done", name)
             self.stats["facts"] += len(facts)
             self._work_log(b, llm, name)
             return name
@@ -293,8 +297,6 @@ class Worker:
                 store_raw(self.conn, b)
                 queue.finish(self.conn, b.turn_ids, "raw", "raw")
                 self.stats["raw"] += 1
-            else:
-                queue.finish(self.conn, b.turn_ids, "done", provider)
         return True
 
     def _reindex_if_embedder_changed(self) -> None:

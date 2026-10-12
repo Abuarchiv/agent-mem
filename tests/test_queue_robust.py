@@ -397,3 +397,34 @@ def test_a_busy_database_is_no_indexer_failure(config: Config, monkeypatch):
     conn = db.connect(config)
     assert conn.execute("SELECT COUNT(*) FROM health WHERE component = 'indexer'").fetchone()[0] == 0
     conn.close()
+
+
+def test_a_worker_killed_during_the_work_log_does_not_extract_the_bundle_again(
+    config: Config, project: Path, monkeypatch
+):
+    import pytest
+
+    from agent_mem.observe import providers, summary, worker
+    from agent_mem.observe.mem0_adapter import Fact
+
+    _turn(config, project, "s1", "nutze uv")
+    conn = db.connect(config)
+    monkeypatch.setattr(providers, "chain", lambda *a: ["claude"])
+    monkeypatch.setattr(providers, "make_llm", lambda *a: object())
+
+    class Adapter:
+        memory = type("M", (), {"llm": None})()
+
+        def extract(self, *a):
+            return [Fact(id="f1", text="[fact] The project uses uv.")]
+
+    def killed(*a):
+        raise KeyboardInterrupt  # SIGTERM/logout while the slow title call runs
+
+    monkeypatch.setattr(summary, "summarize", killed)
+    w = worker.Worker(config, conn, adapter=Adapter())  # type: ignore[arg-type]
+    with pytest.raises(KeyboardInterrupt):
+        w.step()
+    assert conn.execute("SELECT state FROM observe_queue").fetchone()[0] == "done"
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE dedupe_key = 'mem0:f1'").fetchone()[0] == 1
+    conn.close()
