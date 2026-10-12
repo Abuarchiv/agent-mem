@@ -287,10 +287,13 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
     const list = filteredTurns();
     const selected = state.turn === undefined ? undefined : data.turns.find((turn) => String(turn.id) === state.turn);
     const filtering = state.query.trim() !== "" || state.outcome !== "all";
-    const active = state.session ?? selected?.session_id ?? list[0]?.session_id ?? sessions()[0]?.id;
+    const active = state.session ?? selected?.session_id ?? list[0]?.session_id ?? sessions().find((item) => item.turns > 0)?.id;
     const matching = new Set(list.map((turn) => turn.session_id));
     let lastDay = "";
-    const cards = sessions().filter((session) => !filtering || matching.has(session.id)).map((session) => {
+    // Sessions without a request (opened and closed, or only a hook check) only fill the list.
+    const listed = sessions().filter((session) => session.turns > 0 || session.id === state.session);
+    const hidden = sessions().length - listed.length;
+    const cards = listed.filter((session) => !filtering || matching.has(session.id)).map((session) => {
       const key = dayKey(session.started_at);
       const label = key === lastDay ? "" : `<div class="list-label">${h(dayLabel(key))}</div>`;
       lastDay = key;
@@ -307,7 +310,7 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
       }).join("")}</div>`;
     return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
 <div class="timeline">
-<div class="session-list">${cards || empty("No sessions", "Sessions appear after a connected harness runs.")}</div>
+<div class="session-list">${cards || empty("No sessions", "Sessions appear after a connected harness runs.")}${hidden ? `<p class="caption">${plural(hidden, "session")} without a request hidden.</p>` : ""}</div>
 <section class="panel">${head}${feed}</section>
 ${turnDetail(selected, session)}
 </div>`;
