@@ -110,6 +110,32 @@ def test_view_command_writes_a_private_page_and_purge_removes_it(
     assert not ui.view_dir(config).exists()
 
 
+def test_view_watch_rewrites_the_page_until_interrupted(config: Config, driver: Driver, monkeypatch, capsys):
+    from agent_mem.cli import commands
+
+    _teach(driver)
+    page = ui.view_dir(config) / ui.PAGE_NAME
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            driver.prompt("s1", "Second prompt after the first write")
+        else:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(commands.time, "sleep", sleep)
+    assert cli.main(["--data-dir", str(config.data_dir), "view", "--no-open", "--watch", "1"]) == 0
+    assert sleeps == [2, 2]  # never faster than every 2 s
+    payload = _payload(page.read_text(encoding="utf-8"))
+    assert payload["refresh"] == 2
+    assert any(turn["prompt"] == "Second prompt after the first write" for turn in payload["turns"])
+    assert "Stopped" in capsys.readouterr().out
+
+    assert cli.main(["--data-dir", str(config.data_dir), "view", "--no-open"]) == 0
+    assert _payload(page.read_text(encoding="utf-8"))["refresh"] is None
+
+
 def test_view_assets_ship_with_the_package():
     folder = resources.files("agent_mem.ui")
     for name in ("app.js", "app.css", *(f"fonts/{file}" for _, _, file in ui.FONTS)):

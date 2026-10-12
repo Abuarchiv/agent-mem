@@ -121,6 +121,14 @@ def _main(args: list[str]) -> int:
     p.add_argument("--project", help="only this project directory (default: all projects)")
     p.add_argument("--output", type=Path, help="write the page here instead of the private data directory")
     p.add_argument("--no-open", action="store_true", help="only write the page and print its path")
+    p.add_argument(
+        "--watch",
+        type=int,
+        nargs="?",
+        const=10,
+        metavar="SECONDS",
+        help="keep rewriting the page every SECONDS (default 10) until Ctrl+C; the open page reloads itself",
+    )
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")
 

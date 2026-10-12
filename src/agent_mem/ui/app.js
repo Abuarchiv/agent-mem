@@ -22,6 +22,7 @@
     fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
   };
   const icon = (name, size = 20, width = 1.8) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 
@@ -34,6 +35,7 @@
     { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search components…" },
   ];
   const MEMORY_KINDS = ["decision", "fact", "preference", "correction", "dead_end", "lesson", "summary", "native_note"];
+  const PROFILE_LABEL = { "cmd:test": "Test command", "cmd:lint": "Lint command", "cmd:build": "Build command", "cmd:install": "Install command" };
   const ENTITY_KINDS = ["file", "command", "error", "package"];
   // Error signatures are stored as "sig:<hash>"; show them as short error ids.
   const entityLabel = (node) => (node.kind === "error" && node.key.startsWith("sig:") ? `error ${node.key.slice(4, 12)}` : node.key);
@@ -42,7 +44,7 @@
   const root = document.getElementById("root");
   let data = null;
   let graphController = null;
-  const state = { view: "overview", project: "all", query: "", outcome: "all", session: undefined, turn: undefined, kind: "all", invalid: false, hiddenKinds: new Set() };
+  const state = { view: "overview", project: "all", query: "", outcome: "all", session: undefined, turn: undefined, memory: undefined, kind: "all", invalid: false, hiddenKinds: new Set() };
 
   /* ---------------------------------------------------------------- helpers */
 
@@ -58,6 +60,8 @@
   const inline = (text) => h(text).replace(/`([^`]+)`/g, "<code>$1</code>");
   const tag = (text, className = "") => `<span class="tag ${className}">${h(text)}</span>`;
   const stat = (value, label) => `<div class="stat"><b>${h(value)}</b><span>${h(label)}</span></div>`;
+  // A command the reader can copy with one click; the visible text is the command itself.
+  const copyable = (command) => `<button type="button" class="copy" data-action="copy" data-value="${h(command)}" title="Copy to clipboard"><code>${h(command)}</code>${icon("copy", 15)}</button>`;
   const empty = (title, body) => `<div class="empty"><b>${h(title)}</b><span>${body}</span></div>`;
   const matches = (values) => {
     const needle = state.query.trim().toLocaleLowerCase();
@@ -103,6 +107,8 @@
   const outcomeBadge = (outcome) => `<span class="badge ${h(outcome)}" title="${h(outcomeLabel(outcome))}">${icon(outcome === "ok" ? "check" : outcome === "error" ? "cross" : "dots", 15, 2.2)}</span>`;
   const limitReached = (list, key) => list.length >= (data.limits[key] ?? Infinity);
 
+  // `agent-mem view --watch` rewrites the page every `refresh` seconds; an old page means the watch ended.
+  const live = () => Boolean(data.refresh) && date(data.generated_at) !== null && Date.now() - date(data.generated_at).getTime() < data.refresh * 3000;
   const turns = () => data.turns.filter((turn) => inProject(turn.project_id));
   const sessions = () => data.sessions.filter((session) => inProject(session.project_id));
   const memories = () => data.memories.filter((memory) => inProjectOrGlobal(memory.project_id));
@@ -149,7 +155,7 @@
 <aside class="sidebar" aria-label="Viewer navigation">
 <a class="brand" href="${hashFor("overview")}">agent-mem<span class="brand-badge">v${h(String(data.agent_mem).split(".")[0])}</span></a>
 <nav aria-label="Sections">${groups}</nav>
-<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Capture paused" : "Capture active"}</strong><span>Snapshot from ${h(full(data.generated_at))}<br>Run <code>agent-mem view</code> to refresh</span></div>
+<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Capture paused" : "Capture active"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.<br>Stop with Ctrl+C in the terminal.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}${data.refresh ? ". The watch has stopped" : ""}<br>Run <code>agent-mem view --watch</code> to keep it current</span>`}</div>
 </aside>
 <div class="main">
 <header class="topbar">
@@ -237,7 +243,7 @@
 
     const list = filteredTurns().slice(0, 9);
     const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No turns match" : "Nothing captured yet", allTurns.length ? "Try another search or outcome filter." : "Connect a harness with <code>agent-mem setup claude</code> (or codex, copilot, opencode) and start a session.");
-    const latest = valid.slice(0, 4).map((memory) => `<div class="row"><span class="tag kind-${h(memory.kind)}">${h(readable(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memory.title, 90))}</b><span>${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></div>`).join("");
+    const latest = valid.slice(0, 5).map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><span class="tag kind-${h(memory.kind)}">${h(readable(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memoryText(memory), 110))}</b><span>M${memory.id} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></a>`).join("");
     const componentRows = Object.entries(data.health.components ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(0, 6).map(([component, info]) => {
       const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
       return `<div class="row"><i class="dot ${failing ? "bad" : "good"}"></i><b>${h(component)}</b><span class="value">${failing ? "failing" : `ok ${h(ago(info.last_ok_at))}`}</span></div>`;
@@ -294,14 +300,15 @@ ${turnDetail(selected, session)}
     return `<aside class="detail ${h(turn.outcome)}" aria-label="Turn detail">
 <header><h2>T${turn.id} · ${h(outcomeLabel(turn.outcome))}</h2><a class="round-button" href="${closeHref}" aria-label="Close turn detail">${icon("close", 16)}</a></header>
 <div class="pill-group">${tag(projectName(turn.project_id))}${session ? tag(harnessLabel(session.harness)) : ""}${session?.branch ? tag(session.branch, "mono") : ""}${tag(`trust ${turn.trust}`)}</div>
-<dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still open")}</dd><dt>Importance</dt><dd>${h(Number(turn.importance).toFixed(2))}</dd><dt>Show in CLI</dt><dd class="mono">agent-mem show T${turn.id}</dd></dl>
+<dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still open")}</dd><dt>Importance</dt><dd>${h(Number(turn.importance).toFixed(2))}</dd></dl>
+<div class="copy-list">${copyable(`agent-mem show T${turn.id}`)}</div>
 <span class="section-label">Request</span><div class="text-box">${h(turn.prompt || "(no request text)")}</div>
 ${actionList}
 ${turn.answer ? `<span class="section-label">Result</span><div class="text-box">${h(turn.answer)}</div>` : ""}
-${turn.truncated ? `<p class="notice">Long text is shortened on this page. <code>agent-mem show T${turn.id}</code> prints more.</p>` : ""}
+${turn.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show T${turn.id}</code> prints more.</span></p>` : ""}
 ${turn.files.length ? `<span class="section-label">Files</span><div class="file-list">${turn.files.map((file) => tag(file, "mono")).join("")}</div>` : ""}
 ${turn.errors.length ? `<span class="section-label">Errors</span><ul class="actions">${turn.errors.map((error) => `<li><code class="error-line">${h(error)}</code></li>`).join("")}</ul>` : ""}
-${learned.length ? `<span class="section-label">Learned from this turn</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b></header>${h(memory.title)}</li>`).join("")}</ul>` : ""}
+${learned.length ? `<span class="section-label">Learned from this turn</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
 <span class="notice">${icon("lock", 16)}Captured text is untrusted and shown as stored. Secrets were redacted at capture.</span>
 </aside>`;
   }
@@ -316,14 +323,43 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
     const pills = `<div class="pill-group" role="group" aria-label="Filter by kind"><button type="button" class="pill" data-action="kind" data-value="all" aria-pressed="${state.kind === "all"}">All ${num(pool.length)}</button>${MEMORY_KINDS.filter((kind) => counts.get(kind)).map((kind) => `<button type="button" class="pill" data-action="kind" data-value="${kind}" aria-pressed="${state.kind === kind}">${h(readable(kind))} ${num(counts.get(kind))}</button>`).join("")}<button type="button" class="pill" data-action="invalid" aria-pressed="${state.invalid}">Include superseded</button></div>`;
     const cards = shown.map((memory) => {
       const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} shown` : memory.used ? `used ${num(memory.used)}×` : "not recalled yet";
-      return `<article class="memory-card${memory.invalid_at ? " invalid" : ""}"><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b><span class="muted">${h(when(memory.created_at))}</span></header><h3>${inline(memory.title)}</h3>${memory.body && memory.body.trim() !== memory.title.trim() ? `<p>${h(memory.body)}</p>` : ""}
+      const text = memoryText(memory);
+      const extra = memory.body && !text.startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? memory.body : "";
+      return `<article class="memory-card${memory.invalid_at ? " invalid" : ""}${String(memory.id) === state.memory ? " is-selected" : ""}"><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b><span class="muted">${h(when(memory.created_at))}</span></header><h3><a class="card-link" href="${hashFor("memory", { m: String(memory.id) })}">${inline(text)}</a></h3>${extra ? `<p>${h(extra)}</p>` : ""}
 <div class="meter"><span>activation</span><span class="track"><i style="width:${Math.round(memory.activation * 100)}%"></i></span></div>
-<footer>${projectTag(memory.project_id)}${tag(`${memory.source}${memory.origin ? ` · ${memory.origin}` : ""}`)}${tag(`trust ${memory.trust}`)}${tag(usage)}${memory.turn_id ? `<a class="tag" href="${hashFor("timeline", { turn: String(memory.turn_id) })}">from T${memory.turn_id}</a>` : ""}${memory.invalid_at ? tag(memory.superseded_by ? `superseded by M${memory.superseded_by}` : `invalid since ${dayLabel(dayKey(memory.invalid_at))}`, "warn") : ""}</footer></article>`;
+<footer>${projectTag(memory.project_id)}${tag(usage)}${memory.turn_id ? `<a class="tag" href="${hashFor("timeline", { turn: String(memory.turn_id) })}">from T${memory.turn_id}</a>` : ""}${memory.invalid_at ? tag(memory.superseded_by ? `superseded by M${memory.superseded_by}` : `invalid since ${dayLabel(dayKey(memory.invalid_at))}`, "warn") : ""}</footer></article>`;
     }).join("");
-    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What agents and hooks decided to keep. Activation rises when a memory is used and fades when it is not; nothing is deleted by fading. Remove one with <code>agent-mem purge --id M12</code>.</p></div></div>
+    const selected = state.memory === undefined ? undefined : data.memories.find((memory) => String(memory.id) === state.memory);
+    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What agents and hooks decided to keep. Activation rises when a memory is used and fades when it is not; nothing is deleted by fading. Open a memory to copy the command that shows or deletes it.</p></div></div>
 ${pills}
-${cards ? `<div class="cards">${cards}</div>` : empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search or kind." : "Agents write them with the <code>mem_remember</code> MCP tool; hooks add decisions, corrections and dead ends.")}
-${limitReached(data.memories, "memories") ? `<p class="muted">This page holds the latest ${num(data.limits.memories)} memories. <code>agent-mem search</code> finds older ones.</p>` : ""}`;
+<div class="${selected ? "with-detail" : ""}">
+<div>${cards ? `<div class="cards">${cards}</div>` : empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search or kind." : "Agents write them with the <code>mem_remember</code> MCP tool; hooks add decisions, corrections and dead ends.")}
+${limitReached(data.memories, "memories") ? `<p class="muted">This page holds the latest ${num(data.limits.memories)} memories. <code>agent-mem search</code> finds older ones.</p>` : ""}</div>
+${selected ? memoryDetail(selected) : ""}
+</div>`;
+  }
+
+  // Observer facts store the first 120 characters of the body as title; show the whole sentence instead of the cut.
+  const memoryText = (memory) => {
+    const title = String(memory.title ?? "").trim();
+    const body = String(memory.body ?? "").trim();
+    return body.length > title.length && body.startsWith(title) ? body : title;
+  };
+
+  function memoryDetail(memory) {
+    const id = `M${memory.id}`;
+    const successor = memory.superseded_by ? data.memories.find((item) => item.id === memory.superseded_by) : undefined;
+    const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} times shown` : memory.used ? `used ${num(memory.used)}×` : "not recalled yet";
+    return `<aside class="detail memory-detail kind-${h(memory.kind)}" aria-label="Memory detail">
+<header><h2>${id} · ${h(readable(memory.kind))}</h2><a class="round-button" href="${hashFor("memory")}" aria-label="Close memory detail">${icon("close", 16)}</a></header>
+<div class="pill-group">${tag(projectName(memory.project_id))}${tag(memory.source)}${memory.origin ? tag(memory.origin) : ""}${tag(`trust ${memory.trust}`)}${memory.invalid_at ? tag("superseded", "warn") : ""}</div>
+<div class="text-box">${inline(memoryText(memory))}${memory.body && !memoryText(memory).startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? `\n\n${h(memory.body)}` : ""}</div>
+${memory.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show ${id}</code> prints all of it.</span></p>` : ""}
+<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd><dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Importance</dt><dd>${h(Number(memory.importance ?? 0).toFixed(2))}</dd><dt>Activation</dt><dd>${h(Math.round(memory.activation * 100))}%</dd><dt>Recall</dt><dd>${h(usage)}</dd>${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
+<span class="section-label">Commands</span>
+<div class="copy-list">${copyable(`agent-mem show ${id}`)}${copyable(`agent-mem purge --id ${id}`)}</div>
+<p class="notice">${icon("lock", 16)}<span>Purge deletes the memory with its search keys and vectors and removes this page. An agent can do the same with the <code>mem_forget</code> tool.</span></p>
+</aside>`;
   }
 
   /* ---------------------------------------------------------------- learned */
@@ -332,14 +368,20 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
     const rules = data.rules.filter((rule) => inProjectOrGlobal(rule.project_id) && matches([rule.pattern, rule.message]));
     const recipes = data.recipes.filter((recipe) => inProject(recipe.project_id) && matches([recipe.error_text, recipe.command_key, ...recipe.files]));
     const profile = data.profile.filter((item) => inProject(item.project_id) && matches([item.key, item.value]));
-    const ruleRows = rules.map((rule) => `<tr><td><b>R${rule.id}</b></td><td>${inline(rule.message)}<br><span class="muted">pattern</span> <code>${h(rule.pattern)}</code></td><td>${rule.enabled ? tag("enabled", "good") : tag("proposed", "info")}</td><td class="num">${num(rule.evidence)}</td><td class="num">${num(rule.hits)}</td><td class="num">${num(rule.overrides)}</td><td>${projectTag(rule.project_id)}</td><td><code>agent-mem rules ${rule.enabled ? "disable" : "enable"} ${rule.id}</code></td></tr>`).join("");
+    const ruleRows = rules.map((rule) => `<tr><td><b>R${rule.id}</b></td><td>${inline(rule.message)}<br><span class="muted">pattern</span> <code>${h(rule.pattern)}</code></td><td>${rule.enabled ? tag("enabled", "good") : tag("proposed", "info")}</td><td class="num">${num(rule.evidence)}</td><td class="num">${num(rule.hits)}</td><td class="num">${num(rule.overrides)}</td><td>${projectTag(rule.project_id)}</td><td>${copyable(`agent-mem rules ${rule.enabled ? "disable" : "enable"} ${rule.id}`)}</td></tr>`).join("");
     const recipeRows = recipes.map((recipe) => `<div class="recipe"><code class="error-line">${h(firstLine(recipe.error_text, 200))}</code><div class="recipe-meta"><code>${h(recipe.command_key)}</code>${recipe.files.slice(0, 4).map((file) => tag(file, "mono")).join("")}</div><div class="recipe-meta">${tag(`fixed ${num(recipe.successes)}×`, "good")}${recipe.recurrences ? tag(`recurred ${num(recipe.recurrences)}×`, "warn") : ""}${projectTag(recipe.project_id)}<span class="muted">${h(when(recipe.updated_at))}</span></div></div>`).join("");
-    const profileRows = profile.map((item) => `<div class="row"><b>${h(readable(item.key))}</b><span class="grow"><span>${h(item.value)}</span></span><span class="value">${plural(item.count, "time")}</span></div>`).join("");
+    const groups = new Map();
+    for (const item of profile) groups.set(item.key, [...(groups.get(item.key) ?? []), item]);
+    const profileRows = [...groups.entries()].map(([key, items]) => {
+      const rows = items.slice(0, 5).map((item) => `<div class="row"><code class="grow clip" title="${h(item.value)}">${h(firstLine(item.value.replace(/\s*…?\[truncated\]…?\s*/g, " … "), 90))}</code><span class="value">${plural(item.count, "time")}</span></div>`).join("");
+      const more = items.length > 5 ? `<p class="muted more">${plural(items.length - 5, "more variant")}, used less often</p>` : "";
+      return `<div class="pref-group"><span class="section-label">${h(PROFILE_LABEL[key] ?? readable(key))}</span>${rows}${more}</div>`;
+    }).join("");
     return `<div class="page-head"><div><h1>Learned</h1><p class="lede">Rules come from your own corrections, fixes from failing commands that later passed, preferences from repeated choices. No model is involved.</p></div></div>
 <section class="panel"><div class="panel-head"><h2>Rules</h2><small>Proposed rules only warn. Enabled rules can block a command.</small></div>${ruleRows ? `<div class="table-wrap"><table><thead><tr><th>Id</th><th>Rule</th><th>State</th><th>Evidence</th><th>Hits</th><th>Overrides</th><th>Project</th><th>Change with</th></tr></thead><tbody>${ruleRows}</tbody></table></div>` : empty("No rules yet", "Say “pnpm instead of npm” a few times and a rule is proposed.")}</section>
 <div class="halves">
 <section class="panel"><div class="panel-head"><h2>Error fixes</h2><small>failing command → edits → same command passes</small></div>${recipeRows || empty("No fixes learned yet", "They appear after a failing command passes again in the same session.")}</section>
-<section class="panel"><div class="panel-head"><h2>Preferences</h2></div>${profileRows || empty("No preferences yet", "Repeated choices such as package managers or test commands show up here.")}</section>
+<section class="panel"><div class="panel-head"><h2>Preferences</h2><small>most used first</small></div>${profileRows || empty("No preferences yet", "Repeated choices such as package managers or test commands show up here.")}</section>
 </div>`;
   }
 
@@ -374,6 +416,10 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
       return { ...node, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, vx: 0, vy: 0, r: 6 + Math.min(14, Math.sqrt(node.degree) * 2.4) };
     });
     const byId = new Map(nodes.map((node) => [node.id, node]));
+    // Label only the strongest nodes; the rest get a label on hover, selection, search or zoom.
+    const labelled = new Set([...nodes].sort((a, b) => b.strength - a.strength).slice(0, 40).map((node) => node.id));
+    const rank = new Map([...nodes].sort((a, b) => b.strength - a.strength).map((node, index) => [node.id, index]));
+    const shortLabel = (node) => { const label = entityLabel(node); if (label.length <= 34) return label; return node.kind === "file" ? `…${label.slice(-33)}` : `${label.slice(0, 33)}…`; };
     const edges = sourceEdges.filter((edge) => byId.has(edge.a) && byId.has(edge.b));
     if (nodes.length === 0) {
       host.innerHTML = `<div class="graph-empty">No associations yet. They form when files, commands and errors occur in the same turn.</div>`;
@@ -410,6 +456,7 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
         context.strokeStyle = ink; context.lineWidth = 0.6 + edge.weight * (hot ? 3.5 : 2.5);
         context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
       }
+      const labels = [];
       for (const node of nodes) {
         if (!shown(node)) continue;
         const p = screen(node); const active = !focus || node === focus || near.has(node.id); const r = Math.max(3.5, node.r * view.scale);
@@ -417,14 +464,21 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
         context.fillStyle = css(ENTITY_COLOR[node.kind], "#AFC1F0"); context.strokeStyle = ink; context.lineWidth = 1.5;
         context.beginPath(); context.arc(p.x, p.y, r, 0, Math.PI * 2); context.fill(); context.stroke();
         if (node === selected) { context.globalAlpha = 0.18; context.lineWidth = 6; context.beginPath(); context.arc(p.x, p.y, r + 7, 0, Math.PI * 2); context.stroke(); }
-        if ((nodes.length <= 60 || node === focus || near.has(node.id) || node.degree >= 4 || view.scale > 1.5) && hit(node)) {
-          const label = entityLabel(node); const text = label.length > 38 ? `…${label.slice(-37)}` : label;
-          context.globalAlpha = active ? 1 : 0.3;
-          context.font = `${node === selected ? 700 : 600} 12px ${css("--sans", "sans-serif")}`;
-          const w = context.measureText(text).width; const x = p.x + r + 8;
-          context.fillStyle = css("--graph-bg", "#F8F4EA"); context.globalAlpha *= 0.85; context.fillRect(x - 4, p.y - 10, w + 8, 19);
-          context.globalAlpha = active ? 1 : 0.3; context.fillStyle = ink; context.fillText(text, x, p.y + 4);
-        }
+        const searching = query.trim() !== "";
+        const named = focus ? node === focus || near.has(node.id) : searching || nodes.length <= 40 || labelled.has(node.id) || view.scale > 1.8;
+        if (named && hit(node)) labels.push({ node, p, r, active, priority: node === focus ? -1 : rank.get(node.id) });
+      }
+      // Labels last, most important first; a label that would overlap one already drawn is skipped.
+      const placed = [];
+      for (const { node, p, r, active } of labels.sort((a, b) => a.priority - b.priority)) {
+        const text = shortLabel(node);
+        context.font = `${node === selected ? 700 : 600} 12px ${css("--sans", "sans-serif")}`;
+        const w = context.measureText(text).width; const x = p.x + r + 8;
+        const box = { x: x - 4, y: p.y - 10, w: w + 8, h: 19 };
+        if (node !== focus && placed.some((o) => box.x < o.x + o.w && o.x < box.x + box.w && box.y < o.y + o.h && o.y < box.y + box.h)) continue;
+        placed.push(box);
+        context.fillStyle = css("--graph-bg", "#F8F4EA"); context.globalAlpha = (active ? 1 : 0.3) * 0.85; context.fillRect(box.x, box.y, box.w, box.h);
+        context.globalAlpha = active ? 1 : 0.3; context.fillStyle = ink; context.fillText(text, x, p.y + 4);
       }
       context.globalAlpha = 1;
     };
@@ -532,6 +586,7 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
       state.session = params.get("session") ?? undefined;
       if (state.turn !== undefined && state.session === undefined) state.session = data.turns.find((turn) => String(turn.id) === state.turn)?.session_id;
     }
+    state.memory = state.view === "memory" ? params.get("m") ?? undefined : undefined;
   }
 
   function renderView() {
@@ -554,7 +609,7 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
     readRoute();
     renderView();
     if (previous !== state.view) { window.scrollTo({ top: 0 }); document.getElementById("view")?.focus({ preventScroll: true }); }
-    if (state.view === "timeline" && state.turn !== undefined && window.matchMedia("(max-width: 1320px)").matches) document.querySelector(".detail")?.scrollIntoView({ block: "start" });
+    if ((state.turn !== undefined || state.memory !== undefined) && window.matchMedia("(max-width: 1320px)").matches) document.querySelector(".detail")?.scrollIntoView({ block: "start" });
   }
 
   document.addEventListener("click", (event) => {
@@ -565,6 +620,16 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
     if (action === "outcome") { state.outcome = value; renderView(); return; }
     if (action === "kind") { state.kind = value; renderView(); return; }
     if (action === "invalid") { state.invalid = !state.invalid; renderView(); return; }
+    if (action === "copy") {
+      const done = () => { target.classList.add("is-copied"); target.setAttribute("aria-label", "Copied"); setTimeout(() => { target.classList.remove("is-copied"); target.removeAttribute("aria-label"); }, 1400); };
+      // execCommand needs no permission and works for file:// pages; the selection stays if both ways fail.
+      const range = document.createRange(); range.selectNodeContents(target.querySelector("code"));
+      getSelection().removeAllRanges(); getSelection().addRange(range);
+      let copied = false;
+      try { copied = document.execCommand("copy"); } catch { copied = false; }
+      if (copied) { getSelection().removeAllRanges(); done(); } else navigator.clipboard?.writeText(value).then(() => { getSelection().removeAllRanges(); done(); }, () => {});
+      return;
+    }
     if (action === "session") { location.hash = hashFor("timeline", { session: value }); return; }
     if (action === "turn") { location.hash = hashFor("timeline", state.session ? { session: state.session, turn: value } : { turn: value }); return; }
     if (action === "entity-kind") {
@@ -590,6 +655,10 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
     timer = setTimeout(renderView, 120);
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.view !== "graph" && (state.memory !== undefined || state.turn !== undefined) && !event.target.closest?.("input")) {
+      location.hash = state.view === "memory" ? hashFor("memory") : hashFor("timeline", state.session ? { session: state.session } : {});
+      return;
+    }
     if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT" || active.isContentEditable)) return;
@@ -598,12 +667,36 @@ ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds th
   });
   window.addEventListener("hashchange", navigate);
 
+  const SAVED = "agent-mem-view";
+  let lastActivity = 0;
+  for (const type of ["pointerdown", "keydown", "wheel", "touchstart"]) document.addEventListener(type, () => { lastActivity = Date.now(); }, { passive: true, capture: true });
+  const restore = () => {
+    let saved;
+    try { saved = JSON.parse(sessionStorage.getItem(SAVED) ?? "null"); sessionStorage.removeItem(SAVED); } catch { return 0; }
+    if (!saved) return 0;
+    Object.assign(state, { query: saved.query ?? "", project: saved.project ?? state.project, outcome: saved.outcome ?? "all", kind: saved.kind ?? "all", invalid: Boolean(saved.invalid), hiddenKinds: new Set(saved.hiddenKinds ?? []) });
+    if (state.project !== "all" && !data.projects.some((project) => project.id === state.project)) state.project = "all";
+    return Number(saved.scroll) || 0;
+  };
+  // Reload to pick up the rewritten file, but never while the reader is active, typing, selecting text or in the graph.
+  const reloadWhenIdle = () => {
+    const active = document.activeElement;
+    const busy = document.hidden || state.view === "graph" || Date.now() - lastActivity < 8000 || (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) || String(getSelection?.() ?? "") !== "";
+    if (busy) return;
+    try { sessionStorage.setItem(SAVED, JSON.stringify({ query: state.query, project: state.project, outcome: state.outcome, kind: state.kind, invalid: state.invalid, hiddenKinds: [...state.hiddenKinds], scroll: window.scrollY })); } catch { /* storage off: reload without state */ }
+    location.reload();
+  };
+
   try {
     data = JSON.parse(document.getElementById("agent-mem-data").textContent);
     if (data.project_id) state.project = data.project_id;
+    const scroll = restore();
     renderChrome();
     readRoute();
     renderView();
+    if (scroll) window.scrollTo({ top: scroll });
+    // Keep reloading even when the file looks old: a sleeping tab or a restarted watch catches up on its own.
+    if (data.refresh) setInterval(reloadWhenIdle, data.refresh * 1000);
   } catch (error) {
     root.innerHTML = `<div class="app"><div class="main"><div class="empty"><b>The page could not read its snapshot.</b><span class="mono">${h(error && error.message ? error.message : "unknown error")}</span></div></div></div>`;
   }

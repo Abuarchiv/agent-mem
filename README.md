@@ -73,7 +73,7 @@ agent-mem status [--json] | doctor [--fix] [--json] | paths
 agent-mem setup <harness> [--write] [--no-models] | uninstall <harness>
 agent-mem observe [--drain] [--once] [--status] [--retry-failed] [--reprocess-raw] [--reindex]
 agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
-agent-mem show T12 M3 | view [--project DIR] [--output FILE] [--no-open]
+agent-mem show T12 M3 | view [--project DIR] [--output FILE] [--no-open] [--watch [SECONDS]]
 agent-mem rules [list|enable|disable|delete] [ID] | lessons
 agent-mem pause [--for 2h] | resume
 agent-mem export [--project DIR] [--output FILE]

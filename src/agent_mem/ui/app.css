@@ -216,6 +216,7 @@ td code { overflow-wrap: anywhere; }
 .turn-card p { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .turn-card p.answer { color: var(--muted); -webkit-line-clamp: 2; }
 .detail { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 14px; max-height: calc(100vh - 48px); overflow-y: auto; padding: 20px; border-radius: var(--radius-lg); background: var(--pink); color: #1A1814; }
+.detail > * { flex-shrink: 0; }
 .detail.error { background: var(--coral); } .detail.open, .detail.empty-detail { background: var(--sand); }
 .detail header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .detail .round-button { width: 36px; height: 36px; border-color: #1A1814; color: #1A1814; }
@@ -276,10 +277,44 @@ td.num { text-align: right; white-space: nowrap; }
 .inspector li i { border-color: #1A1814; }
 
 /* responsive */
+/* memory detail, copyable commands, preferences, live state */
+.with-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); gap: 16px; align-items: start; }
+.with-detail .cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.memory-card { position: relative; transition: box-shadow .2s ease, transform .2s ease; }
+.memory-card:hover { box-shadow: inset 0 0 0 1.5px var(--line-strong); }
+.memory-card.is-selected { box-shadow: inset 0 0 0 2px var(--ink); }
+.memory-card h3 { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; line-height: 1.35; text-wrap: pretty; }
+.card-link { color: inherit; text-decoration: none; }
+.card-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.card-link:focus-visible { outline: none; }
+.memory-card:has(.card-link:focus-visible) { outline: 2px solid var(--ink); outline-offset: 3px; }
+.memory-card footer a, .memory-card header { position: relative; z-index: 1; }
+.memory-detail .text-box { font-size: 15px; }
+.detail a { color: inherit; font-weight: 700; }
+.copy-list { display: flex; flex-direction: column; gap: 6px; }
+.copy { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, .55); color: #1A1814; text-align: left; transition: background .2s ease, transform .1s ease; }
+.copy code { flex-grow: 1; min-width: 0; overflow-wrap: anywhere; }
+.copy:hover { background: rgba(255, 255, 255, .85); }
+.copy:active { transform: translateY(1px); }
+.copy.is-copied { background: var(--green); }
+.copy.is-copied .icon { display: none; }
+.copy.is-copied::after { content: "Copied"; font-size: 12px; font-weight: 700; }
+td .copy, .panel .copy { background: var(--surface-strong); color: var(--ink); }
+.row-link { color: inherit; text-decoration: none; border-radius: 10px; transition: background .2s ease; }
+.row-link:hover { background: var(--surface-strong); }
+.pref-group { display: flex; flex-direction: column; padding: 12px 0 4px; }
+.pref-group + .pref-group { border-top: 1px solid var(--line); }
+.pref-group .row { border-top: 0; padding: 6px 0; }
+.pref-group .more { margin: 2px 0 0; font-size: 12px; }
+code.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-foot .live { color: #8CCB67; }
+
 @media (max-width: 1320px) {
   .blocks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .timeline { grid-template-columns: 240px minmax(0, 1fr); }
   .timeline .detail { grid-column: 1 / -1; position: static; max-height: none; }
+  .with-detail { grid-template-columns: minmax(0, 1fr); }
+  .with-detail .detail { position: static; max-height: none; order: -1; }
   .columns, .halves { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1080px) {

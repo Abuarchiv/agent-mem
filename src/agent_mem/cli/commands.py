@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
@@ -406,14 +407,28 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
         if ns.project and project is None:
             print(f"No captured project at {os.path.abspath(ns.project)}.", file=sys.stderr)
             return 2
-        snapshot = ui.build_snapshot(conn, config, project.id if project else None)
-    target = ui.write(config, ui.render(snapshot), ns.output)
+        project_id = project.id if project else None
+        snapshot = ui.build_snapshot(conn, config, project_id)
+    watch = max(2, ns.watch) if ns.watch else None
+    target = ui.write(config, ui.render({**snapshot, "refresh": watch}), ns.output)
     print(f"Wrote {target}. It is a local file with a copy of your memory; it makes no network requests.")
     if not ns.no_open:
         import webbrowser
 
         if not webbrowser.open(target.as_uri()):
             print("Open it in a browser to view it.")
+    if watch is None:
+        return 0
+    # A foreground loop, not a server: it only rewrites the file; the page reloads it (R1).
+    print(f"Rewriting every {watch} s. Stop with Ctrl+C.")
+    try:
+        while True:
+            time.sleep(watch)
+            with _conn(config) as conn:
+                snapshot = ui.build_snapshot(conn, config, project_id)
+            ui.write(config, ui.render({**snapshot, "refresh": watch}), ns.output)
+    except KeyboardInterrupt:
+        print("Stopped. The page keeps the last snapshot.")
     return 0
 
 

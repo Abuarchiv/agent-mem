@@ -20,6 +20,12 @@
 - `mem_search` returns only confident hits (the hook's gate; a semantic hit must share a third of the question's content words). Without one it says "No confident match" and lists three weak candidates as such. On the fixture: right answer 20 of 20, silent on 20 of 20 unanswerable questions (before 10). "enthält" and "contains" are filler verbs, not search terms.
 - `eval` reports `All@k` and what the prompt hook would inject (`injected_hit@1`, `injected_abstention`); the fixture has 20 abstention cases instead of 5.
 
+### Viewer
+- `agent-mem view --watch [SECONDS]` rewrites the page every 10 s (minimum 2) until Ctrl+C; the open page reloads itself and keeps search, filters and scroll position. It waits while you click, type, select text or use the graph. Still no server and no open port.
+- Every memory opens a detail panel with its full text, validity, recall counts, source turn and successor, plus copy buttons for `agent-mem show` and `agent-mem purge --id`. Commands in turn details and rules copy with one click.
+- Observer facts show their whole sentence instead of the 120-character title.
+- The graph labels only the strongest nodes and skips overlapping labels; preferences are grouped by command kind.
+
 ### Retrieval
 
 - Default embedder is now `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (same Recall@5 on LongMemEval as embeddinggemma at a fifth of the size, better than e5-small). `retrieval.min_vector_score` default 0.3, calibrated for it; `query:`/`passage:` prefixes are applied only to e5 models. An embedder change re-embeds everything on the next indexer run and rebuilds the mem0 index on the next worker run.
