@@ -92,6 +92,17 @@ def test_corrections_and_preferences():
     assert signals.canonical_rule("Nicht `npm`, sondern nutze `pnpm`.") == ("npm", "pnpm")
     assert signals.canonical_rule("Nutze absolute Pfade wie `/x` statt relativer Pfade") is None
     assert signals.canonical_rule("Nutze keine lokalen LLMs") is None
+    # Everyday contrast is no tool rule; a git/npm avoidance keeps its subcommand.
+    assert signals.canonical_rule("Never commit, use local commits only.") is None
+    assert signals.canonical_rule("Do not install, use the venv.") is None
+    for prose in [
+        "nein, nicht so, sondern anders",
+        "nicht hier, sondern im viewer",
+        "nutze die neue api statt der alten",
+    ]:
+        assert signals.preference_pairs(prose) == [], prose
+    assert signals.preference_pairs("kein git push mehr bitte") == [("git push", None)]
+    assert signals.preference_pairs("nie npm benutzen") == [("npm", None)]
     assert ("yarn", "bun") in signals.preference_pairs("nicht yarn, sondern bun")
     assert ("requests", None) in signals.preference_pairs("never use requests here")
 

@@ -449,6 +449,127 @@ def _name(token: str) -> str:
     return token.lower().rstrip(".,:;!?")
 
 
+# "nicht so, sondern anders", "nicht hier, sondern im viewer", "X statt der alten": everyday contrast in prose.
+# A command rule names a tool, never one of these closed-class words.
+_FILLER = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "one",
+        "ones",
+        "other",
+        "some",
+        "any",
+        "all",
+        "here",
+        "there",
+        "now",
+        "later",
+        "then",
+        "so",
+        "not",
+        "no",
+        "more",
+        "again",
+        "them",
+        "they",
+        "we",
+        "you",
+        "me",
+        "us",
+        "der",
+        "die",
+        "das",
+        "dem",
+        "den",
+        "des",
+        "ein",
+        "eine",
+        "einen",
+        "einem",
+        "einer",
+        "eines",
+        "dies",
+        "diese",
+        "dieser",
+        "dieses",
+        "hier",
+        "da",
+        "dort",
+        "jetzt",
+        "später",
+        "dann",
+        "anders",
+        "nicht",
+        "kein",
+        "keine",
+        "mehr",
+        "wieder",
+        "es",
+        "er",
+        "sie",
+        "wir",
+        "ich",
+        "du",
+        "ihr",
+        "uns",
+        "mir",
+        "dir",
+        "ihn",
+        "im",
+        "in",
+        "am",
+        "an",
+        "auf",
+        "mit",
+        "für",
+        "von",
+        "zu",
+        "bei",
+        "nach",
+        "vor",
+        "aus",
+        "um",
+        "immer",
+        "nie",
+        "lieber",
+        "bitte",
+        "auch",
+        "noch",
+        "nur",
+        "schon",
+        "heute",
+        "morgen",
+        "alles",
+        "alle",
+        "etwas",
+        "nichts",
+        "was",
+        "wie",
+        "wo",
+        "use",
+        "nutzen",
+        "benutzen",
+        "verwenden",
+        "nehmen",
+    ]
+)
+
+
+def _pair(avoid: str, prefer: str | None) -> tuple[str, str | None] | None:
+    names = [avoid] if prefer is None else [avoid, prefer]
+    if avoid == prefer or any(len(n) < 2 or n in _FILLER or n.isdigit() for n in names):
+        return None
+    return avoid, prefer
+
+
 def preference_pairs(text: str) -> list[tuple[str, str | None]]:
     """Extract (avoid, prefer) pairs such as "pnpm statt npm" -> ("npm", "pnpm")."""
     pairs: list[tuple[str, str | None]] = []
@@ -457,23 +578,29 @@ def preference_pairs(text: str) -> list[tuple[str, str | None]]:
         for match in pattern.finditer(sample):
             first, second = _name(match.group(1)), _name(match.group(2))
             prefer, avoid = (second, first) if index == 2 else (first, second)
-            pair = (avoid, prefer)
-            if pair not in pairs and avoid and prefer and avoid != prefer:
+            pair = _pair(avoid, prefer)
+            if pair is not None and pair not in pairs:
                 pairs.append(pair)
     if not pairs:
         for match in _AVOID.finditer(sample):
             token = _name(match.group(1))
-            if token and token not in {"so", "das", "the", "that", "this", "mehr", "more", "wieder", "again"}:
-                pairs.append((token, None))
+            # "kein git push" avoids `git push` (a command key), not every git command.
+            sub = re.match(r"\s+`?([a-z][\w-]*)", sample[match.end(1) :].lower()) if token in _MULTI else None
+            if sub and sub.group(1) not in _FILLER:
+                token = f"{token} {sub.group(1)}"
+            pair = _pair(token, None)
+            if pair is not None:
+                pairs.append(pair)
     return pairs[:5]
 
 
 _CANONICAL_RULE = re.compile(
     r"(?i)^\s*(?:use|nutze|verwende)\s+`?([\w.@/+-]+?)`?\s+(?:instead of|statt|anstatt)\s+`?([\w.@/+-]+?)`?(?=[\s.,;:!]|$)"
 )
+# "Never commit, use local commits" is no tool swap: the avoided name needs a verb ("do not use npm") or backticks.
 _CANONICAL_AVOID_RULE = re.compile(
     r"(?i)^\s*(?:do not|don't|never|not|no|nicht|nie(?:mals)?)\s+"
-    r"(?:(?:use|nutze|verwende|benutze)\s+)?`?([\w.@/+-]+?)`?\s*[,;]\s*"
+    r"(?:(?:use|nutze|verwende|benutze)\s+`?([\w.@/+-]+?)`?|`([\w.@/+-]+?)`)\s*[,;]\s*"
     r"(?:(?:but|sondern)\s+(?:(?:use|nutze|verwende|benutze)\s+)?|"
     r"(?:use|nutze|verwende|benutze)\s+)`?([\w.@/+-]+?)`?(?=[\s.,;:!]|$)"
 )
@@ -483,13 +610,12 @@ def canonical_rule(text: str) -> tuple[str, str] | None:
     """Return one explicit command substitution as (avoid, prefer)."""
     match = _CANONICAL_RULE.match(text)
     if match:
-        prefer, avoid = _name(match.group(1)), _name(match.group(2))
-        return (avoid, prefer) if avoid and prefer and avoid != prefer else None
-    match = _CANONICAL_AVOID_RULE.match(text)
-    if match:
-        avoid, prefer = _name(match.group(1)), _name(match.group(2))
-        return (avoid, prefer) if avoid and prefer and avoid != prefer else None
-    return None
+        pair = _pair(_name(match.group(2)), _name(match.group(1)))
+    elif match := _CANONICAL_AVOID_RULE.match(text):
+        pair = _pair(_name(match.group(1) or match.group(2)), _name(match.group(3)))
+    else:
+        return None
+    return (pair[0], pair[1]) if pair is not None and pair[1] is not None else None
 
 
 def mentions_rule(prompt: str) -> bool:
