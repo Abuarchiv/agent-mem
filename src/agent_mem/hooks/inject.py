@@ -239,7 +239,10 @@ def _memory_lines(
     ranked = sorted(
         rows,
         key=lambda r: (
-            stats[("m", int(r["id"]))].activation_factor * (0.7 + 0.3 * r["importance"]) * priority.get(r["kind"], 1.0)
+            stats[("m", int(r["id"]))].activation_factor
+            * stats[("m", int(r["id"]))].briefing_factor
+            * (0.7 + 0.3 * r["importance"])
+            * priority.get(r["kind"], 1.0)
         ),
         reverse=True,
     )
@@ -262,10 +265,52 @@ def session_start(
     profile = _profile_line(conn, project_id)
     if profile:
         lines.append((profile, None))
-    lines.extend(_memory_lines(conn, project_id, harness))
+    memories = _memory_lines(conn, project_id, harness)
+    lines.extend(memories)
+    lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
     lines.extend(_last_session_lines(conn, project_id, session_id))
     return render(lines, config.budgets.session_start)
+
+
+def _focus_lines(
+    conn: sqlite3.Connection,
+    config: Config,
+    project_id: str,
+    session_id: str,
+    harness: str,
+    taken: set[tuple[str, int]],
+) -> list[tuple[str, tuple[str, int] | None]]:
+    """Memories about what is still open: the last session's next steps used as a query. The same few preferences
+    at every start say nothing about today's work; the open steps do."""
+    row = conn.execute(
+        "SELECT s.summary_json FROM turns t JOIN sessions s ON s.id = t.session_id "
+        "WHERE t.project_id = ? AND t.session_id != ? AND s.summary_json IS NOT NULL "
+        "ORDER BY t.started_at DESC LIMIT 1",
+        (project_id, session_id),
+    ).fetchone()
+    steps = [str(step) for step in json.loads(row[0]).get("next_steps") or []] if row else []
+    if not steps:
+        return []
+    text = " ".join(steps)
+    terms = search.query_terms(text)
+    if not terms:
+        return []
+    query = search.Query(
+        text=text,
+        project_id=project_id,
+        exclude_session=session_id,
+        limit=6,
+        exclude_origins={"claude-auto-memory"} if harness == "claude" else set(),
+    )
+    hits = [h for h in search.search(conn, config, query) if h.owner not in taken and h.owner[0] == "m"]
+    return [
+        (
+            f"- [{h.label} · {timeutil.day(h.ts) if h.ts else ''} · {h.kind}] {first_line(h.title or h.text, 180)}",
+            h.owner,
+        )
+        for h in hits[:2]
+    ]
 
 
 def prompt_hints(

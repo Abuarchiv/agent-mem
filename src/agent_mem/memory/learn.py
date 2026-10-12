@@ -14,7 +14,9 @@ from datetime import datetime
 from agent_mem.core import timeutil
 
 DECAY = 0.5
-RETRIEVAL_KINDS = ("created", "injected", "get", "used", "cited")
+# An injection is an exposure, not a retrieval: counted as one, it raised the activation of whatever was injected,
+# which made it injected again (one stale turn reached 26 injections, 8 of 41 injected items were ever used).
+RETRIEVAL_KINDS = ("created", "get", "used", "cited")
 USE_KINDS = ("get", "used", "cited")
 TRUST_FACTOR = {"user": 1.0, "agent": 0.9, "tool_local": 0.8, "tool_external": 0.5}
 HEBB_RATE = 0.1
@@ -44,6 +46,7 @@ class OwnerStats:
     activation: float = -10.0
     used: int = 0
     shown: int = 0
+    injected: int = 0
 
     @property
     def activation_factor(self) -> float:
@@ -52,6 +55,11 @@ class OwnerStats:
     @property
     def usefulness_factor(self) -> float:
         return 0.5 + usefulness(self.used, self.shown)
+
+    @property
+    def briefing_factor(self) -> float:
+        """Injected at many session starts and never used: make room for something else."""
+        return 0.5 + usefulness(self.used, self.injected)
 
 
 def owner_stats(
@@ -77,6 +85,9 @@ def owner_stats(
             kind = row["kind"]
             if kind == "shown":
                 entry.shown += 1
+                continue
+            if kind == "injected":
+                entry.injected += 1
                 continue
             if kind in USE_KINDS:
                 entry.used += 1
