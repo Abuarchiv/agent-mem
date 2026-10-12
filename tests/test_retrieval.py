@@ -241,3 +241,31 @@ def test_prompt_hint_ignores_chat_filler_project_name_and_command_lines(driver: 
     assert not other.prompt("s2", f"nun schaue dir das gesamte {name} an").context  # only filler and the name
     assert not other.prompt("s2", "wie starte ich die tests").context  # matched only the command line
     assert other.prompt("s2", "welche module hast du gefunden").context
+
+
+def test_graph_keeps_working_commands_and_merges_old_command_lines(driver: Driver, conn, config: Config):
+    from agent_mem.memory import consolidate, store
+
+    driver.prompt("s1", "run the parser tests")
+    driver.bash("s1", "cd app && uv run pytest -q tests/test_parse.py 2>&1 | tail -3", "3 passed")
+    driver.bash("s1", "cat app/parse.py", "def parse(): ...")
+    driver.edit("s1", "parse.py")
+    driver.stop("s1", "Tests pass.")
+    keys = {r[0] for r in conn.execute("SELECT key FROM entities WHERE kind = 'command'")}
+    assert keys == {"uv run pytest"}  # the working part; reading a file is no topic
+
+    project = conn.execute("SELECT project_id FROM entities WHERE kind = 'command'").fetchone()[0]
+    old = store.entity_id(conn, project, "command", "S=/tmp; cd $S && uv run pytest -x")
+    scratch = store.entity_id(conn, project, "file", "/private/tmp/x/scratchpad/out.txt")
+    turn = conn.execute("SELECT id FROM turns").fetchone()[0]
+    conn.execute(
+        "INSERT INTO links(owner_type, owner_id, entity_id) VALUES ('t', ?, ?), ('t', ?, ?)", (turn, old, turn, scratch)
+    )
+    consolidate.run(conn, config)
+    keys = {r[0] for r in conn.execute("SELECT key FROM entities WHERE kind IN ('command', 'file')")}
+    assert "uv run pytest" in keys and not any(k.startswith(("S=", "/private/tmp")) for k in keys)
+    target = conn.execute("SELECT id FROM entities WHERE key = 'uv run pytest'").fetchone()[0]
+    assert (
+        conn.execute("SELECT COUNT(*) FROM links WHERE entity_id = ? AND owner_id = ?", (target, turn)).fetchone()[0]
+        == 1
+    )

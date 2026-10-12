@@ -276,6 +276,7 @@ td.num { text-align: right; white-space: nowrap; }
 .legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; font-size: 13px; }
 .legend span { display: flex; align-items: center; gap: 8px; }
 .legend i, .inspector li i { width: 12px; height: 12px; flex-shrink: 0; border-radius: 50%; border: 1.5px solid var(--ink); }
+.legend i.square { border-radius: 2px; }
 .inspector li i { border-color: #1A1814; }
 
 /* responsive */

@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import PurePosixPath
 
-from agent_mem.core import paths, privacy, timeutil
+from agent_mem.core import paths, privacy, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import learn
 
@@ -21,6 +21,14 @@ def _json_list(value: str | None) -> list[str]:
     except ValueError:
         return []
     return [item for item in parsed if isinstance(item, str)] if isinstance(parsed, list) else []
+
+
+_SCRATCH = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
+
+
+def scratch_path(path: str) -> bool:
+    """Temporary files (scratchpads, test data directories) are no part of the project's structure."""
+    return path.startswith(_SCRATCH) or "/scratchpad/" in path
 
 
 def entity_id(conn: sqlite3.Connection, project_id: str | None, kind: str, key: str) -> int:
@@ -102,9 +110,13 @@ def index_turn(conn: sqlite3.Connection, turn_id: int) -> None:
     project_id = turn["project_id"]
     entity_ids: list[int] = []
     for path in files[:20]:
-        entity_ids.append(entity_id(conn, project_id, "file", path))
+        if not scratch_path(path):
+            entity_ids.append(entity_id(conn, project_id, "file", path))
     for command in commands[:10]:
-        entity_ids.append(entity_id(conn, project_id, "command", command))
+        # The working part ("uv run pytest"), not the whole line; reading and listing commands are no topic.
+        key = signals.command_key(command)
+        if key and signals.fixable(key):
+            entity_ids.append(entity_id(conn, project_id, "command", key))
     for error in errors[:5]:
         entity_ids.append(entity_id(conn, project_id, "error", error))
     events = conn.execute(

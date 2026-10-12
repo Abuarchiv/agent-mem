@@ -203,13 +203,16 @@ class Retriever:
         cached = self._vectors.get(project_id)
         if cached and cached.key == key:
             return cached
+        projects = search.scope(self.conn, project_id)
+        turn_where, turn_params = search._in("t.project_id", projects)
+        memory_where, memory_params = search._in("m.project_id", projects)
         rows = self.conn.execute(
             "SELECT v.owner_type, v.owner_id, v.vec FROM vectors v "
             "LEFT JOIN turns t ON v.owner_type = 't' AND t.id = v.owner_id "
             "LEFT JOIN memories m ON v.owner_type = 'm' AND m.id = v.owner_id "
-            "WHERE v.model = ? AND ((v.owner_type = 't' AND t.project_id IS ?) "
-            "OR (v.owner_type = 'm' AND (m.project_id IS ? OR m.project_id IS NULL)))",
-            (self.embedder.model, project_id, project_id),
+            f"WHERE v.model = ? AND ((v.owner_type = 't' AND {turn_where}) "
+            f"OR (v.owner_type = 'm' AND ({memory_where} OR m.project_id IS NULL)))",
+            (self.embedder.model, *turn_params, *memory_params),
         ).fetchall()
         if not rows:
             return None

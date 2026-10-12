@@ -46,6 +46,7 @@ def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[
         stats["rules_expired"] = _expire_rules(conn, config)
         stats["commands_cleaned"] = _clean_commands(conn)
         stats["fixes_dropped"] = _drop_non_error_fixes(conn)
+        stats["entities_dropped"] = _drop_noise_entities(conn)
     stats["anchors"] = record_anchors(conn)
     stats["invalidated"] = _invalidate_deleted(conn)
     if embedder_matrix is not None:
@@ -96,6 +97,49 @@ def _clean_commands(conn: sqlite3.Connection) -> int:
                 "updated_at = max(updated_at, excluded.updated_at)",
                 (row["project_id"], row["key"], value, row["count"], row["updated_at"]),
             )
+        changed += 1
+    return changed
+
+
+def _drop_noise_entities(conn: sqlite3.Connection) -> int:
+    """Whole command lines, reading commands and temporary files recorded before ``store.index_turn`` kept only
+    the working part; they made the connections graph a hairball. A command line is merged into its working
+    part (links kept, the strongest edge wins), the rest is removed."""
+    changed = 0
+    rows = conn.execute("SELECT id, project_id, kind, key FROM entities WHERE kind IN ('command', 'file')").fetchall()
+    for row in rows:
+        old, key = int(row["id"]), row["key"]
+        if row["kind"] == "file":
+            if not store.scratch_path(key):
+                continue
+            target = None
+        else:
+            core = signals.command_key(key)
+            if core == key and signals.fixable(key):
+                continue
+            target = (
+                store.entity_id(conn, row["project_id"], "command", core) if core and signals.fixable(core) else None
+            )
+        if target is not None:
+            conn.execute(
+                "INSERT OR IGNORE INTO links(owner_type, owner_id, entity_id) "
+                "SELECT owner_type, owner_id, ? FROM links WHERE entity_id = ?",
+                (target, old),
+            )
+            for edge in conn.execute(
+                "SELECT a, b, weight, updated_at FROM edges WHERE a = ? OR b = ?", (old, old)
+            ).fetchall():
+                other = edge["b"] if edge["a"] == old else edge["a"]
+                if other == target:
+                    continue
+                conn.execute(
+                    "INSERT INTO edges(a, b, weight, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(a, b) DO UPDATE SET "
+                    "weight = max(weight, excluded.weight), updated_at = max(updated_at, excluded.updated_at)",
+                    (min(other, target), max(other, target), edge["weight"], edge["updated_at"]),
+                )
+        conn.execute("DELETE FROM links WHERE entity_id = ?", (old,))
+        conn.execute("DELETE FROM edges WHERE a = ? OR b = ?", (old, old))
+        conn.execute("DELETE FROM entities WHERE id = ?", (old,))
         changed += 1
     return changed
 

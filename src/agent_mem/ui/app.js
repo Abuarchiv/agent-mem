@@ -36,10 +36,13 @@
   ];
   const MEMORY_KINDS = ["decision", "fact", "preference", "correction", "dead_end", "lesson", "summary", "native_note"];
   const PROFILE_LABEL = { "cmd:test": "Test command", "cmd:lint": "Lint command", "cmd:build": "Build command", "cmd:install": "Install command" };
-  const ENTITY_KINDS = ["file", "command", "error", "package"];
+  const ENTITY_KINDS = ["file", "command", "error", "package", "memory"];
   // Error signatures are stored as "sig:<hash>"; show them as short error ids.
-  const entityLabel = (node) => (node.kind === "error" && node.key.startsWith("sig:") ? `error ${node.key.slice(4, 12)}` : node.key);
-  const ENTITY_COLOR = { file: "--blue", command: "--green", error: "--coral", package: "--yellow" };
+  const entityLabel = (node) => (node.kind === "memory" ? `M${node.memory_id} ${node.key}` : node.kind === "error" && node.key.startsWith("sig:") ? `error ${node.key.slice(4, 12)}` : node.key);
+  const ENTITY_COLOR = { file: "--blue", command: "--green", error: "--coral", package: "--yellow", memory: "--pink" };
+  // Memories are squares in the colour of their kind (as their tags elsewhere); things are dots.
+  const MEMORY_COLOR = { decision: "--yellow", dead_end: "--coral", lesson: "--green", preference: "--pink", fact: "--blue" };
+  const nodeColor = (node) => (node.kind === "memory" ? MEMORY_COLOR[node.memory_kind] ?? "--pink" : ENTITY_COLOR[node.kind]);
 
   const root = document.getElementById("root");
   let data = null;
@@ -444,14 +447,14 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     const nodes = data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
     const count = (kind) => nodes.filter((node) => node.kind === kind).length;
     const swatch = (kind) => `<i style="background:var(${ENTITY_COLOR[kind]})"></i>`;
-    return `<div class="page-head"><div><h1>Connections</h1><p class="lede">Files, commands and errors that came up in the same request. Bigger dots come up more often. Click a dot to see what belongs with it.</p></div>
-<div class="pill-group" role="group" aria-label="Show entity kinds">${ENTITY_KINDS.filter((kind) => count(kind)).map((kind) => `<button type="button" class="pill" data-action="entity-kind" data-value="${kind}" aria-pressed="${!state.hiddenKinds.has(kind)}">${h(kind)}s ${num(count(kind))}</button>`).join("")}</div></div>
+    return `<div class="page-head"><div><h1>Connections</h1><p class="lede">Files, commands and errors that came up in the same request, and the decisions, dead ends and facts that name them (squares). Bigger dots come up more often. Click one to see what belongs with it.</p></div>
+<div class="pill-group" role="group" aria-label="Show entity kinds">${ENTITY_KINDS.filter((kind) => count(kind)).map((kind) => `<button type="button" class="pill" data-action="entity-kind" data-value="${kind}" aria-pressed="${!state.hiddenKinds.has(kind)}">${h(kind === "memory" ? "memories" : `${kind}s`)} ${num(count(kind))}</button>`).join("")}</div></div>
 <div class="graph-layout">
 <section class="graph-stage" aria-label="Graph canvas"><div id="graph-host" class="graph-host"></div>
 <div class="graph-controls"><button type="button" class="round-button" data-action="zoom" data-value="out" aria-label="Zoom out">${icon("minus", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="fit" aria-label="Fit graph">${icon("fit", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="in" aria-label="Zoom in">${icon("plus", 18)}</button></div>
 <span class="graph-hint">Drag to move · scroll to zoom · F to fit · Esc to clear</span></section>
 <div class="stack"><aside id="graph-inspector" class="inspector" aria-live="polite"></aside>
-<section class="panel"><div class="panel-head"><h3>Legend</h3></div><div class="legend">${ENTITY_KINDS.map((kind) => `<span>${swatch(kind)}${h(kind)}</span>`).join("")}</div>${limitReached(data.graph.nodes, "graph_nodes") ? `<p class="muted" style="margin-top:12px;font-size:13px">Showing the ${num(data.limits.graph_nodes)} most connected of ${num(data.counts.entities)} things.</p>` : ""}</section></div>
+<section class="panel"><div class="panel-head"><h3>Legend</h3></div><div class="legend">${ENTITY_KINDS.filter((kind) => kind !== "memory").map((kind) => `<span>${swatch(kind)}${h(kind)}</span>`).join("")}${Object.entries(MEMORY_COLOR).map(([kind, color]) => `<span><i class="square" style="background:var(${color})"></i>${h(readable(kind))}</span>`).join("")}</div>${limitReached(data.graph.nodes, "graph_nodes") ? `<p class="muted" style="margin-top:12px;font-size:13px">Showing the ${num(data.limits.graph_nodes)} most connected of ${num(data.counts.entities)} things.</p>` : ""}</section></div>
 </div>`;
   }
 
@@ -462,7 +465,12 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
         return;
       }
       const links = edges.filter((edge) => edge.a === node.id || edge.b === node.id).sort((x, y) => y.weight - x.weight).slice(0, 8);
-      inspector.innerHTML = `<span class="kicker">${h(node.kind)}</span><h2>${h(entityLabel(node))}</h2><div class="stats">${stat(num(node.degree), "links")}${stat(Number(node.strength).toFixed(2), "strength")}${stat(projectName(node.project_id), "project")}</div>${links.length ? `<span class="kicker">Occurs with</span><ul>${links.map((edge) => { const other = byId.get(edge.a === node.id ? edge.b : edge.a); return other ? `<li><i style="background:var(${ENTITY_COLOR[other.kind]})"></i><span>${h(entityLabel(other))}</span><span class="mono" style="margin-left:auto">${Number(edge.weight).toFixed(2)}</span></li>` : ""; }).join("")}</ul>` : ""}`;
+      if (node.kind === "memory") {
+        const names = edges.filter((edge) => edge.a === node.id).map((edge) => byId.get(edge.b)).filter(Boolean);
+        inspector.innerHTML = `<span class="kicker">${h(readable(node.memory_kind))}</span><h2>${h(node.key)}</h2><div class="stats">${stat(`M${node.memory_id}`, "memory")}${stat(projectName(node.project_id), "project")}</div>${names.length ? `<span class="kicker">Names</span><ul>${names.map((other) => `<li><i style="background:var(${nodeColor(other)})"></i><span>${h(entityLabel(other))}</span></li>`).join("")}</ul>` : ""}<a class="text-link" href="${hashFor("memory", { m: String(node.memory_id) })}">Open M${node.memory_id}</a>`;
+        return;
+      }
+      inspector.innerHTML = `<span class="kicker">${h(node.kind)}</span><h2>${h(entityLabel(node))}</h2><div class="stats">${stat(num(node.degree), "links")}${stat(Number(node.strength).toFixed(2), "strength")}${stat(projectName(node.project_id), "project")}</div>${links.length ? `<span class="kicker">Occurs with</span><ul>${links.map((edge) => { const other = byId.get(edge.a === node.id ? edge.b : edge.a); return other ? `<li><i style="background:var(${nodeColor(other)})"></i><span>${h(entityLabel(other))}</span><span class="mono" style="margin-left:auto">${Number(edge.weight).toFixed(2)}</span></li>` : ""; }).join("")}</ul>` : ""}`;
     };
     const nodes = sourceNodes.map((node, index) => {
       const angle = index * 2.3999632297; const radius = 40 + Math.sqrt(index) * 38;
@@ -516,8 +524,10 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
         if (!shown(node)) continue;
         const p = screen(node); const active = !focus || node === focus || near.has(node.id); const r = Math.max(3.5, node.r * view.scale);
         context.globalAlpha = !hit(node) ? 0.1 : active ? 1 : 0.2;
-        context.fillStyle = css(ENTITY_COLOR[node.kind], "#AFC1F0"); context.strokeStyle = ink; context.lineWidth = 1.5;
-        context.beginPath(); context.arc(p.x, p.y, r, 0, Math.PI * 2); context.fill(); context.stroke();
+        context.fillStyle = css(nodeColor(node), "#AFC1F0"); context.strokeStyle = ink; context.lineWidth = 1.5;
+        context.beginPath();
+        if (node.kind === "memory") context.rect(p.x - r, p.y - r, r * 2, r * 2); else context.arc(p.x, p.y, r, 0, Math.PI * 2);
+        context.fill(); context.stroke();
         if (node === selected) { context.globalAlpha = 0.18; context.lineWidth = 6; context.beginPath(); context.arc(p.x, p.y, r + 7, 0, Math.PI * 2); context.stroke(); }
         const searching = query.trim() !== "";
         const named = focus ? node === focus || near.has(node.id) : searching || nodes.length <= 40 || labelled.has(node.id) || view.scale > 1.8;

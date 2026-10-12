@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from agent_mem.core import timeutil
+from agent_mem.core import identity, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.signals import first_line, request_text
 from agent_mem.memory import learn
@@ -493,6 +493,24 @@ def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
     return matched / len(terms), matched
 
 
+def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
+    """The project and every project nested inside it. A session started in ~/Lernen that works in ~/Lernen/agent-mem
+    has its turns and facts filed under agent-mem (``capture._narrow_turn``); searching from ~/Lernen must find them."""
+    if project_id is None:
+        return [None]
+    rows = conn.execute("SELECT id, root FROM projects").fetchall()
+    root = next((r[1] for r in rows if r[0] == project_id), None)
+    nested = [r[0] for r in rows if root and r[0] != project_id and identity.is_within(r[1], root)]
+    return [project_id, *nested]
+
+
+def _in(column: str, ids: list[str | None]) -> tuple[str, tuple[str | None, ...]]:
+    """``column IN (...)`` that also matches NULL (a turn outside any project)."""
+    if ids == [None]:
+        return f"{column} IS NULL", ()
+    return f"{column} IN ({','.join('?' for _ in ids)})", tuple(ids)
+
+
 @dataclass
 class Query:
     text: str
@@ -518,18 +536,20 @@ def search(
     now: datetime | None = None,
 ) -> list[Hit]:
     terms = query_terms(query.text)
+    projects = scope(conn, query.project_id)
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
     lists["graph"] = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, 40)
     if vector_source is not None:
         lists["vector"] = vector_source(query.text, 60)
     if query.window:
         # "What did we do on 8 April?" names a time, not a topic: every turn in the window is a candidate.
+        where, params = _in("project_id", projects)
         lists["time"] = [
             ("t", int(row[0]))
             for row in conn.execute(
-                "SELECT id FROM turns WHERE project_id IS ? AND started_at >= ? AND started_at < ? "
+                f"SELECT id FROM turns WHERE {where} AND started_at >= ? AND started_at < ? "
                 "ORDER BY started_at DESC LIMIT 40",
-                (query.project_id, timeutil.iso(query.window[0]), timeutil.iso(query.window[1])),
+                (*params, timeutil.iso(query.window[0]), timeutil.iso(query.window[1])),
             )
         ]
     fused = rrf(lists, config.retrieval.rrf_k)
@@ -544,7 +564,7 @@ def search(
             continue
         if query.exclude_session and hit.session_id == query.exclude_session:
             continue
-        same_project = hit.project_id == query.project_id
+        same_project = hit.project_id in projects
         is_global = hit.project_id is None
         if not (same_project or is_global or query.include_other_projects):
             continue

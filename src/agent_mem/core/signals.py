@@ -187,6 +187,8 @@ def _split(command: str) -> list[str]:
 
 # Segments that only prepare the shell; the command is the next one ("cd app && pytest" is pytest).
 _SETUP = {"cd", "pushd", "popd", "export", "source", ".", "set", "unset", "alias", "true", ":"}
+# Shell control words: "for f in …; do pytest $f; done" runs pytest.
+_CONTROL = {"for", "while", "until", "if", "elif", "else", "fi", "done", "esac", "case", "select", "function"}
 # Commands that only look at things. One failing ("cat: no such file") and the next one passing is not an
 # error that a change fixed.
 INSPECTION = {
@@ -228,6 +230,20 @@ INSPECTION = {
     "ps",
     "env",
     "date",
+    "rm",
+    "mkdir",
+    "cp",
+    "mv",
+    "touch",
+    "chmod",
+    "ln",
+    "kill",
+    "pkill",
+    "lsof",
+    "xargs",
+    "tee",
+    "nl",
+    "strings",
 }
 
 
@@ -246,12 +262,17 @@ def _segment_key(segment: str) -> str | None:
     except ValueError:
         tokens = segment.split()
     tokens = [t for t in tokens if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t)]
-    while tokens and tokens[0] in {"sudo", "time", "env", "exec", "nohup", "command", "nice"}:
-        tokens = tokens[1:]
+    while tokens and tokens[0] in {"sudo", "time", "env", "exec", "nohup", "command", "nice", "do", "then", "timeout"}:
+        tokens = tokens[2:] if tokens[0] == "timeout" and len(tokens) > 1 else tokens[1:]  # timeout <seconds> cmd
     # "f=$(ls -t x | head -1)" leaves "-t": an assignment, not a command.
-    if not tokens or tokens[0] in _SETUP or tokens[0].startswith(("-", "$", "(", ")")):
+    if not tokens or tokens[0] in _SETUP or tokens[0] in _CONTROL or tokens[0].startswith(("-", "$", "(", ")", "@")):
         return None
     program = PurePosixPath(tokens[0].replace("\\", "/")).name.lower()
+    if not re.fullmatch(r"[a-z][a-z0-9._+-]*", program):
+        return None  # a number, a path fragment or a quoted word left over from an assignment
+    if program == "git":  # git -C <dir> status is git status
+        while len(tokens) > 2 and tokens[1] in {"-C", "-c"}:
+            tokens = [tokens[0], *tokens[3:]]
     rest = [t for t in tokens[1:] if not t.startswith("-")]
     if program in {"python", "python3", "py"} and "-m" in tokens:
         index = tokens.index("-m")

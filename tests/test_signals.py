@@ -15,6 +15,9 @@ def test_command_keys():
     assert signals.command_key("f=$(ls -t logs/* | head -1); grep x $f") == "grep"
     assert not signals.fixable("cat") and not signals.fixable("grep") and signals.fixable("uv run pytest")
     assert not signals.fixable("cd") and not signals.fixable("-t") and not signals.fixable(None)
+    assert signals.command_key("for f in a b; do uv run pytest $f; done") == "uv run pytest"
+    assert signals.command_key("timeout 600 uv run pytest -q") == "uv run pytest"
+    assert signals.command_key("git -C /repo status") == "git status" and signals.command_key("150") is None
 
 
 def test_command_kinds():

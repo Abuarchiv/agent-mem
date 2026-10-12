@@ -55,6 +55,20 @@ def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver:
     recalls = ui.build_snapshot(conn, config)["recalls"]
     assert recalls and {r["session_id"] for r in recalls} == {"claude:s2"}
     assert {r["kind"] for r in recalls} <= {"injected", "shown"}
+
+    # graph: a decision that names a file hangs on that file as a square (agentmemory's decision -> file)
+    from agent_mem.memory import store
+
+    project_id = snapshot["sessions"][0]["project_id"]
+    body = "Keep the ranking weight in app.py at 0.7."
+    store.add_memory(conn, project_id=project_id, kind="decision", title="", body=body, source="agent", trust="user")
+    graph = ui.build_snapshot(conn, config)["graph"]
+    memory = next(node for node in graph["nodes"] if node["kind"] == "memory")
+    file_node = next(node for node in graph["nodes"] if node["kind"] == "file" and node["key"].endswith("app.py"))
+    assert (
+        memory["memory_kind"] == "decision"
+        and {"a": memory["id"], "b": file_node["id"], "weight": 0.6} in graph["edges"]
+    )
     assert snapshot["recipes"] and snapshot["recipes"][0]["command_key"]
     assert snapshot["learning"]["errors_fixed"] >= 1
     assert snapshot["projects"][0]["name"] == "demo"

@@ -17,11 +17,12 @@ import sqlite3
 import sys
 from datetime import timedelta
 from importlib import resources
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent_mem import __version__
 from agent_mem.core import timeutil
+from agent_mem.core.signals import first_line
 from agent_mem.core.config import Config
 from agent_mem.memory import learn
 
@@ -35,6 +36,7 @@ LIMITS = {
     "profile": 200,
     "graph_nodes": 160,
     "graph_edges": 420,
+    "graph_memories": 60,
     "days": 14,
     "recalls": 1500,
 }
@@ -242,6 +244,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             "ORDER BY weight DESC LIMIT ?",
             (*node_ids, *node_ids, LIMITS["graph_edges"]),
         )
+    memory_nodes, memory_edges = _memory_links(conn, nodes, project_id)
 
     counts = {
         "projects": len(projects),
@@ -317,8 +320,60 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         "rules": rules,
         "profile": profile,
         "daily": daily,
-        "graph": {"nodes": nodes, "edges": edges},
+        "graph": {"nodes": nodes + memory_nodes, "edges": edges + memory_edges},
     }
+
+
+GRAPH_MEMORY_KINDS = ("decision", "dead_end", "lesson", "preference", "fact")
+
+
+def _memory_links(
+    conn: sqlite3.Connection, nodes: list[dict[str, Any]], project_id: str | None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Decisions, dead ends, lessons and facts as graph nodes, linked to the files and commands they name.
+
+    Like agentmemory's decision -> file edges, but from text already stored: a memory links to a file when it
+    names the file (``inject.py`` or its path), to a command when it contains it. No model call."""
+    targets: list[tuple[str, int]] = []
+    for node in nodes:
+        key = str(node["key"])
+        if node["kind"] == "file":
+            name = PurePosixPath(key).name
+            targets += [(key, int(node["id"]))] + ([(name, int(node["id"]))] if "." in name and len(name) >= 5 else [])
+        elif node["kind"] == "command" and len(key) >= 6:
+            targets.append((key, int(node["id"])))
+    if not targets:
+        return [], []
+    scope = "AND project_id = ?" if project_id is not None else ""
+    rows = conn.execute(
+        f"SELECT id, kind, title, body, project_id, importance FROM memories WHERE invalid_at IS NULL "
+        f"AND kind IN ({','.join('?' for _ in GRAPH_MEMORY_KINDS)}) {scope} ORDER BY created_at DESC LIMIT 400",
+        (*GRAPH_MEMORY_KINDS, *([project_id] if project_id is not None else [])),
+    ).fetchall()
+    found: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    for row in rows:
+        text = f"{row['title'] or ''}\n{row['body'] or ''}"
+        hits = sorted({entity for needle, entity in targets if needle in text})[:4]
+        if not hits:
+            continue
+        node_id = -int(row["id"])  # entity ids are positive
+        found.append(
+            {
+                "id": node_id,
+                "kind": "memory",
+                "memory_kind": row["kind"],
+                "memory_id": row["id"],
+                "key": first_line(row["body"] or row["title"] or "", 160),
+                "project_id": row["project_id"],
+                "strength": round(0.5 + float(row["importance"] or 0), 3),
+                "degree": len(hits),
+            }
+        )
+        edges += [{"a": node_id, "b": entity, "weight": 0.6} for entity in hits]
+        if len(found) >= LIMITS["graph_memories"]:
+            break
+    return found, edges
 
 
 def _asset(name: str) -> bytes:

@@ -210,3 +210,33 @@ def test_recipes_only_come_from_project_commands(driver: Driver, conn):
     driver.edit("s1", "app.py")
     driver.bash("s1", "pytest tests/test_api.py", "1 passed")
     assert [r[0] for r in conn.execute("SELECT command_key FROM recipes")] == ["pytest"]
+
+
+def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn, config, tmp_path):
+    import subprocess
+
+    from agent_mem.hooks import inject
+    from agent_mem.memory import search
+    from tests.conftest import Driver as Fresh
+
+    parent = tmp_path / "Lernen"
+    nested = parent / "agent-mem"
+    nested.mkdir(parents=True)
+    for root in (parent, nested):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (nested / "app.py").write_text("x = 1\n")
+    driver = Fresh(conn, config, parent)
+    driver.prompt("s1", "Configure the viewer launch agent for the memory service")
+    driver.cwd = str(nested)
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "The viewer launch agent restarts after a crash within ten seconds.")
+    driver.cwd = str(parent)
+    parent_id = conn.execute("SELECT id FROM projects WHERE name = 'Lernen'").fetchone()[0]
+    hits = search.search(conn, config, search.Query(text="viewer launch agent restarts", project_id=parent_id))
+    assert hits and "launch agent" in hits[0].text
+    nested_id = conn.execute("SELECT id FROM projects WHERE name = 'agent-mem'").fetchone()[0]
+    assert search.scope(conn, nested_id) == [nested_id]  # a nested project does not see its parent's work
+    block = inject.prompt_hints(
+        conn, config, parent_id, "claude:s2", "How does the viewer launch agent restart?", "claude"
+    )
+    assert block is not None and "launch agent" in block.text
