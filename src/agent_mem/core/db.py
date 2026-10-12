@@ -57,6 +57,9 @@ def _private_file(path: Path) -> None:
             os.chmod(path, 0o600)
 
 
+WAL_LIMIT_BYTES = 4 * 1024 * 1024
+
+
 def connect(
     config: Config, *, busy_timeout_ms: int = BUSY_TIMEOUT_MS, migrate: bool = True, fresh_only: bool = False
 ) -> sqlite3.Connection:
@@ -73,6 +76,8 @@ def connect(
     if str(mode).lower() != "wal":
         conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
+    # The WAL keeps its peak size (a VACUUM writes the whole database into it) unless a limit truncates it.
+    conn.execute(f"PRAGMA journal_size_limit = {WAL_LIMIT_BYTES}")
     _private_file(config.db_path)
     if migrate:
         current = user_version(conn)

@@ -319,3 +319,22 @@ def test_terminal_view_groups_what_the_model_got():
     assert "claude hooks failing" in view and "Commands  test: `uv run pytest`" in view
     assert lines[-1] == "Details: agent-mem show T7 · all memories: agent-mem view"
     assert "\x1b[" not in view and "\x1b[" in inject.terminal(context, "shop")
+
+
+def test_the_wal_shrinks_back_after_a_vacuum(config) -> None:
+    import os
+
+    from agent_mem.core import db
+
+    conn = db.connect(config)
+    conn.execute("CREATE TABLE big(x)")
+    conn.execute(
+        "INSERT INTO big SELECT randomblob(1000) FROM "
+        "(WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 10000) SELECT i FROM c)"
+    )
+    conn.execute("DELETE FROM big")
+    conn.execute("VACUUM")
+    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+    conn.execute("INSERT INTO big VALUES (1)")
+    assert os.path.getsize(str(config.db_path) + "-wal") <= db.WAL_LIMIT_BYTES
+    conn.close()
