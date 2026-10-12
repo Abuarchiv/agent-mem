@@ -1,6 +1,7 @@
 """Turn titles and session summaries (schema v3): parsing, storage, briefing, terminal and viewer."""
 
 import json
+import sqlite3
 
 import pytest
 
@@ -121,4 +122,39 @@ def test_migration_003_adds_the_columns_to_a_v2_database(config: Config):
     assert db.user_version(conn) == db.SCHEMA_VERSION >= 3
     assert {"title", "type"} <= {r[1] for r in conn.execute("PRAGMA table_info(turns)")}
     assert {"title", "summary_json"} <= {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+    conn.close()
+
+
+def test_migration_004_keeps_the_call_log_and_allows_the_new_purposes(config: Config):
+    conn = db.connect(config)
+    # A v3 database: the call log as migration 002 created it.
+    conn.execute("DROP TABLE observe_calls")
+    conn.execute(
+        "CREATE TABLE observe_calls (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, provider TEXT NOT NULL, "
+        "purpose TEXT NOT NULL CHECK (purpose IN ('extract', 'judge')), seconds REAL NOT NULL, ok INTEGER NOT NULL, "
+        "prompt_chars INTEGER NOT NULL, turn_ids TEXT NOT NULL, error TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO observe_calls(ts, provider, purpose, seconds, ok, prompt_chars, turn_ids) "
+        "VALUES ('2026-10-12', 'claude', 'extract', 1.0, 1, 10, '[1]')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO observe_calls(ts, provider, purpose, seconds, ok, prompt_chars, turn_ids) "
+            "VALUES ('2026-10-12', 'claude', 'summary', 1.0, 1, 0, '[]')"
+        )
+    conn.execute("PRAGMA user_version = 3")
+    conn.close()
+    conn = db.connect(config)
+    for purpose in ("summary", "review"):
+        conn.execute(
+            "INSERT INTO observe_calls(ts, provider, purpose, seconds, ok, prompt_chars, turn_ids) "
+            "VALUES ('2026-10-12', 'claude', ?, 1.0, 1, 0, '[]')",
+            (purpose,),
+        )
+    assert [r[0] for r in conn.execute("SELECT purpose FROM observe_calls ORDER BY id")] == [
+        "extract",
+        "summary",
+        "review",
+    ]
     conn.close()

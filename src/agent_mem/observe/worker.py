@@ -24,7 +24,7 @@ from agent_mem.core import db, logutil, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store
 from agent_mem.observe import bundle as bundling
-from agent_mem.observe import contradiction, providers, queue, summary
+from agent_mem.observe import contradiction, providers, queue, review, summary
 from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 POLL_SECONDS = 2.0
@@ -138,6 +138,7 @@ class Worker:
             "superseded": 0,
             "forgotten": 0,
             "titled": 0,
+            "reviewed": 0,
         }
 
     @property
@@ -339,7 +340,41 @@ class Worker:
             if not drain or time.monotonic() - idle_since >= self.config.observe.idle_seconds:
                 break
             time.sleep(POLL_SECONDS)
+        self.review_due()
+        self.drain_forget()
         return self.stats
+
+    def review_due(self) -> None:
+        """The daily review per project (``observe/review.py``), through the vendor the project used last."""
+        for project_id in review.due_projects(self.conn):
+            if _calls_today(self.conn) >= self.config.observe.daily_limit:
+                return
+            row = self.conn.execute(
+                "SELECT harness FROM sessions WHERE project_id = ? ORDER BY last_event_at DESC LIMIT 1", (project_id,)
+            ).fetchone()
+            chain = providers.chain(self.config, row[0] if row else "claude", self.conn)
+            if not chain:
+                continue
+            name = chain[0]
+            started = time.perf_counter()
+            try:
+                retired = review.review(
+                    self.conn, providers.make_llm(name, providers.model_for(self.config, name)), project_id
+                )
+            except Exception as error:  # the review is housekeeping; it never stops the worker
+                _record_call(
+                    self.conn,
+                    name,
+                    "review",
+                    time.perf_counter() - started,
+                    False,
+                    0,
+                    [],
+                    f"{type(error).__name__}: {error}"[:300],
+                )
+                continue
+            _record_call(self.conn, name, "review", time.perf_counter() - started, True, 0, [], None)
+            self.stats["reviewed"] += retired
 
     def close(self) -> None:
         if self._adapter is not None:

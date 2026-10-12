@@ -86,6 +86,7 @@ def test_contradiction_supersedes_old_fact(observe_config: Config, project: Path
         json.dumps(
             [
                 {"memory": [{"text": "Tests laufen mit pytest über uv run pytest."}]},
+                {"turns": [], "session": {"title": "Testbefehl festgehalten"}},  # summary call (schema v3)
                 {"memory": [{"text": "Tests laufen jetzt mit nox -s tests, nicht mehr mit pytest."}]},
                 {"verdicts": [{"pair": 1, "verdict": "SUPERSEDE"}]},
             ]
