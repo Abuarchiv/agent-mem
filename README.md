@@ -64,7 +64,7 @@ A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Quota or l
 - **Association graph:** files, commands, errors and packages that occur together are linked and searched with Personalized PageRank.
 - **Consolidation:** daily, in the background: decay, global preferences, superseding, stale anchors.
 
-Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" filter by date and list every turn of that day.
+Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the turns of that time first.
 
 ## Commands
 
