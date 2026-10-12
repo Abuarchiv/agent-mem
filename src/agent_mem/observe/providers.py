@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from typing import Any, ClassVar
@@ -22,7 +23,30 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
 
 class ProviderError(RuntimeError):
-    """The binary failed, is not logged in, or hit a quota."""
+    """The binary failed, is not logged in, or hit a quota. ``kind`` is quota | login | timeout | other."""
+
+    def __init__(self, message: str, kind: str | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind or classify(message)
+
+
+_QUOTA = re.compile(r"rate.?limit|usage limit|quota|too many requests|\b429\b|limit reached|exceeded", re.I)
+_LOGIN = re.compile(r"not logged in|unauthori[sz]ed|login|authenticat|\b401\b|\b403\b|invalid api key", re.I)
+
+
+def classify(message: str) -> str:
+    if _QUOTA.search(message):
+        return "quota"
+    if _LOGIN.search(message):
+        return "login"
+    if "timeout" in message.lower():
+        return "timeout"
+    return "other"
+
+
+# Which stage a harness's turns may use without leaving their vendor (D12, cross_vendor=False).
+VENDOR_OF_HARNESS = {"claude": "claude", "codex": "codex", "copilot": "copilot"}
+BINARY = {"claude": "claude", "codex": "codex", "copilot": "copilot", "ollama": "ollama"}
 
 
 def _flatten(messages: list[dict[str, Any]], wants_json: bool) -> str:
@@ -127,8 +151,35 @@ class CopilotCliLLM(LLMBase):
         return _clean_json(out) if wants_json else out.strip()
 
 
+class FakeLLM(LLMBase):
+    """Test double. Reads canned answers from the file named in ``AGENT_MEM_FAKE_LLM`` (JSON list,
+    consumed in order, last one repeats). Without the file it extracts one fact per user message."""
+
+    calls: ClassVar[dict[str, int]] = {}  # per answer file, across instances (the worker makes one per call)
+
+    def __init__(self, config: BaseLlmConfig | None = None) -> None:
+        super().__init__(config or BaseLlmConfig(model="fake"))
+
+    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
+        prompt = "\n".join(str(m.get("content", "")) for m in messages)
+        path = os.environ.get("AGENT_MEM_FAKE_LLM")
+        if path and os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                answers = json.load(fh)
+            index = min(FakeLLM.calls.get(path, 0), len(answers) - 1)
+            FakeLLM.calls[path] = index + 1
+            answer = answers[index]
+            return answer if isinstance(answer, str) else json.dumps(answer)
+        if '"verdicts"' in prompt or "SUPERSEDE" in prompt:
+            return json.dumps({"verdicts": []})
+        facts = re.findall(r"^\s*user:\s*(.+)$", prompt, re.M | re.I) or re.findall(r"^\[user\]\n(.+)$", prompt, re.M)
+        return json.dumps({"memory": [{"text": f.strip()} for f in facts[-3:]]})
+
+
 def make_llm(kind: str, model: str | None = None) -> LLMBase:
-    """``claude``, ``codex`` or ``copilot`` (harness binaries) or ``ollama`` (local)."""
+    """``claude``, ``codex`` or ``copilot`` (harness binaries), ``ollama`` (local) or ``fake`` (tests)."""
+    if kind == "fake":
+        return FakeLLM()
     if kind == "claude":
         return ClaudeCliLLM(BaseLlmConfig(model=model or "haiku"))
     if kind == "codex":
@@ -140,3 +191,70 @@ def make_llm(kind: str, model: str | None = None) -> LLMBase:
 
         return OllamaLLM(BaseLlmConfig(model=model or "qwen3.5:4b-mlx", temperature=0.0))
     raise ValueError(f"unknown llm provider {kind!r}")
+
+
+# --- chain (D12) ---------------------------------------------------------------------------------
+
+
+def model_for(config: Any, name: str) -> str | None:
+    return {
+        "claude": config.observe.claude_model,
+        "codex": config.observe.codex_model,
+        "copilot": config.observe.copilot_model,
+        "ollama": config.observe.ollama_model,
+    }.get(name) or None
+
+
+def available(name: str) -> bool:
+    if name == "fake":
+        return True
+    return shutil.which(BINARY.get(name, name)) is not None
+
+
+def paused_until(conn: Any, name: str) -> str | None:
+    from .. import db
+
+    return db.get_meta(conn, f"observe.pause.{name}")
+
+
+def note_failure(conn: Any, config: Any, name: str, error: ProviderError) -> None:
+    """A quota or login failure pauses the stage for ``pause_minutes`` instead of punishing the turn."""
+    if error.kind not in {"quota", "login"}:
+        return
+    from datetime import timedelta
+
+    from .. import db, timeutil
+
+    until = timeutil.iso(timeutil.now() + timedelta(minutes=config.observe.pause_minutes))
+    db.set_meta(conn, f"observe.pause.{name}", until)
+
+
+def chain(config: Any, harness: str, conn: Any) -> list[str]:
+    """Stages a turn from ``harness`` may use, in order, minus missing binaries and paused stages."""
+    from .. import timeutil
+
+    names = list(config.observe.providers)
+    if "fake" in names:
+        return ["fake"]
+    if not config.observe.cross_vendor:
+        own = VENDOR_OF_HARNESS.get(harness)
+        names = [n for n in names if n in {"ollama", own}]
+    now = timeutil.iso()
+    out = []
+    for name in names:
+        if not available(name):
+            continue
+        until = paused_until(conn, name)
+        if until and until > now:
+            continue
+        out.append(name)
+    return out
+
+
+def any_left(config: Any, harness: str, conn: Any) -> bool:
+    """True while some stage might still succeed later (paused, not missing)."""
+    names = list(config.observe.providers)
+    if not config.observe.cross_vendor:
+        own = VENDOR_OF_HARNESS.get(harness)
+        names = [n for n in names if n in {"ollama", own}]
+    return any(available(n) for n in names)

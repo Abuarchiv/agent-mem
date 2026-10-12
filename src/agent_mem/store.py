@@ -169,6 +169,14 @@ def supersede(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
 
 def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bool:
     """Hard delete including keys, vectors, links, anchors and access history."""
+    if owner_type == "m":
+        # Mirrored facts (docs/PLAN.md §4.6 point 3): the mem0 copy is removed by the next worker run.
+        row = conn.execute("SELECT dedupe_key FROM memories WHERE id = ?", (owner_id,)).fetchone()
+        if row and str(row[0] or "").startswith("mem0:"):
+            conn.execute(
+                "INSERT OR IGNORE INTO observe_forget(mem0_id, ts) VALUES (?, ?)",
+                (str(row[0])[len("mem0:") :], timeutil.iso()),
+            )
     remove_search_keys(conn, owner_type, owner_id)
     for table in ("vectors", "links", "anchors", "accesses"):
         conn.execute(f"DELETE FROM {table} WHERE owner_type = ? AND owner_id = ?", (owner_type, owner_id))

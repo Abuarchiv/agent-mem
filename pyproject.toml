@@ -70,6 +70,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "local: needs the observer extra and a cached embedding model; run by hand, not in CI (PLAN.md R9)",
+]
 addopts = "-q"
 
 [tool.ruff]

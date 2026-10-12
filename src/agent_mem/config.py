@@ -107,6 +107,30 @@ class Federation:
 
 
 @dataclass
+class Observe:
+    """Background observer (docs/PLAN.md §4.3 to §4.6)."""
+
+    enabled: bool = True
+    # Provider chain in order; a stage is skipped when its binary is missing, paused or over budget.
+    providers: list[str] = field(default_factory=lambda: ["claude", "codex", "copilot", "ollama"])
+    # Default: a turn only goes to the vendor that already saw it, then ollama, then raw (D12).
+    cross_vendor: bool = False
+    claude_model: str = "haiku"
+    codex_model: str = ""
+    copilot_model: str = ""
+    ollama_model: str = "qwen3.5:4b-mlx"
+    daily_limit: int = 300
+    idle_seconds: int = 90
+    lease_seconds: int = 900
+    bundle_turns: int = 5
+    bundle_tokens: int = 6_000
+    tool_output_chars: int = 800
+    contradiction_min_score: float = 0.4  # B.16: mem0 scores shrink in small indexes; the judge filters
+    contradiction_max_pairs: int = 15
+    pause_minutes: int = 60
+
+
+@dataclass
 class Config:
     data_dir: Path
     capture: bool = True
@@ -121,6 +145,7 @@ class Config:
     summarize: Summarize = field(default_factory=Summarize)
     semantic: Semantic = field(default_factory=Semantic)
     federation: Federation = field(default_factory=Federation)
+    observe: Observe = field(default_factory=Observe)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -150,6 +175,14 @@ class Config:
     @property
     def lock_path(self) -> Path:
         return self.data_dir / "indexer.lock"
+
+    @property
+    def observe_lock_path(self) -> Path:
+        return self.data_dir / "observe.lock"
+
+    @property
+    def mem0_dir(self) -> Path:
+        return self.data_dir / "mem0"
 
     @property
     def config_path(self) -> Path:

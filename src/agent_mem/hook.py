@@ -93,6 +93,46 @@ def _maybe_spawn(conn: sqlite3.Connection, config: Config, wanted: bool) -> None
         spawn_indexer(config)
 
 
+OBSERVER_THROTTLE_SECONDS = 15
+
+
+def spawn_observer(config: Config) -> bool:
+    """Start ``agent-mem observe --drain`` detached (docs/PLAN.md §4.3). The worker exits at once if
+    another one holds ``observe.lock``; a marker file keeps a burst of Stop hooks from spawning more
+    than one process every few seconds."""
+    if not config.observe.enabled or env_flag("AGENT_MEM_NO_SPAWN"):
+        return False
+    marker = config.data_dir / ".observer-spawned"
+    with contextlib.suppress(OSError):
+        if marker.exists() and time.time() - marker.stat().st_mtime < OBSERVER_THROTTLE_SECONDS:
+            return False
+        marker.touch()
+    return _spawn([sys.executable, "-m", "agent_mem", "observe", "--drain", "--quiet"], config)
+
+
+def _spawn(argv: list[str], config: Config) -> bool:
+    env = {**os.environ, "AGENT_MEM_DATA_DIR": str(config.data_dir), "AGENT_MEM_INTERNAL": "1"}
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+        "env": env,
+    }
+    if sys.platform == "win32":
+        flags = 0
+        for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
+            flags |= getattr(subprocess, name, 0)
+        kwargs["creationflags"] = flags
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen(argv, **kwargs)
+    except OSError:
+        return False
+    return True
+
+
 def _spawn_for_migration(config: Config) -> None:
     # The database cannot be written yet, so the throttle lives in a marker file instead of ``meta``.
     marker = config.data_dir / ".migration-requested"
@@ -120,6 +160,8 @@ class _Worker(threading.Thread):
             conn = db.connect(self.config, fresh_only=True)
             self.response = capture.apply(conn, self.config, self.event)
             _maybe_spawn(conn, self.config, self.response.wants_indexer)
+            if self.event.kind in {"stop", "session_end"}:
+                spawn_observer(self.config)
         except db.MigrationPendingError as error:
             # The indexer migrates (with backup) outside the deadline and then replays the spool.
             self.error = f"{type(error).__name__}: {error}"

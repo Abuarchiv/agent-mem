@@ -31,7 +31,7 @@ jobs:
       - name: Types
         run: uv run pyright
       - name: Tests
-        run: uv run pytest
+        run: uv run pytest -m "not local"
       - name: Build
         run: uv build
       - name: Smoke test installed wheel
@@ -63,7 +63,7 @@ jobs:
           cd "$RUNNER_TEMP"/sdist/agent_mem-*
           uv venv
           uv pip install ".[semantic]" pytest
-          .venv/bin/python -m pytest -p no:cacheprovider
+          .venv/bin/python -m pytest -p no:cacheprovider -m "not local"
 
   opencode-plugin:
     runs-on: ubuntu-latest
