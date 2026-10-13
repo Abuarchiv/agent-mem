@@ -181,7 +181,7 @@ def test_a_bundle_never_mixes_projects(conn, config: Config, tmp_path):
     from agent_mem.observe import bundle
     from tests.conftest import Driver as Fresh
 
-    parent = tmp_path / "Lernen"
+    parent = tmp_path / "work"
     nested = parent / "agent-mem"
     nested.mkdir(parents=True)
     for root in (parent, nested):
@@ -197,7 +197,7 @@ def test_a_bundle_never_mixes_projects(conn, config: Config, tmp_path):
     turn_ids = [int(r[0]) for r in conn.execute("SELECT id FROM turns ORDER BY id")]
     bundles = bundle.build(conn, config, turn_ids)
     names = [conn.execute("SELECT name FROM projects WHERE id = ?", (b.project_id,)).fetchone()[0] for b in bundles]
-    assert names == ["Lernen", "agent-mem"] and [len(b.turn_ids) for b in bundles] == [1, 1]
+    assert names == ["work", "agent-mem"] and [len(b.turn_ids) for b in bundles] == [1, 1]
 
 
 def test_headline_cuts_at_a_word_boundary():
@@ -215,7 +215,7 @@ def test_last_session_is_found_through_its_turns(conn, config: Config, tmp_path)
 
     from tests.conftest import Driver as Fresh
 
-    parent = tmp_path / "Lernen"
+    parent = tmp_path / "work"
     nested = parent / "agent-mem"
     nested.mkdir(parents=True)
     for root in (parent, nested):

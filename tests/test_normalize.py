@@ -276,7 +276,7 @@ def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
                    "tool_input": {"command": "uv run --with pytest python3 -m pytest -q"}, "tool_response": output}  # fmt: skip
         return normalize("codex", payload).tool_failed
 
-    assert failed("error: Failed to initialize cache at `/Users/abu/.cache/uv`\n  Caused by: Operation not permitted")
+    assert failed("error: Failed to initialize cache at `/Users/dev/.cache/uv`\n  Caused by: Operation not permitted")
     assert failed('Traceback (most recent call last):\n  File "<string>", line 1\nZeroDivisionError: division by zero')
     assert failed("F.\n=================== 1 failed, 1 passed in 0.03s ===================")
     assert failed("bash: pytest: command not found")

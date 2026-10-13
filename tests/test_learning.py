@@ -177,7 +177,7 @@ def test_turn_moves_to_the_nested_project_its_tools_work_in(conn, config, tmp_pa
 
     from tests.conftest import Driver as Fresh
 
-    parent = tmp_path / "Lernen"
+    parent = tmp_path / "work"
     nested = parent / "agent-mem"
     nested.mkdir(parents=True)
     for root in (parent, nested):
@@ -196,7 +196,7 @@ def test_turn_moves_to_the_nested_project_its_tools_work_in(conn, config, tmp_pa
     ).fetchall()
     assert [(r["prompt"], r["name"]) for r in rows] == [
         ("Fix the viewer in agent-mem", "agent-mem"),
-        ("What is in this folder?", "Lernen"),
+        ("What is in this folder?", "work"),
     ]
     session = conn.execute("SELECT p.name FROM sessions s JOIN projects p ON p.id = s.project_id").fetchone()
     assert session["name"] == "agent-mem"
@@ -220,7 +220,7 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
     from agent_mem.memory import search
     from tests.conftest import Driver as Fresh
 
-    parent = tmp_path / "Lernen"
+    parent = tmp_path / "work"
     nested = parent / "agent-mem"
     nested.mkdir(parents=True)
     for root in (parent, nested):
@@ -232,7 +232,7 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
     driver.edit("s1", "app.py")
     driver.stop("s1", "The viewer launch agent restarts after a crash within ten seconds.")
     driver.cwd = str(parent)
-    parent_id = conn.execute("SELECT id FROM projects WHERE name = 'Lernen'").fetchone()[0]
+    parent_id = conn.execute("SELECT id FROM projects WHERE name = 'work'").fetchone()[0]
     hits = search.search(conn, config, search.Query(text="viewer launch agent restarts", project_id=parent_id))
     assert hits and "launch agent" in hits[0].text
     nested_id = conn.execute("SELECT id FROM projects WHERE name = 'agent-mem'").fetchone()[0]
