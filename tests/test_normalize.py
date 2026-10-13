@@ -258,6 +258,8 @@ def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
         "Warning: truncated output (original token count: 14267)\nTotal output lines: 314\n\nsrc/x.py:12: error handling"
     )
     assert not failed("tests/test_errors.py::test_assert_raises PASSED\n0 failed")
+    assert failed("npm ERR! code ELIFECYCLE") and failed("error[E0308]: mismatched types")
+    assert not failed("kind  | n  | note\nerror | 39 | from a sqlite3 table")  # a table row, live data
 
 
 def test_claude_piped_test_run_without_exit_code_counts_as_failed():
