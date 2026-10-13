@@ -227,7 +227,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     try:
         conn = db.connect(config)
     except db.SchemaTooNewError as error:
-        checks.append(Check("database", False, str(error), "Upgrade agent-mem (`uv tool upgrade agent-mem`)."))
+        checks.append(Check("database", False, str(error), "Run `agent-mem upgrade`."))
         return checks
     except db.MigrationInProgressError as error:
         checks.append(Check("database", False, f"migration in progress: {error}", "Run `agent-mem doctor` again."))
@@ -317,7 +317,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
         checks.extend(_observer_checks(conn, config))
     finally:
         conn.close()
-    checks.extend(_hook_checks())
+    checks.extend(_hook_checks(fix))
     checks.extend(_viewer_checks(config, fix))
     if fix:
         from agent_mem.memory import indexer
@@ -456,13 +456,34 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     return checks
 
 
-def _hook_checks() -> list[Check]:
-    """docs/PLAN.md §14 I2/I5: hook commands point at an existing binary."""
+def _hook_checks(fix: bool) -> list[Check]:
+    """docs/PLAN.md §14 I2/I5: hook commands point at an existing binary and match this release."""
     from agent_mem.cli import install
 
     checks: list[Check] = []
     for harness in install.HARNESSES:
-        for command in install.hook_commands(harness):
+        commands = install.hook_commands(harness)
+        if not commands:
+            continue
+        exe = commands[0].rsplit(" hook ", 1)[0]
+        fixed = False
+        if fix and (install.stale(harness) or not Path(exe).is_file()):
+            # The path they already use (a checkout's `uv run` must not take them over), unless it is gone.
+            install.write(harness, install.plugins_dir(), exe if Path(exe).is_file() else None)
+            commands, fixed = install.hook_commands(harness), True
+        stale = install.stale(harness)
+        detail = "match this release" + (", rewritten" if fixed else "")
+        if fixed and harness == "codex":
+            detail += "; trust them again in Codex with /hooks"
+        checks.append(
+            Check(
+                f"{harness} hooks current",
+                not stale,
+                "from an older agent-mem release (events, matchers or timeouts changed)" if stale else detail,
+                "Run `agent-mem doctor --fix`.",
+            )
+        )
+        for command in commands:
             exe = command.split(" hook ", 1)[0]
             resolved = Path(exe) if os.path.isabs(exe) else Path(shutil.which(exe) or "")
             checks.append(

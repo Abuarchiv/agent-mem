@@ -2,6 +2,13 @@
 
 ## Unreleased (2.0 track)
 
+### Install and upgrade
+
+- `agent-mem upgrade` installs the newest commit of the source this copy came from (extras and a branch or tag kept, a pinned commit dropped), then runs `doctor --fix` with the new code. It uses `uv tool install --upgrade`, which swaps the environment in place; `--reinstall` deletes it first, and in a measured run 258 of 332 hook calls during those 2.6 s found no binary.
+- `doctor` compares the hooks `setup --write` registered with the ones this release ships; `doctor --fix` rewrites them at the binary path they already use. Before, a changed event, matcher or timeout (such as the Codex SessionEnd timeout of 3 s) never reached existing installs.
+- Running the install script over an existing install prints old and new version and runs `doctor --fix`.
+- `agent-mem --version` names the commit of a git install (`1.0.0 (9436f94)`), because the version number stays the same between releases.
+
 ### Facts in the background (new)
 
 - A detached worker (`agent-mem observe`) extracts facts from finished turns with mem0 2.2.1 and the harness CLI you are already logged into: `claude -p` (Haiku), `codex exec`, `copilot -s`. No API key is read or stored. The worker holds one lock, runs at low priority and exits after 90 s without work. Turns go only to the vendor that already saw them; Ollama is an opt-in fallback stage.

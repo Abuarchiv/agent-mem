@@ -82,14 +82,14 @@ def _main(args: list[str]) -> int:
     import json
     from pathlib import Path
 
-    from agent_mem import __version__
+    from agent_mem.cli.install import version
     from agent_mem.core.config import load
 
     parser = argparse.ArgumentParser(prog="agent-mem", description="Local, self-learning memory for coding agents.")
     parser.add_argument(
         "--data-dir", type=Path, help="data directory (default: platform data dir or AGENT_MEM_DATA_DIR)"
     )
-    parser.add_argument("--version", action="version", version=f"agent-mem {__version__}")
+    parser.add_argument("--version", action="version", version=f"agent-mem {version()}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("status", help="counts, learning metrics and component health")
@@ -184,6 +184,7 @@ def _main(args: list[str]) -> int:
     group = p.add_mutually_exclusive_group()
     group.add_argument("--autostart", action="store_true", help="start the viewer at every login, and now")
     group.add_argument("--no-autostart", action="store_true", help="remove the login item")
+    sub.add_parser("upgrade", help="install the newest version from where this one came from, then `doctor --fix`")
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")
 

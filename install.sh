@@ -14,9 +14,15 @@ if ! command -v uv >/dev/null 2>&1; then
   PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
   command -v uv >/dev/null 2>&1 || fail "uv was installed but is not on PATH. Open a new terminal and run this again."
 fi
+before=$(agent-mem --version 2>/dev/null || true)
 uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
   || fail "uv could not install agent-mem (network or git missing?). The error above names the cause."
 uv tool update-shell >/dev/null 2>&1 || true
+if [ -n "$before" ]; then
+  echo "Updated: $before -> $(agent-mem --version)"
+  agent-mem doctor --fix || true  # migrates the database, rewrites hooks an older release wrote
+  exit 0
+fi
 echo
 echo "Installed. Next steps:"
 echo "  agent-mem setup all --write       # every harness on PATH; or one: claude, codex, copilot, opencode"

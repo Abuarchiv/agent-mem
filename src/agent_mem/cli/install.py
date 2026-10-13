@@ -30,6 +30,15 @@ def binary() -> str:
     return str(sibling) if sibling.exists() else "agent-mem"
 
 
+def plugins_dir() -> Path:
+    """Plugin files ship inside the wheel (agent_mem/plugins) and live in ./plugins in a checkout."""
+    package = Path(__file__).resolve().parents[1]  # src/agent_mem
+    packaged = package / "plugins"
+    if packaged.is_dir():
+        return packaged
+    return package.parents[1] / "plugins"
+
+
 def claude_home() -> Path:
     override = os.environ.get("CLAUDE_CONFIG_DIR")
     return Path(override).expanduser() if override else Path.home() / ".claude"
@@ -274,6 +283,71 @@ def hook_commands(harness: str) -> list[str]:
         for group in entries:
             found.extend(str(h["command"]) for h in group.get("hooks", []) if _is_ours(h))
     return sorted(set(found))
+
+
+def stale(harness: str) -> bool:
+    """Our registered hooks differ from the ones this release ships (an event, matcher or timeout changed since
+    ``setup --write``). Compared at the binary path they already use, so only the shipped content counts."""
+    commands = hook_commands(harness)
+    if not commands:
+        return False
+    exe = commands[0].rsplit(" hook ", 1)[0]
+    plugins = plugins_dir()
+    if harness == "opencode":
+        shipped = (plugins / "opencode" / "agent-mem.ts").read_text(encoding="utf-8")
+        current = (opencode_home() / "plugins" / "agent-mem.ts").read_text(encoding="utf-8")
+        return current != shipped.replace('spawn("agent-mem"', f"spawn({json.dumps(exe)}")
+    want = _plugin_hooks(plugins, harness, exe)
+    if harness == "copilot":
+        return _read_json(copilot_home() / "hooks" / "agent-mem.json") != want
+    path = claude_home() / "settings.json" if harness == "claude" else codex_home() / "hooks.json"
+    ours = {
+        event: [g for g in groups if all(_is_ours(h) for h in g.get("hooks", []))]
+        for event, groups in _read_json(path).get("hooks", {}).items()
+    }
+    return {event: groups for event, groups in ours.items() if groups} != want["hooks"]
+
+
+# --- version and upgrade ---------------------------------------------------------------------------
+
+
+def origin() -> dict[str, Any]:
+    """Where this copy was installed from (PEP 610 ``direct_url.json``), empty for an install from an index."""
+    from importlib import metadata
+
+    try:
+        text = metadata.distribution("agent-mem").read_text("direct_url.json")
+        return json.loads(text) if text else {}
+    except (metadata.PackageNotFoundError, ValueError):
+        return {}
+
+
+def version() -> str:
+    """``1.0.0 (9436f94)`` for a git install: releases are rare, the commit says which build runs."""
+    from agent_mem import __version__
+
+    commit = origin().get("vcs_info", {}).get("commit_id")
+    return f"{__version__} ({commit[:7]})" if commit else __version__
+
+
+def upgrade_command() -> list[str] | None:
+    """The uv call that moves this copy to the newest commit of its source, extras kept. None when it was not
+    installed with ``uv tool``. ``uv tool install --upgrade`` swaps the environment in place; ``--reinstall``
+    deletes it first and hooks fired in those seconds find no binary (measured 2.6 s, 258 of 332 calls failed)."""
+    uv = shutil.which("uv")
+    if uv is None or not (Path(sys.prefix) / "uv-receipt.toml").exists():
+        return None
+    source = origin()
+    vcs = source.get("vcs_info", {})
+    if vcs.get("vcs") != "git":
+        return [uv, "tool", "upgrade", "agent-mem"]
+    url = source["url"]
+    ref = vcs.get("requested_revision")
+    if ref and ref != vcs.get("commit_id"):  # a branch or tag stays; a pinned commit would never move
+        url += f"@{ref}"
+    wanted = [name for name, present in extras().items() if present]
+    spec = f"agent-mem[{','.join(wanted)}]" if wanted else "agent-mem"
+    return [uv, "tool", "install", "--upgrade", f"{spec} @ git+{url}"]
 
 
 def extras() -> dict[str, bool]:

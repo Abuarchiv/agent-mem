@@ -24,6 +24,8 @@ Three sizes:
 | `agent-mem[semantic]` | plus 220 MB model | vector search (`paraphrase-multilingual-MiniLM-L12-v2`, ONNX, no PyTorch) |
 | `agent-mem[semantic,observer]` | plus about 400 MB | background facts, work log, lessons, daily review of duplicates and outdated facts (mem0, Qdrant local mode, spaCy) |
 
+Update with `agent-mem upgrade`: it installs the newest commit of the source you installed from (extras kept), then runs `agent-mem doctor --fix`, which migrates the database and rewrites hooks that an older release wrote (Codex asks you to trust changed hooks once more with `/hooks`). Running the install script again does the same. Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no binary.
+
 Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data).
 
 ## What it does
@@ -73,7 +75,7 @@ Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusi
 
 ```
 agent-mem status [--json] | doctor [--fix] [--json] | paths
-agent-mem setup all|<harness> [--write] [--no-models] | uninstall all|<harness>
+agent-mem setup all|<harness> [--write] [--no-models] | uninstall all|<harness> | upgrade
 agent-mem observe [--drain] [--once] [--status] [--retry-failed] [--reprocess-raw] [--reindex]
 agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
 agent-mem show T12 M3 | view [--project DIR] [--output FILE|FOLDER] [--no-open]

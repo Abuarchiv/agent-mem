@@ -160,3 +160,62 @@ def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, mon
     assert calls[0].startswith("mcp remove --scope user agent-mem") and calls[1].startswith("mcp add --scope user")
     err = capsys.readouterr().err
     assert "MCP server not registered (boom)" in err and "claude mcp add --scope user agent-mem" in err
+
+
+def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes: Path) -> None:
+    from agent_mem.cli.health import _hook_checks
+
+    exe = homes / "bin" / "agent-mem"
+    exe.parent.mkdir()
+    exe.write_text("")
+    for harness in install.HARNESSES:
+        install.write(harness, PLUGINS, str(exe))
+        assert not install.stale(harness)
+
+    settings = homes / ".claude" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["hooks"]["Stop"][0]["hooks"][0]["timeout"] = 99  # a release since changed this timeout
+    data["hooks"]["Stop"].insert(0, {"hooks": [{"type": "command", "command": "other-tool notify"}]})
+    settings.write_text(json.dumps(data))
+    codex = homes / ".codex" / "hooks.json"
+    data = json.loads(codex.read_text())
+    del data["hooks"]["PreCompact"]  # a release since added this event
+    codex.write_text(json.dumps(data))
+    copilot = homes / ".copilot" / "hooks" / "agent-mem.json"
+    copilot.write_text(copilot.read_text().replace('"timeoutSec"', '"timeout_sec"'))
+    plugin = homes / ".config" / "opencode" / "plugins" / "agent-mem.ts"
+    plugin.write_text(plugin.read_text() + "\n// older\n")
+    assert all(install.stale(harness) for harness in install.HARNESSES)
+
+    shown = {c.name: c for c in _hook_checks(fix=False)}
+    assert not shown["claude hooks current"].ok and "older" in shown["claude hooks current"].detail
+
+    fixed = {c.name: c for c in _hook_checks(fix=True)}
+    assert all(fixed[f"{h} hooks current"].ok for h in install.HARNESSES)
+    assert "/hooks" in fixed["codex hooks current"].detail
+    assert not any(install.stale(harness) for harness in install.HARNESSES)
+    assert install.hook_commands("claude") == [f"{exe} hook claude"]  # the path they used, not this test's binary
+    assert "other-tool notify" in _hooks_commands(json.loads(settings.read_text())["hooks"])
+
+
+def test_upgrade_moves_to_the_head_of_the_source_and_keeps_extras(
+    homes: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None)
+    monkeypatch.setattr(install.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(install, "extras", lambda: {"semantic": True, "observer": False})
+    assert install.upgrade_command() is None  # not a `uv tool` environment
+    (tmp_path / "uv-receipt.toml").write_text("")
+
+    url = "https://github.com/Abuarchiv/agent-mem"
+    pinned = {"url": url, "vcs_info": {"vcs": "git", "commit_id": "abc1234def", "requested_revision": "abc1234def"}}
+    monkeypatch.setattr(install, "origin", lambda: pinned)
+    assert install.upgrade_command() == ["/bin/uv", "tool", "install", "--upgrade", f"agent-mem[semantic] @ git+{url}"]
+    assert install.version().endswith("(abc1234)")
+
+    branch = {"url": url, "vcs_info": {"vcs": "git", "commit_id": "abc1234def", "requested_revision": "beta"}}
+    monkeypatch.setattr(install, "origin", lambda: branch)
+    assert install.upgrade_command()[-1] == f"agent-mem[semantic] @ git+{url}@beta"
+
+    monkeypatch.setattr(install, "origin", dict)
+    assert install.upgrade_command() == ["/bin/uv", "tool", "upgrade", "agent-mem"]

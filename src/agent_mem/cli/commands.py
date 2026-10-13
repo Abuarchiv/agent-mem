@@ -36,6 +36,7 @@ def dispatch(ns: argparse.Namespace, config: Config) -> int:
         "models": cmd_models,
         "setup": cmd_setup,
         "uninstall": cmd_uninstall,
+        "upgrade": cmd_upgrade,
         "view": cmd_view,
     }[ns.command]
     return handler(ns, config)
@@ -467,15 +468,6 @@ def _served_url(config: Config, project_id: str | None) -> str | None:
     return server.url(config) + (f"?project={quote(project_id)}" if project_id else "")
 
 
-def plugins_dir() -> Path:
-    """Plugin files ship inside the wheel (agent_mem/plugins) and live in ./plugins in a checkout."""
-    package = Path(__file__).resolve().parents[1]  # src/agent_mem
-    packaged = package / "plugins"
-    if packaged.is_dir():
-        return packaged
-    return package.parents[1] / "plugins"
-
-
 SETUP = {
     "claude": """Claude Code
   1. /plugin marketplace add Abuarchiv/agent-mem
@@ -530,7 +522,7 @@ def _targets(harness: str, found: dict[str, Any]) -> list[str]:
 def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.cli import install
 
-    folder = plugins_dir()
+    folder = install.plugins_dir()
     found = install.detect()
     targets = _targets(ns.harness, found)
     if not targets:
@@ -595,3 +587,37 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
             print(f"  removed the viewer login item {removed} (no harness left)")
     print(f"Data stays in {config.data_dir}; `agent-mem purge --all` deletes it.")
     return 0
+
+
+def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
+    import shlex
+    import subprocess
+
+    from agent_mem.cli import install
+
+    command = install.upgrade_command()
+    if command is None:
+        print(
+            "This copy was not installed with `uv tool` (the install script uses it). Upgrade it the way you "
+            "installed it, then run `agent-mem doctor --fix`.",
+            file=sys.stderr,
+        )
+        return 1
+    before = install.version()
+    exe = str(Path(sys.executable).with_name("agent-mem.exe" if sys.platform == "win32" else "agent-mem"))
+    print("$ " + shlex.join(command), flush=True)
+    if subprocess.run(command, check=False).returncode != 0:
+        print("Upgrade failed; uv names the cause above.", file=sys.stderr)
+        return 1
+    after = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout.strip()
+    after = after.removeprefix("agent-mem ") or "?"
+    if after == before:
+        print(f"agent-mem {after} is the newest version.")
+    else:
+        print(
+            f"agent-mem {before} -> {after}. Hooks use it now; running sessions keep their MCP server until restart.",
+            flush=True,
+        )
+    # The new code finishes the job: it migrates the database and rewrites hooks of an older release.
+    print("$ agent-mem doctor --fix", flush=True)
+    return subprocess.run([exe, "--data-dir", str(config.data_dir), "doctor", "--fix"], check=False).returncode
