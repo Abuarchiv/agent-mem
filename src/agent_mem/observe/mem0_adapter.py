@@ -103,22 +103,25 @@ def _use_entity_model(name: str = "en_core_web_sm", path: Path | None = None) ->
     """mem0 loads ``en_core_web_sm`` for entity linking; on German facts it returns fragments ("Der", "und
     nur"). Load the configured model into mem0's loader instead. Without the model mem0 would run
     ``spacy download`` (an install into the live environment, which ends the process in a tool install), so
-    mark it as failed: entity linking is skipped, facts and search are unaffected (docs/PLAN.md B.27)."""
+    mark it as failed: entity linking is skipped, facts and search are unaffected (docs/PLAN.md B.27). The same
+    model lemmatizes for mem0's BM25: left unset, that loader ran ``spacy download en_core_web_sm`` itself."""
     from mem0.utils import spacy_models
 
-    if path is not None and spacy_models._nlp_full is None:
-        import spacy
+    if path is not None:
+        if spacy_models._nlp_full is None:
+            import spacy
 
-        spacy_models._nlp_full = spacy.load(path)  # downloaded by `agent-mem models install`
-        return
-    if not spacy_model_available(name):
+            spacy_models._nlp_full = spacy.load(path)  # downloaded by `agent-mem models install`
+    elif not spacy_model_available(name):
         spacy_models._load_failed_full = True
         spacy_models._load_failed_lemma = True
         return
-    if name != "en_core_web_sm" and spacy_models._nlp_full is None:
+    elif name != "en_core_web_sm" and spacy_models._nlp_full is None:
         import spacy
 
         spacy_models._nlp_full = spacy.load(name)
+    if spacy_models._nlp_lemma is None and spacy_models._nlp_full is not None:
+        spacy_models._nlp_lemma = spacy_models._nlp_full
 
 
 class Mem0Adapter:

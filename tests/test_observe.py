@@ -59,6 +59,36 @@ def test_missing_spacy_model_disables_entity_linking_instead_of_installing(monke
     assert spacy_models.get_nlp_full() is None  # no download attempt
 
 
+def test_the_configured_model_also_lemmatizes_so_mem0_downloads_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """With ``agent-mem models install``'s model only the entity loader was set; mem0's BM25 lemmatizer then ran
+    ``spacy download en_core_web_sm``, a pip install from the network into the tool environment, after every
+    upgrade again."""
+    import importlib.util
+
+    import spacy
+    import spacy.cli
+
+    mem0_adapter = importlib.import_module("agent_mem.observe.mem0_adapter")
+    spacy_models = importlib.import_module("mem0.utils.spacy_models")
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "en_core_web_sm" else real(name))
+    monkeypatch.setattr(spacy.util, "is_package", lambda name: False)
+    monkeypatch.setattr(spacy.cli, "download", lambda *a, **k: pytest.fail("mem0 tried to download a model"))
+    loaded = object()
+    monkeypatch.setattr(spacy, "load", lambda *a, **k: loaded)
+    for attr in ("_nlp_full", "_nlp_lemma"):
+        monkeypatch.setattr(spacy_models, attr, None)
+    for attr in ("_load_failed_full", "_load_failed_lemma"):
+        monkeypatch.setattr(spacy_models, attr, False)
+
+    for _ in range(2):  # a second adapter in the same process must not switch entity linking off
+        mem0_adapter._use_entity_model("de_core_news_sm", tmp_path / "de_core_news_sm")
+        assert spacy_models.get_nlp_full() is loaded
+        assert spacy_models.get_nlp_lemma() is loaded
+
+
 def test_migration_005_adds_concept_tables_to_a_v4_database(config) -> None:
     from agent_mem.core import db
 
