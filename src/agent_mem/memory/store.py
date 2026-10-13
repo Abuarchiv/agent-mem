@@ -297,6 +297,14 @@ def learn_rule(
     """Record one statement "use X instead of Y" (or "avoid X"); a preference memory follows from
     ``rules.min_corrections`` statements. Called by the prompt hook and by the observer."""
     message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
+    # One turn is one statement: the prompt hook and later the observer read the same prompt, and the observer
+    # retries a bundle after an error. Counted each time, "use uv instead of pip" typed once became a preference.
+    counted = conn.execute(
+        "INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)",
+        (f"rule.turn|{project_id}|{avoid}|{prefer or ''}|{turn_id}", timeutil.iso()),
+    )
+    if counted.rowcount == 0:
+        return
     guards_exist(config)
     if prefer:
         # "Use npm instead of pnpm" after "use pnpm instead of npm": the newer statement wins. Before, both rules

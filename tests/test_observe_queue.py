@@ -475,3 +475,26 @@ def test_a_failed_graph_batch_waits_an_hour(config: Config, monkeypatch) -> None
         w.graph_due()
     assert len(calls) == 1
     conn.close()
+
+
+def test_one_statement_counts_once_although_hook_and_observer_both_read_it(config: Config, project: Path) -> None:
+    """Real Copilot session: "Use uv instead of pip" typed once became "(corrected 2x)" and a preference for every
+    session, because the prompt hook and then the observer each counted the same turn."""
+    from agent_mem.observe import bundle, worker
+    from agent_mem.observe.mem0_adapter import Fact
+
+    prompt = "Run the tests. Use uv instead of pip if you need to install anything."
+    _turn(config, project, "s1", prompt, "Done.")
+    conn = db.connect(config)
+    turn, project_id = conn.execute("SELECT id, project_id FROM turns").fetchone()
+    b = bundle.Bundle(turn_ids=[turn], session_id="s1", project_id=project_id, harness="claude",
+                      messages=[{"role": "user", "content": prompt}])  # fmt: skip
+    for attempt in range(2):  # the observer also retries a bundle after an error
+        worker.mirror(conn, config, b, [Fact(id=f"p{attempt}", text="[rule] Use uv instead of pip", metadata={})])
+    assert [tuple(r) for r in conn.execute("SELECT pattern, evidence FROM rules")] == [("pip", 1)]
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE source = 'hook' AND kind = 'preference'").fetchone()[0] == 0
+    conn.close()
+    _turn(config, project, "s2", "Again: use uv instead of pip.", "Done.")
+    conn = db.connect(config)
+    assert [tuple(r) for r in conn.execute("SELECT pattern, evidence FROM rules")] == [("pip", 2)]
+    conn.close()
