@@ -136,6 +136,17 @@ def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: 
     return ids
 
 
+def _with_stored(adapter: Mem0Adapter, namespace: str, turn_ids: list[int], facts: list[Fact]) -> list[Fact]:
+    """``facts`` plus what mem0 already holds for ``turn_ids`` (its metadata names the turn), new ones first."""
+    stored = adapter.memory.get_all(filters={"user_id": namespace, "turn_id": {"in": turn_ids}}, top_k=200)
+    seen = {fact.id for fact in facts}
+    return facts + [
+        Fact(id=str(r["id"]), text=str(r["memory"]), metadata=dict(r.get("metadata") or {}))
+        for r in stored.get("results", [])
+        if str(r["id"]) not in seen
+    ]
+
+
 class Worker:
     def __init__(self, config: Config, conn: sqlite3.Connection, *, adapter: Mem0Adapter | None = None) -> None:
         self.config = config
@@ -215,13 +226,18 @@ class Worker:
                 )
                 last_error = f"{name}: {type(error).__name__}: {error}"
                 continue
+            # mem0 stores the facts before SQLite takes them. After a failure in between (a write lock held over
+            # 10 s, a killed worker) the retry showed the model its own facts as existing memories, it extracted
+            # nothing, and they lived only in mem0. Take every fact mem0 holds for these turns; the dedupe key
+            # skips the ones already mirrored.
+            facts = _with_stored(self.adapter, namespace, b.turn_ids, facts)
             _record_call(self.conn, name, "extract", time.perf_counter() - started, True, b.chars, b.turn_ids, None)
             # Facts and `done` in one transaction, before the slow work-log call: a worker killed in between
             # extracted the bundle again, and mem0 kept both wordings of every fact.
             with db.transaction(self.conn):
-                mirror(self.conn, self.config, b, facts)
+                added = mirror(self.conn, self.config, b, facts)
                 queue.finish(self.conn, b.turn_ids, "done", name)
-            self.stats["facts"] += len(facts)
+            self.stats["facts"] += len(added)
             self._work_log(b, llm, name)
             return name
         if last_error:

@@ -384,7 +384,7 @@ def test_a_worker_killed_during_the_work_log_does_not_extract_the_bundle_again(
     monkeypatch.setattr(providers, "make_llm", lambda *a: object())
 
     class Adapter:
-        memory = type("M", (), {"llm": None})()
+        memory = type("M", (), {"llm": None, "get_all": lambda self, **kw: {"results": []}})()
 
         def extract(self, *a):
             return [Fact(id="f1", text="[fact] The project uses uv.")]

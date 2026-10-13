@@ -170,3 +170,41 @@ def test_a_bundle_yields_facts_only_from_its_own_turns(
     history = extraction[0].split("## Last k Messages")[-1].split("## Recently Extracted Memories")[0]
     assert "nox" not in history  # another session's dialogue is no context for this bundle
     conn.close()
+
+
+def test_facts_stored_in_mem0_before_a_failure_reach_sqlite_on_retry(
+    observe_config: Config, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mem0 keeps the facts before SQLite takes them. When the SQLite step failed (a write lock held over 10 s, a
+    killed worker), the retry showed Haiku its own facts as existing memories, it extracted nothing, and the facts
+    lived only in mem0: reproduced twice with Haiku (Fly.io region and app name lost)."""
+    import sqlite3 as sqlite
+
+    from agent_mem.observe import worker as worker_mod
+
+    answers = tmp_path / "answers.json"
+    answers.write_text(
+        json.dumps([{"memory": [{"text": "[decision] Deploys go to Fly.io in region fra."}]}, {"memory": []}])
+    )
+    monkeypatch.setenv("AGENT_MEM_FAKE_LLM", str(answers))
+    _turn(observe_config, project, "s1", "Wir deployen auf Fly.io in fra.", "fly.toml angelegt.")
+    real = worker_mod.mirror
+    calls = {"n": 0}
+
+    def locked_once(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite.OperationalError("database is locked")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(worker_mod, "mirror", locked_once)
+    conn = db.connect(observe_config)
+    worker = _worker(observe_config, conn)
+    worker.run(drain=False)
+    conn.execute("UPDATE observe_queue SET next_try = '2000-01-01T00:00:00.000Z'")  # the backoff is over
+    worker.run(drain=False)
+    worker.close()
+    assert conn.execute("SELECT state FROM observe_queue").fetchone()[0] == "done"
+    bodies = [r[0] for r in conn.execute("SELECT body FROM memories WHERE dedupe_key LIKE 'mem0:%'")]
+    assert bodies == ["Deploys go to Fly.io in region fra."]
+    conn.close()
