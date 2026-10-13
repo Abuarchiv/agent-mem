@@ -364,6 +364,29 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
     turn_id = _new_turn(conn, session_id, project_id, event.ts, prompt)
     conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn_id, event_id))
 
+    _learn_from_prompt(conn, config, prompt, project_id, turn_id, last)
+    if _OVERRIDE.search(prompt):
+        conn.execute(
+            "UPDATE rules SET overrides = overrides + 1, enabled = CASE WHEN overrides + 1 >= 2 THEN 0 ELSE enabled END "
+            "WHERE (project_id IS ? OR project_id IS NULL) AND last_hit_at IS NOT NULL AND last_hit_at >= ?",
+            (project_id, timeutil.iso(timeutil.now() - timedelta(minutes=15))),
+        )
+    if with_context and project_id is not None:
+        block = inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness)
+        if block:
+            response.context = block.text
+            learn.record_access(conn, block.owners, "injected", session_id)
+
+
+def _learn_from_prompt(
+    conn: sqlite3.Connection,
+    config: Config,
+    prompt: str,
+    project_id: str | None,
+    turn_id: int,
+    last: sqlite3.Row | None,
+) -> None:
+    """Rules, corrections and decisions the user stated in a prompt; ``last`` is the turn it answers."""
     typed = not signals.from_harness(prompt)
     corrective = typed and (signals.is_correction(prompt) or signals.mentions_rule(prompt))
     if typed and not corrective:
@@ -376,18 +399,12 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
     observed = _observer_active(conn, config)
     # A long spoken prompt is not a correction one can apply later; the turn itself stays searchable.
     if corrective and not observed and len(prompt) <= CORRECTION_CHARS:
-        context = ""
-        if last is not None:
-            commands = json.loads(last["commands_json"] or "[]")
-            context = f"\nPrevious request (T{last['id']}): {signals.first_line(last['prompt'], 200)}"
-            if commands:
-                context += f"\nPrevious commands: {' | '.join(commands[-3:])}"
         store.add_memory(
             conn,
             project_id=project_id,
             kind="correction",
             title=signals.first_line(prompt, 200),
-            body=prompt[:1500] + context,
+            body=prompt[:1500] + _previous_request(last),
             source="hook",
             trust="user",
             importance=signals.IMPORTANCE["correction"],
@@ -412,17 +429,17 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
             turn_id=turn_id,
         )
         _raise_importance(conn, turn_id, signals.IMPORTANCE["decision"])
-    if _OVERRIDE.search(prompt):
-        conn.execute(
-            "UPDATE rules SET overrides = overrides + 1, enabled = CASE WHEN overrides + 1 >= 2 THEN 0 ELSE enabled END "
-            "WHERE (project_id IS ? OR project_id IS NULL) AND last_hit_at IS NOT NULL AND last_hit_at >= ?",
-            (project_id, timeutil.iso(timeutil.now() - timedelta(minutes=15))),
-        )
-    if with_context and project_id is not None:
-        block = inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness)
-        if block:
-            response.context = block.text
-            learn.record_access(conn, block.owners, "injected", session_id)
+
+
+def _previous_request(last: sqlite3.Row | None) -> str:
+    """What a correction refers to: the request and last commands of the turn before it."""
+    if last is None:
+        return ""
+    commands = json.loads(last["commands_json"] or "[]")
+    context = f"\nPrevious request (T{last['id']}): {signals.first_line(last['prompt'], 200)}"
+    if commands:
+        context += f"\nPrevious commands: {' | '.join(commands[-3:])}"
+    return context
 
 
 def _observer_active(conn: sqlite3.Connection, config: Config) -> bool:
@@ -531,6 +548,38 @@ def _file_history(conn, config, project, project_id, session_id, tool_signal) ->
     return block
 
 
+# The project's own commands: the only ones worth an error-to-fix recipe or a place in the briefing.
+PROJECT_COMMANDS = {"test", "build", "lint", "install"}
+
+
+def _tool_importance(tool_signal: signals.ToolSignal, failed: bool) -> float:
+    """An edit outweighs a command, a command a read; a commit and any failure raise it further."""
+    importance = signals.IMPORTANCE["read"]
+    if tool_signal.category == "edit":
+        importance = signals.IMPORTANCE["edit"]
+    elif tool_signal.command:
+        importance = signals.IMPORTANCE["command"]
+    if tool_signal.command_kind == "commit" and not failed:
+        importance = signals.IMPORTANCE["commit"]
+    if failed:
+        importance = max(importance, signals.IMPORTANCE["error"])
+    return importance
+
+
+def _remember_command(
+    conn: sqlite3.Connection, project_id: str | None, tool_signal: signals.ToolSignal, ts: str
+) -> None:
+    """A test, build, lint or install command that passed, counted so the briefing names the usual one."""
+    command, kind = tool_signal.command, tool_signal.command_kind
+    if project_id is None or not command or kind not in PROJECT_COMMANDS or not _reusable(command, kind):
+        return
+    conn.execute(
+        "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, ?, ?, 1, ?) "
+        "ON CONFLICT(project_id, key, value) DO UPDATE SET count = count + 1, updated_at = excluded.updated_at",
+        (project_id, f"cmd:{kind}", privacy.clean_text(command, 120), ts),
+    )
+
+
 def _on_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
     tool_signal = signals.analyze_tool(event.tool or "", event.tool_input)
     turn_id = _turn_for_tool(conn, session_id, project_id, event.ts)
@@ -549,16 +598,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
     if payload.get("error_line") and payload.get("trust") != "tool_external":
         _append_json(conn, turn_id, "errors_json", [str(payload["error_line"])[:200]], cap=10)
 
-    importance = signals.IMPORTANCE["read"]
-    if tool_signal.category == "edit":
-        importance = signals.IMPORTANCE["edit"]
-    elif tool_signal.command:
-        importance = signals.IMPORTANCE["command"]
-    if tool_signal.command_kind == "commit" and not event.tool_failed:
-        importance = signals.IMPORTANCE["commit"]
-    if event.tool_failed:
-        importance = max(importance, signals.IMPORTANCE["error"])
-    _raise_importance(conn, turn_id, importance)
+    _raise_importance(conn, turn_id, _tool_importance(tool_signal, event.tool_failed))
 
     if tool_signal.packages and project_id is not None:
         ids = [store.entity_id(conn, project_id, "package", name) for name in tool_signal.packages]
@@ -566,7 +606,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
 
     # Error-to-fix recipes only for the project's own commands: a failed `cat` or `cd` followed by one that worked
     # is looking around, not a fix worth repeating (17 of 17 recipes on real data were such noise).
-    project_command = tool_signal.command_kind in {"test", "build", "lint", "install"}
+    project_command = tool_signal.command_kind in PROJECT_COMMANDS
     if event.tool_failed and error_sig and tool_signal.command_key and project_command:
         recipe = conn.execute(
             "SELECT * FROM recipes WHERE project_id IS ? AND error_sig = ? ORDER BY command_key = ? DESC, successes DESC LIMIT 1",
@@ -581,17 +621,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
     elif not event.tool_failed and tool_signal.command_key:
         if project_command:
             _resolve_failures(conn, project_id, session_id, turn_id, tool_signal.command_key, event.ts)
-        if (
-            tool_signal.command_kind in {"test", "build", "lint", "install"}
-            and project_id is not None
-            and tool_signal.command
-            and _reusable(tool_signal.command, tool_signal.command_kind)
-        ):
-            conn.execute(
-                "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, ?, ?, 1, ?) "
-                "ON CONFLICT(project_id, key, value) DO UPDATE SET count = count + 1, updated_at = excluded.updated_at",
-                (project_id, f"cmd:{tool_signal.command_kind}", privacy.clean_text(tool_signal.command, 120), event.ts),
-            )
+            _remember_command(conn, project_id, tool_signal, event.ts)
 
     if tool_signal.command_kind == "revert" and not event.tool_failed:
         _record_dead_end(conn, project_id, session_id, turn_id, tool_signal)
