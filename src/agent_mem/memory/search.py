@@ -159,7 +159,7 @@ STOPWORDS = {
     "gibt",
     "alle",
     "alles",
-    # question words and filler verbs: they lower coverage without naming anything (B.29)
+    # question words and filler verbs: they lower coverage without naming anything
     "who",
     "will",
     "been",
@@ -409,7 +409,7 @@ def graph_candidates_sql(
 
 LINKS_PER_ENTITY = 50
 GRAPH_CANDIDATES = 200
-# Measured on 32 real questions, fixture, coding-agent-life and LongMemEval-40 (docs/PLAN.md B.33).
+# Measured on 32 real questions, fixture, coding-agent-life and LongMemEval-40.
 COVERAGE_WEIGHT = 0.5
 GRAPH_WEIGHT = 0.3
 
@@ -551,7 +551,7 @@ class Query:
     limit: int = 8
     include_other_projects: bool = False
     # A time named in the question ("last week", "8. April"). It adds candidates and never excludes:
-    # a misread or future time ("tips for this weekend") must not hide every memory (B.29).
+    # a misread or future time ("tips for this weekend") must not hide every memory.
     window: tuple[datetime, datetime] | None = None
     kinds: set[str] | None = None
     exclude_origins: set[str] = field(default_factory=set)
@@ -613,7 +613,7 @@ def search(
     projects = scope(conn, query.project_id)
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
     # The graph says how strongly a hit is tied to the files and commands the question names. As a list of its own in
-    # the fusion it outvoted exact matches with whatever touched such a file last (B.33); it now reorders the hits the
+    # the fusion it outvoted exact matches with whatever touched such a file last; it now reorders the hits the
     # text and the vectors found.
     tied = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, GRAPH_CANDIDATES)
     tie = {owner: 1.0 - rank / len(tied) for rank, owner in enumerate(tied)}
@@ -669,7 +669,7 @@ def confident(hit: Hit, config: Config, terms: Sequence[str]) -> bool:
     if hit.score < config.retrieval.inject_min_score:
         return False
     # A semantic hit still has to share a third of the question's content words: unrelated questions
-    # matched one generic word of five or more (c26, c30, c37 in B.29), real ones at least one of three.
+    # matched one generic word of five or more, real ones at least one of three.
     if "vector" in hit.sources and hit.matched_terms >= 1 and hit.coverage >= 1 / 3:
         return True
     needed = 1 if len(terms) <= 1 else 2

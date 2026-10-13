@@ -33,7 +33,7 @@ dependencies = [
 # Semantic search with the multilingual E5 model (ONNX, no PyTorch). ONNX Runtime publishes no
 # wheels for Intel Macs; there the extra installs nothing and search stays lexical + graph.
 semantic = ["fastembed>=0.8; sys_platform != 'darwin' or platform_machine != 'x86_64'"]
-# Background observer (docs/PLAN.md §4.5): mem0 does extraction and dedup, Qdrant is the local
+# Background observer: mem0 does extraction and dedup, Qdrant is the local
 # vector store. Pinned; upgrades only with a green adapter test. Imported lazily by observe/ only.
 observer = ["mem0ai[nlp]==2.2.1", "qdrant-client>=1.12", "ollama>=0.4"]
 
@@ -72,14 +72,14 @@ dev = [
   "pyright>=1.1.414",
   # mem0's entity linking loads this spaCy model and otherwise pip-installs it at runtime into the
   # active environment (mem0/utils/spacy_models.py). Declared here so `uv sync` keeps it and no
-  # run ever modifies the venv. `agent-mem setup` installs it for end users (PLAN.md §14, I4).
+  # run ever modifies the venv. `agent-mem setup` installs it for end users.
   "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "local: needs the observer extra and a cached embedding model; run by hand, not in CI (PLAN.md R9)",
+  "local: needs the observer extra and a cached embedding model; run by hand, not in CI",
 ]
 addopts = "-q"
 pythonpath = ["."]

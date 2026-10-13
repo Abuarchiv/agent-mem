@@ -1,4 +1,4 @@
--- Agent Mem database schema, version 2: background observer (docs/PLAN.md §4.2, §4.3).
+-- Agent Mem database schema, version 2: background observer.
 
 -- One row per closed turn. The Stop hook inserts it; the worker leases and finishes it.
 CREATE TABLE observe_queue (
@@ -13,8 +13,8 @@ CREATE TABLE observe_queue (
 );
 CREATE INDEX observe_queue_state ON observe_queue(state, next_try);
 
--- Every model call the worker makes: stage, purpose, duration, size. Phase 5 reads it to size the
--- subscription cost (§4.3 point 5, E9). Never contains prompt text.
+-- Every model call the worker makes: stage, purpose, duration, size. Never contains
+-- prompt text.
 CREATE TABLE observe_calls (
   id INTEGER PRIMARY KEY,
   ts TEXT NOT NULL,
@@ -29,8 +29,8 @@ CREATE TABLE observe_calls (
 CREATE INDEX observe_calls_ts ON observe_calls(ts);
 
 -- Facts deleted in SQLite (mem_forget, purge) whose mem0 copy still has to go. The hook path and
--- the MCP server never import mem0 (R2); they leave the id here and the next worker run deletes it
--- from Qdrant, the entity store and history.db (§4.6 point 3).
+-- the MCP server never import mem0; they leave the id here and the next worker run deletes it
+-- from Qdrant, the entity store and history.db.
 CREATE TABLE observe_forget (
   mem0_id TEXT PRIMARY KEY,
   ts TEXT NOT NULL

@@ -1,4 +1,4 @@
-"""Observer package: privacy guarantees that must hold without any model (docs/PLAN.md §6)."""
+"""Observer package: privacy guarantees that must hold without any model."""
 
 from __future__ import annotations
 

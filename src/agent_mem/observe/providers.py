@@ -1,4 +1,4 @@
-"""LLM providers for mem0 (docs/PLAN.md §4.4).
+"""LLM providers for mem0.
 
 Each provider starts the official harness binary under the user's own login. No token is read,
 copied or stored. The prompt goes in via stdin, the process runs in an empty temporary directory
@@ -50,7 +50,7 @@ def classify(message: str) -> str:
     return "other"
 
 
-# Which stage a harness's turns may use without leaving their vendor (D12, cross_vendor=False).
+# Which stage a harness's turns may use without leaving their vendor (cross_vendor=False).
 VENDOR_OF_HARNESS = {"claude": "claude", "codex": "codex", "copilot": "copilot"}
 BINARY = {"claude": "claude", "codex": "codex", "copilot": "copilot", "ollama": "ollama"}
 
@@ -142,7 +142,7 @@ def _run_model(cmd: list[str], model_args: list[str], prompt: str, extra_env: di
 
 
 class ClaudeCliLLM(LLMBase):
-    """Stage 1: ``claude -p`` under the subscription login (measured, A.3)."""
+    """Stage 1: ``claude -p`` under the subscription login."""
 
     CMD: ClassVar[tuple[str, ...]] = (
         "claude",
@@ -167,7 +167,7 @@ class ClaudeCliLLM(LLMBase):
 
 
 class CodexCliLLM(LLMBase):
-    """Stage 2: ``codex exec`` under the CLI login (measured, A.7). Default ``gpt-6-luna`` at low effort,
+    """Stage 2: ``codex exec`` under the CLI login. Default ``gpt-6-luna`` at low effort,
     the cheapest model in the Codex catalog (2026-10-12)."""
 
     def __init__(self, config: BaseLlmConfig | None = None) -> None:
@@ -276,7 +276,7 @@ def make_llm(kind: str, model: str | None = None) -> LLMBase:
     raise ValueError(f"unknown llm provider {kind!r}")
 
 
-# --- chain (D12) ---------------------------------------------------------------------------------
+# --- chain ---------------------------------------------------------------------------------------
 
 
 def model_for(config: Any, name: str) -> str | None:

@@ -441,7 +441,7 @@ def prompt_hints(
         exclude_origins=notes.own_notes(harness),
     )
     # Only confident hits: on wording alone a weaker one cannot be told from an unrelated one ("was läuft heute im
-    # kino" against a turn about the viewer that runs; c32 in B.32), and noise is not context.
+    # kino" against a turn about the viewer that runs), and noise is not context.
     hits = [h for h in search.search(conn, config, query) if search.confident(h, config, terms)][:PROMPT_HITS]
     if not hits:
         return None

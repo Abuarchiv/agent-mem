@@ -1,4 +1,4 @@
-"""``setup --write`` and ``uninstall`` (docs/PLAN.md §14, I2 and I6): absolute binary path, clean removal."""
+"""``setup --write`` and ``uninstall``: absolute binary path, clean removal."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def test_claude_hooks_get_absolute_path_and_keep_foreign_hooks(homes: Path) -> N
     assert data["theme"] == "dark"
     commands = _hooks_commands(data["hooks"])
     assert f"{EXE} hook claude" in commands and "other-tool notify" in commands
-    assert "agent-mem hook claude" not in commands  # never the bare name (I2)
+    assert "agent-mem hook claude" not in commands  # never the bare name
     assert install.hook_commands("claude") == [f"{EXE} hook claude"]
 
     install.write("claude", PLUGINS, EXE)  # idempotent

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Retrieval fixture (docs/PLAN.md §8a). 40 cases: 20 answerable, 20 abstention (c26-c40 share only generic words such as test, deploy, server or version with their history). Each case has its own history (sessions of user/assistant messages, with distractor turns), a question, and either expect_any (one of these substrings must appear in the top-1 result, case-insensitive) or abstain=true (no result may be returned above the backend's threshold). Plus 10 contradiction pairs (§8d): after ingesting before and after, the top result for the question must contain a current substring and none of the obsolete ones.",
+  "description": "Retrieval fixture. 40 cases: 20 answerable, 20 abstention (c26-c40 share only generic words such as test, deploy, server or version with their history). Each case has its own history (sessions of user/assistant messages, with distractor turns), a question, and either expect_any (one of these substrings must appear in the top-1 result, case-insensitive) or abstain=true (no result may be returned above the backend's threshold). Plus 10 contradiction pairs: after ingesting before and after, the top result for the question must contain a current substring and none of the obsolete ones.",
   "cases": [
     {
       "id": "c01", "lang": "de",

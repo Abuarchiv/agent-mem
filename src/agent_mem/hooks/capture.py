@@ -273,7 +273,7 @@ def _close_turn(conn: sqlite3.Connection, config: Config, turn_id: int, outcome:
     final = "error" if outcome == "ok" and unresolved else outcome
     conn.execute("UPDATE turns SET outcome = ?, ended_at = ? WHERE id = ?", (final, ts, turn_id))
     store.index_turn(conn, turn_id)
-    # Same transaction as the close: the observer worker picks it up later (docs/PLAN.md §4.2). With the observer
+    # Same transaction as the close: the observer worker picks it up later. With the observer
     # off nothing is queued: switched on again, it would send turns captured while model calls were off.
     if not config.observe.enabled:
         return
@@ -408,7 +408,7 @@ def _learn_from_prompt(
             if prefer is not None:
                 store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
     # With a working observer the model reads the turn and writes corrections and decisions as facts;
-    # the patterns then only raise the turn's importance (B.24: regex corrections caught complaints too).
+    # the patterns then only raise the turn's importance (regex corrections caught complaints too).
     observed = _observer_active(conn, config)
     decisions = [] if observed or not typed else signals.decision_sentences(prompt)
     # A long spoken prompt is not a correction one can apply later; the turn itself stays searchable. A stated rule

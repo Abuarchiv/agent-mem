@@ -1,4 +1,4 @@
-"""Queue, bundle and provider chain: standard library only, run in CI (docs/PLAN.md §4.2, §4.3, D12)."""
+"""Queue, bundle and provider chain: standard library only, run in CI."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def test_chain_is_vendor_faithful_by_default(config: Config, monkeypatch) -> Non
     conn = db.connect(config)
     assert providers.chain(config, "claude", conn) == ["claude"]
     assert providers.chain(config, "codex", conn) == ["codex"]
-    assert providers.chain(config, "opencode", conn) == []  # raw stage unless ollama is opted in (B.20)
+    assert providers.chain(config, "opencode", conn) == []  # raw stage unless ollama is opted in
     config.observe.providers.append("ollama")
     assert providers.chain(config, "opencode", conn) == ["ollama"]
     config.observe.cross_vendor = True
@@ -268,7 +268,7 @@ def test_observer_writes_corrections_the_hook_only_marks_them(config: Config, pr
 
 
 def test_claude_reports_its_failures_on_stdout_and_they_are_classified(monkeypatch) -> None:
-    """`claude -p` prints the readable error on stdout; stderr carries only a tag (measured 2026-10-13)."""
+    """`claude -p` prints the readable error on stdout; stderr carries only a tag."""
     import sys
 
     from agent_mem.observe import providers
@@ -322,7 +322,7 @@ def test_codex_observer_runs_without_hooks_or_memories(monkeypatch) -> None:
 
 
 def test_the_extractor_sees_what_the_tools_showed_but_not_web_pages_or_edits(driver, conn, config: Config) -> None:
-    """Without tool output the observer never learns what a file or command revealed (docs/PLAN.md B.33)."""
+    """Without tool output the observer never learns what a file or command revealed."""
     from agent_mem.observe import bundle
 
     driver.prompt("s1", "where does uv keep the install source?")

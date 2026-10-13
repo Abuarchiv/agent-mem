@@ -1,12 +1,12 @@
-"""Build the message bundle for one extraction call (docs/PLAN.md §4.3 point 4).
+"""Build the message bundle for one extraction call.
 
 Content per turn: the user's prompt, what the turn's tools showed (command or file and the start of the
 output, ``observe.tool_output_chars`` each, ``observe.turn_tool_chars`` per turn), the agent's answer, and
 one compact line with the commands, files and error lines the turn touched (from the ``turns`` columns,
 already cleaned by capture), plus the final answers of subagents that ran in the turn (``SubagentStop``).
 Without the outputs the extractor never learns what a file or command revealed ("`uv tool` keeps the
-install source in `direct_url.json`"); claude-mem's observer sees every tool call (docs/PLAN.md B.33).
-Events with ``trust = 'tool_external'`` never contribute text (§6 point 2). The whole bundle is
+install source in `direct_url.json`").
+Events with ``trust = 'tool_external'`` never contribute text. The whole bundle is
 capped at ``observe.bundle_tokens`` (4 characters per token); a bundle that would exceed it is split
 at turn boundaries, a single oversized turn is truncated.
 """

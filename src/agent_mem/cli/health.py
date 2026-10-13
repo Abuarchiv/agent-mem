@@ -407,7 +407,7 @@ def _viewer_checks(config: Config, fix: bool) -> list[Check]:
 
 
 def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
-    """docs/PLAN.md §14 I5: observer extra, queue, last worker run, providers, index size."""
+    """Observer extra, queue, last worker run, providers, index size."""
     from agent_mem.cli import install
 
     if not install.extras()["observer"]:
@@ -532,7 +532,7 @@ def record_setup_health(config: Config) -> None:
 
 
 def _hook_checks(fix: bool) -> list[Check]:
-    """docs/PLAN.md §14 I2/I5: hook commands point at an existing binary and match this release."""
+    """Hook commands point at an existing binary and match this release."""
     from agent_mem.cli import install
 
     checks: list[Check] = []

@@ -59,7 +59,7 @@ The model is the CLI you already pay for, started under your login with no tools
 | Copilot CLI | Auto, efficiency tier (resolves to GPT-6-Luna) | `copilot -s --model auto --auto-tier efficiency` |
 | OpenCode, or no CLI found | none | the request is saved word for word |
 
-A request never leaves its vendor (a Claude request is not sent to OpenAI). Each uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, it tries once more with the CLI's own default. With only one CLI installed, its requests get facts and the others are saved word for word; with all three, each request goes to the CLI it came from. A usage limit or a missing login pauses facts for an hour; the request waits. Ollama can be added as a local fallback (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95 (see `docs/PLAN.md`, appendix B).
+A request never leaves its vendor (a Claude request is not sent to OpenAI). Each uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, it tries once more with the CLI's own default. With only one CLI installed, its requests get facts and the others are saved word for word; with all three, each request goes to the CLI it came from. A usage limit or a missing login pauses facts for an hour; the request waits. Ollama can be added as a local fallback (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95.
 
 ### How ranking learns (no model needed)
 
@@ -182,7 +182,7 @@ uv run pytest -m "not local"
 uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Design decisions and every measurement live in `docs/PLAN.md`.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -106,7 +106,7 @@ def test_hybrid_search_with_vectors_and_graph(driver: Driver, conn, config: Conf
     assert hits[0].label == "T1"
     assert {"fts", "vector"} <= hits[0].sources
     by_file = retriever.search("exporter.py", _pid(conn), record_shown=False)
-    assert by_file[0].label == "T1"  # the graph ties T1 to exporter.py and orders it first (B.33)
+    assert by_file[0].label == "T1"  # the graph ties T1 to exporter.py and orders it first
 
 
 def test_named_time_ranks_first_and_excludes_nothing(driver: Driver, conn, config: Config):
@@ -375,7 +375,7 @@ def test_day_words_are_no_topic(driver: Driver, conn):
 def test_an_exact_match_is_not_outvoted_by_recent_work_on_a_file_with_the_word_in_its_path(
     driver: Driver, conn, config: Config
 ):
-    """The graph used to vote like a text match with whatever touched such a file last (am2 in B.33)."""
+    """The graph used to vote like a text match with whatever touched such a file last."""
     from agent_mem.memory import store
 
     driver.prompt("s0", "seed")

@@ -1,7 +1,6 @@
 # Working in this repository
 
-Binding rules for every agent and contributor (docs/PLAN.md §13). The plan is the single source
-of design decisions; measurements go to its Appendix B and are never edited after the fact.
+Binding rules for every agent and contributor.
 
 - **R1 Boundary.** No network service except the read-only viewer (`agent-mem serve`): loopback
   only, GET only, foreign Host headers rejected (SECURITY.md). Nothing else listens on a port. Generative model calls are made only by the `observe` worker, always with `AGENT_MEM_INTERNAL=1` so the child session is never captured.

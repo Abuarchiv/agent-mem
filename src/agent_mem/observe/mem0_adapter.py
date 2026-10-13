@@ -1,15 +1,15 @@
-"""The single import point for mem0 (docs/PLAN.md §4.5, D1, D2, D8, D13).
+"""The single import point for mem0.
 
-``extract`` runs mem0's add pipeline (one LLM call, A.10) and returns the new facts;
+``extract`` runs mem0's add pipeline (one LLM call) and returns the new facts;
 ``search`` is mem0's hybrid search; ``forget`` removes a fact from Qdrant, the entity store and
 ``history.db``; ``reindex`` re-adds facts without a model call (``infer=False``).
 
-mem0 validates provider names in its pydantic configs (A.2). We register our own classes in mem0's
+mem0 validates provider names in its pydantic configs. We register our own classes in mem0's
 factories and set the provider name after validation, so no placeholder provider is ever
 instantiated (no Ollama or OpenAI client is created for Claude-only installs).
 
 Embeddings come from the project's own :mod:`agent_mem.memory.semantic` embedder so that the mem0 index and
-the SQLite vectors use identical vectors (fair comparison in §8, one model cache, E5 prefixes kept).
+the SQLite vectors use identical vectors (one model cache, E5 prefixes kept).
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ def _use_entity_model(name: str = "en_core_web_sm", path: Path | None = None) ->
     """mem0 loads ``en_core_web_sm`` for entity linking; on German facts it returns fragments ("Der", "und
     nur"). Load the configured model into mem0's loader instead. Without the model mem0 would run
     ``spacy download`` (an install into the live environment, which ends the process in a tool install), so
-    mark it as failed: entity linking is skipped, facts and search are unaffected (docs/PLAN.md B.27). The same
+    mark it as failed: entity linking is skipped, facts and search are unaffected. The same
     model lemmatizes for mem0's BM25: left unset, that loader ran ``spacy download en_core_web_sm`` itself."""
     from mem0.utils import spacy_models
 
@@ -163,7 +163,7 @@ class Mem0Adapter:
         mem0_config = MemoryConfig(
             **{
                 "llm": {
-                    "provider": "ollama",  # valid placeholder name, replaced below (A.2)
+                    "provider": "ollama",  # valid placeholder name, replaced below
                     "config": {"model": llm_model or llm_defaults[llm], "temperature": 0.0},
                 },
                 "embedder": {"provider": "ollama", "config": {"model": handle, "embedding_dims": dims}},
@@ -184,7 +184,6 @@ class Mem0Adapter:
         mem0_config.embedder.provider = EMBEDDER_PROVIDER
         self.memory = Memory(mem0_config)
 
-    # --- plan §4.5 -----------------------------------------------------------------
     def extract(
         self, messages: list[dict[str, str]], namespace: str, metadata: dict[str, Any] | None = None
     ) -> list[Fact]:

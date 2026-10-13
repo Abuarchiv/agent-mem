@@ -450,7 +450,7 @@ def test_with_the_observer_off_no_turn_waits_to_be_sent_later(config: Config, pr
 
 def test_a_usage_limit_wrapped_by_mem0_pauses_the_stage(config: Config, project: Path, monkeypatch):
     """mem0 re-raises a provider's error as ``LLMError(...) from error``. Caught as a generic error, a usage limit
-    never paused the stage: every turn spent its attempts and ended in `failed` (sandbox install, 2026-10-13)."""
+    never paused the stage: every turn spent its attempts and ended in `failed`."""
     from mem0.exceptions import LLMError
 
     from agent_mem.observe import providers, worker

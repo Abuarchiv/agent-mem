@@ -1,4 +1,4 @@
-"""Observer worker end to end with the fake provider (docs/PLAN.md §4.2 to §4.6, §9 Phase 1).
+"""Observer worker end to end with the fake provider.
 
 Needs the observer extra (mem0, qdrant) and the semantic extra (fastembed model in the cache);
 skipped otherwise. No harness binary and no network beyond a cached embedding model.
@@ -20,7 +20,7 @@ from agent_mem.hooks import hook
 if importlib.util.find_spec("mem0") is None:
     pytest.skip("observer extra not installed", allow_module_level=True)
 
-pytestmark = pytest.mark.local  # runs only by hand: loads the embedding model (R9)
+pytestmark = pytest.mark.local  # runs only by hand: loads the embedding model
 
 
 def _payload(project: Path, session: str, **fields: object) -> str:

@@ -1,4 +1,4 @@
-"""Turn queue for the observer (docs/PLAN.md §4.2). Standard library only: ``capture`` enqueues on the hook path."""
+"""Turn queue for the observer. Standard library only: ``capture`` enqueues on the hook path."""
 
 from __future__ import annotations
 

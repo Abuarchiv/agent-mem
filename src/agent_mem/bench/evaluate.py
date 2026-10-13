@@ -1,11 +1,11 @@
-"""Retrieval evaluation (docs/PLAN.md §8).
+"""Retrieval evaluation.
 
 Two data sets, two backends:
 
 * ``longmemeval``: LongMemEval-S items (``question``, ``haystack_sessions``, ``haystack_session_ids``,
   ``answer_session_ids``, ``question_type``). Reports session-level Recall@k per question type.
   Abstention items (``*_abs``) are skipped because they have no gold session. ``subset`` restricts the
-  run to the question ids listed in ``tests/fixtures/longmemeval_subset.json`` (§8: 40 questions).
+  run to the question ids listed in ``tests/fixtures/longmemeval_subset.json`` (40 questions).
   ``tests/fixtures/coding_agent_life_v1.json`` (agentmemory's coding corpus) uses the same layout plus
   ``session_dates``. Session dates (``haystack_dates`` in LongMemEval) are used as turn times and the
   ``question_date`` as "now", so "last week" means the week before the question. ``R@k`` counts a question when any gold session is in the top k (LongMemEval),
@@ -159,7 +159,7 @@ class Mem0Backend:
     ) -> None:
         from agent_mem.observe.mem0_adapter import Mem0Adapter
 
-        self.raw = llm == "none"  # E3: no extraction, mem0 hybrid search over the raw turns
+        self.raw = llm == "none"  # no extraction, mem0 hybrid search over the raw turns
         self.adapter = Mem0Adapter(
             Config(data_dir=root / "data"),
             llm="fake" if self.raw else llm,

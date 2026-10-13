@@ -37,12 +37,12 @@ CUSTOM_MODELS = {
 
 
 def _prefixes(model: str) -> tuple[str, str]:
-    """E5 models were trained with ``query:``/``passage:`` prefixes; other models get none (B.19)."""
+    """E5 models were trained with ``query:``/``passage:`` prefixes; other models get none."""
     return ("query: ", "passage: ") if "e5" in model.lower() else ("", "")
 
 
 class FastEmbedEmbedder:
-    """Sentence embeddings via fastembed (ONNX Runtime, no PyTorch). Default: MiniLM-L12-v2 (E2, B.19)."""
+    """Sentence embeddings via fastembed (ONNX Runtime, no PyTorch). Default: MiniLM-L12-v2."""
 
     def __init__(self, config: Config, *, allow_download: bool) -> None:
         # The Hub's "You are sending unauthenticated requests ... set a HF_TOKEN" read as a step left to do on a

@@ -118,7 +118,7 @@ OBSERVER_THROTTLE_SECONDS = 15
 
 
 def spawn_observer(config: Config) -> bool:
-    """Start ``agent-mem observe --drain`` detached (docs/PLAN.md §4.3). The worker exits at once if
+    """Start ``agent-mem observe --drain`` detached. The worker exits at once if
     another one holds ``observe.lock``; a marker file keeps a burst of Stop hooks from spawning more
     than one process every few seconds."""
     if not config.observe.enabled or env_flag("AGENT_MEM_NO_SPAWN"):

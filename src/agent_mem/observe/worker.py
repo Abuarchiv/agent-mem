@@ -1,9 +1,9 @@
-"""The observer worker: ``agent-mem observe`` (docs/PLAN.md §4.3 to §4.6).
+"""The observer worker: ``agent-mem observe``.
 
 Started detached by the Stop hook. Holds ``observe.lock`` for its whole run (one worker at a time,
-Qdrant opened once, D8), drains the queue in bundles, waits ``idle_seconds`` for new work and exits.
-No daemon (R1). Every model call is recorded in ``observe_calls``. A bundle that no provider can
-handle is stored raw (``kind='summary'``) so nothing is lost (§7).
+Qdrant opened once), drains the queue in bundles, waits ``idle_seconds`` for new work and exits.
+No daemon. Every model call is recorded in ``observe_calls``. A bundle that no provider can
+handle is stored raw (``kind='summary'``) so nothing is lost.
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ class Worker:
     @property
     def adapter(self) -> Mem0Adapter:
         if self._adapter is None:
-            instructions = (Path(__file__).with_name("coding_instructions.md")).read_text(encoding="utf-8")  # E8
+            instructions = (Path(__file__).with_name("coding_instructions.md")).read_text(encoding="utf-8")
             # The initial LLM is replaced per stage in process(); "claude" needs no client or server.
             self._adapter = Mem0Adapter(
                 self.config, llm="claude", llm_model=self.config.observe.claude_model, custom_instructions=instructions
@@ -346,7 +346,7 @@ class Worker:
         return True
 
     def _reindex_if_embedder_changed(self) -> None:
-        """The mem0 index holds vectors of one embedder; after an upgrade it is rebuilt from SQLite (I7)."""
+        """The mem0 index holds vectors of one embedder; after an upgrade it is rebuilt from SQLite."""
         model = self.config.semantic.model
         previous = db.get_meta(self.conn, "observe.embedder")
         if previous == model:
@@ -526,7 +526,7 @@ def _reindex(config: Config, conn: sqlite3.Connection) -> int:
 
 
 def reindex(config: Config) -> dict[str, int]:
-    """Rebuild Qdrant, the entity store and history.db from the valid facts in SQLite (docs/PLAN.md §5).
+    """Rebuild Qdrant, the entity store and history.db from the valid facts in SQLite.
 
     mem0 assigns new ids, so the mirror's ``dedupe_key`` is rewritten to the new id. No model call.
     """

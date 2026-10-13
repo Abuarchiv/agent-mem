@@ -1,7 +1,7 @@
-"""``agent-mem setup <harness> --write`` and ``agent-mem uninstall <harness>`` (docs/PLAN.md §14, I2 to I6).
+"""``agent-mem setup <harness> --write`` and ``agent-mem uninstall <harness>``.
 
 Hook files get the **absolute path** of the ``agent-mem`` binary: sessions started from an IDE or a GUI
-often have a short ``PATH`` and would not find the bare name (I2). Everything written here is removed
+often have a short ``PATH`` and would not find the bare name. Everything written here is removed
 again by :func:`remove`; data stays. Standard library only.
 """
 
@@ -202,7 +202,7 @@ def write(harness: str, plugins: Path, exe: str | None = None) -> list[Path]:
 
 
 def remove(harness: str) -> list[Path]:
-    """Undo :func:`write`. Data, config and models stay (I6)."""
+    """Undo :func:`write`. Data, config and models stay."""
     touched: list[Path] = []
     if harness == "claude":
         settings = claude_home() / "settings.json"
@@ -296,11 +296,11 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
         )
 
 
-# --- detection (I4) --------------------------------------------------------------------------------
+# --- detection -------------------------------------------------------------------------------------
 
 
 def hook_commands(harness: str) -> list[str]:
-    """Commands our hooks would run for this harness as currently installed (for ``doctor``, I5)."""
+    """Commands our hooks would run for this harness as currently installed (for ``doctor``)."""
     found: list[str] = []
     if harness == "claude":
         groups = _read_json(claude_home() / "settings.json").get("hooks", {})

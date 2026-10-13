@@ -1,4 +1,4 @@
-"""Phase 0, §8c / E8: extract facts from 20 real turns with mem0 (default prompt vs coding prompt).
+"""Extract facts from 20 real turns with mem0 (default prompt vs coding prompt).
 
 Reads the newest Claude Code transcripts on this machine, builds bundles like observe/bundle.py will
 (user text, assistant text, tool names and arguments; no tool output), caps them at ~6k tokens, and

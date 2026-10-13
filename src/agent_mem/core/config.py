@@ -56,7 +56,7 @@ class Retrieval:
     max_per_session: int = 3
     rrf_k: int = 60
     current_project_boost: float = 1.2
-    # Cosine similarity floor for vector candidates, calibrated per embedder (docs/PLAN.md B.23):
+    # Cosine similarity floor for vector candidates, calibrated per embedder:
     # MiniLM-L12-v2 0.3 (fixture abstention 0.6, LongMemEval R@5 0.925); multilingual-e5-small needs 0.78.
     min_vector_score: float = 0.3
 
@@ -88,23 +88,23 @@ class Rules:
 @dataclass
 class Semantic:
     enabled: bool = True
-    # E2 (docs/PLAN.md B.19): same Recall@5 as embeddinggemma at a fifth of the size; e5-small needs a custom registration.
+    # Same Recall@5 as embeddinggemma at a fifth of the size; e5-small needs a custom registration.
     model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     batch_size: int = 32
-    # A new fact this close to an older one of the same project replaces it (B.32: on real facts every pair
+    # A new fact this close to an older one of the same project replaces it (on real facts every pair
     # from 0.90 up was the same statement, reworded or updated). 1.0 turns it off.
     duplicate_min_cosine: float = 0.90
 
 
 @dataclass
 class Observe:
-    """Background observer (docs/PLAN.md §4.3 to §4.6)."""
+    """Background observer."""
 
     enabled: bool = True
     # Provider chain in order; a stage is skipped when its binary is missing, paused or over budget.
-    # "ollama" (local model) is opt-in: add it here to use it as a fallback stage (B.20).
+    # "ollama" (local model) is opt-in: add it here to use it as a fallback stage.
     providers: list[str] = field(default_factory=lambda: ["claude", "codex", "copilot"])
-    # Default: a turn only goes to the vendor that already saw it, then raw (D12).
+    # Default: a turn only goes to the vendor that already saw it, then raw.
     cross_vendor: bool = False
     claude_model: str = "haiku"
     # Cheapest per CLI (2026-10-12); a plan without the model falls back to the CLI's default.
@@ -126,7 +126,7 @@ class Observe:
 
     def stage_for(self, harness: str) -> tuple[str, str] | None:
         """The stage and model turns from ``harness`` go to first, as in ``observe.providers.chain`` (without
-        pauses, which live in the database). Each harness CLI is its own vendor (D12)."""
+        pauses, which live in the database). Each harness CLI is its own vendor."""
         import shutil
 
         if not self.enabled:

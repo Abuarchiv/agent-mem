@@ -102,7 +102,7 @@ def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
             conn.execute("VACUUM")
         with db.transaction(conn):
             db.set_meta(conn, "vacuumed_at", timeutil.iso())
-    # Quarantined events hold full payloads (privacy, R4); kept as long as payloads are, for `doctor` to show.
+    # Quarantined events hold full payloads (privacy); kept as long as payloads are, for `doctor` to show.
     quarantined = 0
     if config.quarantine_dir.exists():
         horizon = time.time() - config.retention.payload_days * 86400
@@ -226,7 +226,7 @@ def _semantic(conn: sqlite3.Connection, config: Config, allow_download: bool, st
             # The model is present but failed to load: a real problem worth reporting.
             db.record_health(conn, "semantic", "embedding model failed to load (lexical search only)")
     if embedder is not None:
-        # A new embedder (upgrade, I7) re-embeds everything in one run; vectors are upserted per owner.
+        # A new embedder (upgrade) re-embeds everything in one run; vectors are upserted per owner.
         limit = 100_000 if previous not in (None, "unavailable", embedder.model) else 512
         stats["embedded"] = semantic.embed_pending(conn, embedder, limit=limit)
         stats["duplicates_retired"] = semantic.merge_duplicates(conn, config, embedder.model)

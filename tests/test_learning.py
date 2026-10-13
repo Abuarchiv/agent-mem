@@ -236,7 +236,7 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
     hits = search.search(conn, config, search.Query(text="viewer launch agent restarts", project_id=parent_id))
     assert hits and "launch agent" in hits[0].text
     nested_id = conn.execute("SELECT id FROM projects WHERE name = 'agent-mem'").fetchone()[0]
-    # What a session in the parent folder learned stays filed there; the nested project looks there too (B.33),
+    # What a session in the parent folder learned stays filed there; the nested project looks there too,
     # a sibling project and the home folder stay out.
     sibling = parent / "other"
     sibling.mkdir()
@@ -252,7 +252,7 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
 
 
 def test_a_session_in_the_home_folder_does_not_see_the_projects_below_it(conn):
-    """A session in ~ searched every project below it, ~/Company with client data too (audit 2026-10-13)."""
+    """A session in ~ searched every project below it, ~/Company with client data too."""
     home = os.path.expanduser("~")
     for project_id, root in (("home", home), ("client", os.path.join(home, "Company", "client"))):
         conn.execute(

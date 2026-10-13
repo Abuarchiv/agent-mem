@@ -1,6 +1,6 @@
 # Architecture
 
-The authoritative design document is `docs/PLAN.md` (decisions D1 to D13, measurements in appendix B). This file is the short version.
+This file describes the design in short.
 
 ## Processes
 
@@ -102,10 +102,10 @@ usefulness = (used + 1) / (shown + 2)
 order = score × (0.5 + 0.5·coverage) × (1 + 0.3·tie)
 ```
 
-`score` is what the abstention gate compares; `order` only sorts. `coverage` is the share of the question's words in a hit (a turn's request and the start of its answer, a memory's first 800 characters). `tie` (0 to 1) is how strongly the graph ties a hit to the files, commands and packages the question names: seeds by exact name 1.0, by a word inside a path 0.3. The graph reorders what text and vectors found and adds no candidates of its own; as a separate list in the fusion it outvoted exact matches with whatever touched such a file last (`docs/PLAN.md` B.33). A project's search includes the projects nested in it and the projects around it (`~/Lernen` around `~/Lernen/agent-mem`), never the home folder.
+`score` is what the abstention gate compares; `order` only sorts. `coverage` is the share of the question's words in a hit (a turn's request and the start of its answer, a memory's first 800 characters). `tie` (0 to 1) is how strongly the graph ties a hit to the files, commands and packages the question names: seeds by exact name 1.0, by a word inside a path 0.3. The graph reorders what text and vectors found and adds no candidates of its own; as a separate list in the fusion it outvoted exact matches with whatever touched such a file last. A project's search includes the projects nested in it and the projects around it (`~/Lernen` around `~/Lernen/agent-mem`), never the home folder.
 
-Automatic injection (prompt hook) is lexical and also requires a minimum score and term coverage; question words and filler verbs are not terms, hyphenated words are searched as their parts, and one inflection ending is dropped. Vector candidates (MCP server, CLI) count only above `retrieval.min_vector_score` (0.3 for MiniLM, calibrated in `docs/PLAN.md` B.23). `mem_search` applies the same gate; a hit with vector support needs a third of the content words. Without a confident hit it lists three weak candidates under "No confident match". `agent-mem eval --fixture` reports both paths (`hit@1`, `abstention` and `injected_*`, B.28).
+Automatic injection (prompt hook) is lexical and also requires a minimum score and term coverage; question words and filler verbs are not terms, hyphenated words are searched as their parts, and one inflection ending is dropped. Vector candidates (MCP server, CLI) count only above `retrieval.min_vector_score` (0.3 for MiniLM, calibrated on the retrieval fixture). `mem_search` applies the same gate; a hit with vector support needs a third of the content words. Without a confident hit it lists three weak candidates under "No confident match". `agent-mem eval --fixture` reports both paths (`hit@1`, `abstention` and `injected_*`).
 
 ## Why mem0 search is not the retrieval path
 
-Measured in `docs/PLAN.md` B.9 and B.23: mem0's hybrid search always returns results and scores unrelated hits above true ones, so it cannot abstain (fixture abstention 0.0 against 0.6 for the SQLite path at equal hit@1). Qdrant therefore serves deduplication and contradiction candidates; the hook and the MCP server search SQLite.
+Measured: mem0's hybrid search always returns results and scores unrelated hits above true ones, so it cannot abstain (fixture abstention 0.0 against 0.6 for the SQLite path at equal hit@1). Qdrant therefore serves deduplication and contradiction candidates; the hook and the MCP server search SQLite.
