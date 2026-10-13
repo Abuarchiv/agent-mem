@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from agent_mem.core.config import Config
-from agent_mem.memory import notes, search
+from agent_mem.memory import notes, search, store
 from tests.conftest import Driver
 
 
@@ -120,3 +120,19 @@ def test_notes_can_be_switched_off(conn, config: Config, project: Path):
     _claude_note(project, "worker-drain.md", NOTE)
     config.native_notes = False
     assert notes.ingest(conn, config)["stored"] == 0
+
+
+def test_a_note_the_review_retired_stays_retired(conn, config: Config, project: Path):
+    """A duplicate merge or the daily review may retire a note in favour of another memory; reviving it on every
+    indexer run would undo that once a minute, and the merge would retire it again."""
+    _claude_note(project, "worker-drain.md", NOTE)
+    notes.ingest(conn, config)
+    note = conn.execute("SELECT id, project_id FROM memories WHERE kind = 'native_note'").fetchone()
+    newer = conn.execute(
+        "INSERT INTO memories(project_id, kind, title, body, source, trust, valid_from, created_at) "
+        "VALUES (?, 'fact', 'The observer drains its queue', 'x', 'agent', 'observer', 't', 't')",
+        (note[1],),
+    ).lastrowid
+    store.supersede(conn, note[0], newer)
+    assert notes.ingest(conn, config)["stored"] == 0
+    assert _valid(conn) == []

@@ -129,13 +129,15 @@ def ingest(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
         return counts
     # Dedupe key note:<path>:<content>:<folder>; the folder says which scan can tell that a note was deleted (another
     # CLAUDE_CONFIG_DIR is another folder). Keys from before the folder part get it on their next scan.
-    stored = {
-        ":".join(str(key).split(":")[:3]): (int(memory_id), str(key), origin, invalid is None)
-        for memory_id, key, origin, invalid in conn.execute(
-            "SELECT id, dedupe_key, origin, invalid_at FROM memories WHERE kind = 'native_note' "
-            "AND dedupe_key LIKE 'note:%'"
-        )
-    }
+    rows = conn.execute(
+        "SELECT id, dedupe_key, origin, invalid_at, superseded_by FROM memories WHERE kind = 'native_note' "
+        "AND dedupe_key LIKE 'note:%'"
+    ).fetchall()
+    stored = {":".join(str(r[1]).split(":")[:3]): (int(r[0]), str(r[1]), r[2], r[3] is None) for r in rows}
+    source_of = {int(r[0]): str(r[1]).split(":")[1] for r in rows}
+    # Retired here, not by the review or a duplicate merge: deleted (nothing replaces it) or an older version of
+    # the same file. Only those come back when the file does; the others stay retired while the text is the same.
+    mine = {int(r[0]) for r in rows if r[4] is None or source_of.get(int(r[4])) == source_of[int(r[0])]}
     fresh, rekeyed, revived, scanned, seen = [], [], [], set(), set()
     for origin, found in (
         ("claude-auto-memory", claude_notes(_home("CLAUDE_CONFIG_DIR", ".claude"), scanned)),
@@ -152,7 +154,7 @@ def ingest(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
             memory_id, key, _, valid = stored[dedupe]
             if key != f"{dedupe}:{folder}":
                 rekeyed.append((f"{dedupe}:{folder}", memory_id))
-            if not valid:  # restored after a deletion, or changed back to an earlier version
+            if not valid and memory_id in mine:  # restored after a deletion, or changed back to an earlier version
                 revived.append((memory_id, source))
     gone = [
         memory_id
