@@ -280,3 +280,20 @@ def test_the_test_command_is_stored_as_it_can_be_run_again(driver: Driver, conn)
     driver.stop("s1", "Tests pass.")
     rows = [r[0] for r in conn.execute("SELECT value FROM profile WHERE key = 'cmd:test'")]
     assert rows == ["uv run --with pytest python3 -m pytest -q"]
+
+
+def test_the_briefing_shows_an_old_recorded_command_as_it_can_be_run(driver: Driver, conn):
+    """Rows recorded before capture cleaned them ("… pytest -q 2>&1 | tail -30; git status --short") stayed in the
+    session-start briefing until a cleanup ran."""
+    from agent_mem.hooks import inject
+
+    driver.prompt("s1", "hi")
+    project_id = conn.execute("SELECT id FROM projects").fetchone()[0]
+    conn.execute(
+        "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, 'cmd:test', ?, 5, '2026-10-13')",
+        (project_id, "uv run --with pytest python3 -m pytest -q 2>&1 | tail -30; git status --short"),
+    )
+    assert (
+        inject._profile_line(conn, project_id)
+        == "- Commands that worked here: test: `uv run --with pytest python3 -m pytest -q`"
+    )

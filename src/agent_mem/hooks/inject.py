@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-from agent_mem.core import spool, timeutil
+from agent_mem.core import signals, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.signals import command_kind, first_line, looks_like_error, request_text
 from agent_mem.memory import learn, notes, search
@@ -123,14 +123,14 @@ def _health_lines(conn: sqlite3.Connection, config: Config) -> list[str]:
 
 def _profile_line(conn: sqlite3.Connection, project_id: str) -> str | None:
     rows = conn.execute(
-        # Only reusable one-liners; scripts and long chains were recorded before capture filtered them.
-        "SELECT key, value FROM profile WHERE project_id = ? AND key LIKE 'cmd:%' "
-        "AND instr(value, char(10)) = 0 AND value NOT LIKE '%[truncated]%' AND length(value) <= 100 ORDER BY count DESC",
-        (project_id,),
+        "SELECT key, value FROM profile WHERE project_id = ? AND key LIKE 'cmd:%' ORDER BY count DESC", (project_id,)
     ).fetchall()
     best: dict[str, str] = {}
     for row in rows:
-        best.setdefault(row["key"][4:], row["value"])
+        # Rows recorded before capture cleaned them hold whole chains ("… | tail -30; git status"): shown cleaned.
+        command = signals.reusable_command(row["value"], row["key"][4:])
+        if command is not None:
+            best.setdefault(row["key"][4:], command)
     if not best:
         return None
     parts = [f"{kind}: `{value}`" for kind, value in best.items()]
