@@ -397,3 +397,16 @@ def test_copilot_shows_the_panel_as_progress_lines(config: Config, project: Path
         "type": "progress",
         "message": "agent-mem session saved · 1 request · 0 files · facts are added in the background",
     }
+
+
+def test_a_lone_surrogate_in_a_payload_is_saved_not_lost(config: Config, project: Path):
+    """JSON may carry `\\ud800` (a binary file shown by `cat`); the event raised UnicodeEncodeError in the database
+    and in the spool and was lost without a trace."""
+    tool = {"hook_event_name": "PostToolUse", "session_id": "s", "cwd": str(project), "tool_name": "Bash",
+            "tool_use_id": "b", "tool_input": {"command": "cat bin.dat"}, "tool_response": {"stdout": "a\ud800b", "stderr": ""}}  # fmt: skip
+    hook.run("claude", None, _prompt_payload(project, "s", "show the file \udc00"), config)
+    hook.run("claude", None, json.dumps(tool), config)
+    conn = db.connect(config)
+    assert conn.execute("SELECT prompt FROM turns").fetchone()[0] == "show the file �"
+    assert json.loads(conn.execute("SELECT payload FROM events WHERE kind = 'tool'").fetchone()[0])["output"] == "a�b"
+    conn.close()
