@@ -5,6 +5,7 @@ and temporal query parsing (dateparser). Only used by the MCP server, the indexe
 from __future__ import annotations
 
 import contextlib
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -44,6 +45,9 @@ class FastEmbedEmbedder:
     """Sentence embeddings via fastembed (ONNX Runtime, no PyTorch). Default: MiniLM-L12-v2 (E2, B.19)."""
 
     def __init__(self, config: Config, *, allow_download: bool) -> None:
+        # The Hub's "You are sending unauthenticated requests ... set a HF_TOKEN" read as a step left to do on a
+        # fresh install; the public model needs no token. Errors still show.
+        logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
         from fastembed import TextEmbedding  # lazy: optional dependency
 
         self.model = config.semantic.model
