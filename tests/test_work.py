@@ -153,3 +153,39 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     injected = _injected(conn)
     assert (injected["blocks"], injected["tokens"], injected["work"]) == (3, 400, 10_000)
     assert injected["saved_percent"] == 96  # 9,600 of 10,000
+
+
+def test_a_growing_transcript_is_read_from_where_the_open_turn_begins(conn) -> None:
+    """A 220 MB Claude Code session took 2.1 s to read, and the indexer read it again after every turn."""
+    now = "2026-10-13T11:"
+    turns = _session(conn, "claude", "s3", [(f"{now}00:00.000Z", f"{now}05:00.000Z"), (f"{now}06:00.000Z", None)])
+    conn.execute("UPDATE sessions SET last_event_at = ?", (db.timeutil.iso(),))
+    path = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-tmp-p" / "s3.jsonl"
+    _lines(path, [_assistant(f"{now}01:00.000Z", "a", 100, 0), _assistant(f"{now}06:30.000Z", "b", 7, 0)])
+    assert work.measure(conn) == 1  # the second turn is still open
+
+    read: list[int] = []
+    original = work._claude_usage
+
+    def spy(file: Path, offset: int = 0):
+        read.append(offset)
+        return original(file, offset)
+
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_assistant(f"{now}07:00.000Z", "c", 3, 0)) + "\n")
+    conn.execute("UPDATE turns SET ended_at = ? WHERE id = ?", (f"{now}09:00.000Z", turns[1]))
+    work._claude_usage = spy  # type: ignore[assignment]
+    try:
+        assert work.measure(conn) == 1
+    finally:
+        work._claude_usage = original  # type: ignore[assignment]
+    assert read and read[0] > 0  # resumed, not from the start
+    assert dict(conn.execute("SELECT id, work_tokens FROM turns").fetchall()) == {turns[0]: 100, turns[1]: 10}
+
+    _lines(path, [_assistant(f"{now}20:00.000Z", "z", 1, 0)])  # rewritten shorter: start over
+    conn.execute(
+        "INSERT INTO turns(session_id, project_id, started_at, ended_at, prompt) VALUES ('claude:s3', 'p', ?, ?, 'x')",
+        (f"{now}19:00.000Z", f"{now}21:00.000Z"),
+    )
+    assert work.measure(conn) == 1
+    assert conn.execute("SELECT work_tokens FROM turns ORDER BY id DESC LIMIT 1").fetchone()[0] == 1

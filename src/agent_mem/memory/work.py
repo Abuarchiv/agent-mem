@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 
@@ -47,59 +48,84 @@ def _codex_files(native_id: str, started_at: str) -> list[Path]:
     return found[:1]
 
 
-def _claude_usage(path: Path) -> list[tuple[str, int]]:
-    """(timestamp, fresh tokens) per assistant message; a message streamed over several lines counts once."""
-    calls: dict[str, tuple[str, int]] = {}
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if '"usage"' not in line or '"assistant"' not in line:
-                continue
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            message = entry.get("message") if isinstance(entry, dict) else None
-            usage = message.get("usage") if isinstance(message, dict) else None
-            if not isinstance(message, dict) or not isinstance(usage, dict) or entry.get("type") != "assistant":
-                continue
-            if not entry.get("timestamp"):
-                continue
-            fresh = sum(
-                int(usage.get(key) or 0) for key in ("input_tokens", "cache_creation_input_tokens", "output_tokens")
-            )
-            calls[str(message.get("id") or entry.get("uuid"))] = (str(entry["timestamp"]), fresh)
-    return list(calls.values())
+Call = tuple[str, int, int]  # (timestamp, fresh tokens, byte offset of its line)
 
 
-def _codex_usage(path: Path) -> list[tuple[str, int]]:
-    """(timestamp, fresh tokens) per model call; Codex repeats an event when only its rate limits change."""
-    calls: list[tuple[str, int]] = []
+def _lines(path: Path, offset: int) -> Iterator[tuple[int, int, str]]:
+    """(offset, offset after it, text) of each complete line from ``offset``; a transcript only grows, so a file
+    shorter than the offset was replaced and is read from the start. A line still being written is left for later."""
+    with path.open("rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        fh.seek(offset if offset <= fh.tell() else 0)
+        position = fh.tell()
+        for raw in iter(fh.readline, b""):
+            if not raw.endswith(b"\n"):
+                return
+            yield position, position + len(raw), raw.decode("utf-8", errors="replace")
+            position += len(raw)
+
+
+def _claude_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
+    """Fresh tokens per assistant message (a message streamed over several lines counts once), and where the
+    complete lines end."""
+    calls: dict[str, Call] = {}
+    end = offset
+    for position, after, line in _lines(path, offset):
+        end = after
+        if '"usage"' not in line or '"assistant"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        message = entry.get("message") if isinstance(entry, dict) else None
+        usage = message.get("usage") if isinstance(message, dict) else None
+        if not isinstance(message, dict) or not isinstance(usage, dict) or entry.get("type") != "assistant":
+            continue
+        if not entry.get("timestamp"):
+            continue
+        fresh = sum(
+            int(usage.get(key) or 0) for key in ("input_tokens", "cache_creation_input_tokens", "output_tokens")
+        )
+        key = str(message.get("id") or entry.get("uuid"))
+        calls[key] = (str(entry["timestamp"]), fresh, calls[key][2] if key in calls else position)
+    return list(calls.values()), end
+
+
+def _codex_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
+    """Fresh tokens per model call (Codex repeats an event when only its rate limits change), and where the complete
+    lines end."""
+    calls: list[Call] = []
     total = -1
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if '"token_count"' not in line:
-                continue
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            payload = entry.get("payload") if isinstance(entry, dict) else None
-            info = payload.get("info") if isinstance(payload, dict) else None
-            if not isinstance(info, dict) or not entry.get("timestamp"):
-                continue
-            running = int((info.get("total_token_usage") or {}).get("total_tokens") or 0)
-            last = info.get("last_token_usage") or {}
-            if running <= total or not isinstance(last, dict):
-                continue
-            total = running
-            fresh = int(last.get("input_tokens") or 0) - int(last.get("cached_input_tokens") or 0)
-            calls.append((str(entry["timestamp"]), max(fresh, 0) + int(last.get("output_tokens") or 0)))
-    return calls
+    end = offset
+    for position, after, line in _lines(path, offset):
+        end = after
+        if '"token_count"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        info = payload.get("info") if isinstance(payload, dict) else None
+        if not isinstance(info, dict) or not entry.get("timestamp"):
+            continue
+        running = int((info.get("total_token_usage") or {}).get("total_tokens") or 0)
+        last = info.get("last_token_usage") or {}
+        if running <= total or not isinstance(last, dict):
+            continue
+        total = running
+        fresh = int(last.get("input_tokens") or 0) - int(last.get("cached_input_tokens") or 0)
+        calls.append((str(entry["timestamp"]), max(fresh, 0) + int(last.get("output_tokens") or 0), position))
+    return calls, end
 
 
 def measure(conn: sqlite3.Connection) -> int:
     """Fill ``turns.work_tokens`` for closed turns of Claude Code and Codex sessions whose transcript exists.
-    A turn without a model call in its window gets 0 (measured, nothing spent). Returns the turns measured."""
+    A turn without a model call in its window gets 0 (measured, nothing spent). Returns the turns measured.
+
+    Each file is read from where the earliest turn still open began (``meta work.offset:<path>``): a 220 MB session
+    took 2.1 s to read, and the indexer read it again after every turn."""
     since = timeutil.iso(timeutil.now() - timedelta(days=LOOKBACK_DAYS))
     sessions = conn.execute(
         "SELECT DISTINCT s.id, s.harness, s.native_id, s.started_at FROM turns t JOIN sessions s ON s.id = t.session_id "
@@ -114,23 +140,32 @@ def measure(conn: sqlite3.Connection) -> int:
             continue
         read = _claude_usage if harness == "claude" else _codex_usage
         try:
-            calls = [call for path in files for call in read(path)]
+            per_file = {path: read(path, int(db.get_meta(conn, f"work.offset:{path}") or 0)) for path in files}
         except OSError:
             continue
+        calls = [call for found, _ in per_file.values() for call in found]
         turns = conn.execute(
             "SELECT id, started_at, ended_at, work_tokens FROM turns WHERE session_id = ? ORDER BY started_at, id",
             (session_id,),
         ).fetchall()
+        still_open: list[str] = []
         with db.transaction(conn):
             for index, (turn_id, start, end, done) in enumerate(turns):
-                if done is not None or end is None:
+                if done is not None:
+                    continue
+                if end is None:
+                    still_open.append(start)
                     continue
                 # A turn closed late (stale, or by the next prompt) must not take the next turn's calls.
                 if index + 1 < len(turns):
                     end = min(end, turns[index + 1][1])
-                spent = sum(tokens for ts, tokens in calls if start <= ts <= end)
+                spent = sum(tokens for ts, tokens, _ in calls if start <= ts <= end)
                 conn.execute("UPDATE turns SET work_tokens = ? WHERE id = ?", (spent, turn_id))
                 measured += 1
+            for path, (found, end) in per_file.items():
+                # Resume at the first call an open turn may own; with none, after the last complete line read.
+                needed = [position for ts, _, position in found if still_open and ts >= min(still_open)]
+                db.set_meta(conn, f"work.offset:{path}", str(min(needed) if needed else end))
     return measured
 
 
