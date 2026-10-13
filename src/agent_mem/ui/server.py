@@ -250,6 +250,62 @@ def _quiet(*argv: str) -> bool:
         return False
 
 
+def _launchd_plist(target: Path, argv: list[str], data_dir: str, path: str) -> str:
+    return plistlib.dumps(
+        {
+            "Label": LABEL,
+            # Through sh: once `uv tool uninstall` removed the interpreter, the item deletes itself instead of
+            # failing every ten seconds for good.
+            "ProgramArguments": [
+                "/bin/sh",
+                "-c",
+                f'[ -x "$1" ] && exec "$@"; rm -f {shlex.quote(str(target))}; '
+                f"launchctl bootout gui/$(id -u)/{LABEL}; exit 0",
+                "agent-mem-viewer",
+                *argv,
+            ],
+            "EnvironmentVariables": {"AGENT_MEM_DATA_DIR": data_dir, "AGENT_MEM_INTERNAL": "1", "PATH": path},
+            "RunAtLoad": True,
+            # Restart after a crash, not after a clean exit (another viewer already answers).
+            "KeepAlive": {"SuccessfulExit": False},
+            "ThrottleInterval": 10,
+            "ProcessType": "Background",
+        }
+    ).decode("utf-8")
+
+
+def _windows_startup(argv: list[str], data_dir: str) -> str:
+    quoted = " ".join(f'"{part}"' for part in argv)
+    return (
+        f'@echo off\r\nset "AGENT_MEM_DATA_DIR={data_dir}"\r\nset AGENT_MEM_INTERNAL=1\r\n'
+        # Uninstalled: remove this file instead of showing an error at every login.
+        f'if exist "{argv[0]}" (start "" {quoted}) else (del "%~f0")\r\n'
+    )
+
+
+def _systemd_unit(argv: list[str], data_dir: str, path: str) -> str:
+    quoted = " ".join('"' + part.replace("\\", "\\\\").replace('"', '\\"') + '"' for part in argv)
+    return (
+        # Uninstalled: the unit is skipped instead of failing and restarting.
+        f"[Unit]\nDescription=agent-mem viewer on 127.0.0.1\nConditionPathExists={argv[0]}\n\n[Service]\n"
+        f'Environment="AGENT_MEM_DATA_DIR={data_dir}" AGENT_MEM_INTERNAL=1 "PATH={path}"\nExecStart={quoted}\n'
+        "Restart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n"
+    )
+
+
+def _start_login_item(target: Path) -> bool:
+    """Hand the written item to the service manager now. Windows has none; its Startup folder runs at login only."""
+    if sys.platform == "darwin":
+        domain = f"gui/{os.getuid()}"
+        _quiet("launchctl", "bootout", f"{domain}/{LABEL}")
+        return _quiet("launchctl", "bootstrap", domain, str(target))
+    if sys.platform == "win32":
+        return False
+    return _quiet("systemctl", "--user", "daemon-reload") and _quiet(
+        "systemctl", "--user", "enable", "--now", "agent-mem-viewer.service"
+    )
+
+
 def install_autostart(config: Config) -> str:
     """Register the viewer as a login item and start it now. Returns one line for the user."""
     target = autostart_path()
@@ -260,57 +316,16 @@ def install_autostart(config: Config) -> str:
     # Login items start with a bare PATH; the health page looks up claude, codex and copilot on it.
     path = os.environ.get("PATH", "")
     if sys.platform == "darwin":
-        content = plistlib.dumps(
-            {
-                "Label": LABEL,
-                # Through sh: once `uv tool uninstall` removed the interpreter, the item deletes itself instead of
-                # failing every ten seconds for good.
-                "ProgramArguments": [
-                    "/bin/sh",
-                    "-c",
-                    f'[ -x "$1" ] && exec "$@"; rm -f {shlex.quote(str(target))}; '
-                    f"launchctl bootout gui/$(id -u)/{LABEL}; exit 0",
-                    "agent-mem-viewer",
-                    *argv,
-                ],
-                "EnvironmentVariables": {"AGENT_MEM_DATA_DIR": data_dir, "AGENT_MEM_INTERNAL": "1", "PATH": path},
-                "RunAtLoad": True,
-                # Restart after a crash, not after a clean exit (another viewer already answers).
-                "KeepAlive": {"SuccessfulExit": False},
-                "ThrottleInterval": 10,
-                "ProcessType": "Background",
-            }
-        ).decode("utf-8")
+        content = _launchd_plist(target, argv, data_dir, path)
     elif sys.platform == "win32":
-        quoted = " ".join(f'"{part}"' for part in argv)
-        content = (
-            f'@echo off\r\nset "AGENT_MEM_DATA_DIR={data_dir}"\r\nset AGENT_MEM_INTERNAL=1\r\n'
-            # Uninstalled: remove this file instead of showing an error at every login.
-            f'if exist "{argv[0]}" (start "" {quoted}) else (del "%~f0")\r\n'
-        )
+        content = _windows_startup(argv, data_dir)
     else:
-        quoted = " ".join('"' + part.replace("\\", "\\\\").replace('"', '\\"') + '"' for part in argv)
-        content = (
-            # Uninstalled: the unit is skipped instead of failing and restarting.
-            f"[Unit]\nDescription=agent-mem viewer on 127.0.0.1\nConditionPathExists={argv[0]}\n\n[Service]\n"
-            f'Environment="AGENT_MEM_DATA_DIR={data_dir}" AGENT_MEM_INTERNAL=1 "PATH={path}"\nExecStart={quoted}\n'
-            "Restart=on-failure\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n"
-        )
+        content = _systemd_unit(argv, data_dir, path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8", newline="")
     if env_flag("AGENT_MEM_NO_SPAWN"):
         return f"viewer: login item written to {target} (not started: AGENT_MEM_NO_SPAWN)."
-    if sys.platform == "darwin":
-        domain = f"gui/{os.getuid()}"
-        _quiet("launchctl", "bootout", f"{domain}/{LABEL}")
-        started = _quiet("launchctl", "bootstrap", domain, str(target))
-    elif sys.platform == "win32":
-        started = False
-    else:
-        started = _quiet("systemctl", "--user", "daemon-reload") and _quiet(
-            "systemctl", "--user", "enable", "--now", "agent-mem-viewer.service"
-        )
-    if not started and not running(config):
+    if not _start_login_item(target) and not running(config):
         from agent_mem.hooks.hook import spawn_viewer
 
         spawn_viewer(config, force=True)

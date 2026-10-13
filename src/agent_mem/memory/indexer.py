@@ -173,10 +173,7 @@ def _mark_guards(conn: sqlite3.Connection, config: Config) -> None:
 
 def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, allow_download: bool) -> dict[str, Any]:
     stats: dict[str, Any] = {}
-    applied, quarantined = spool.drain(
-        config.spool_dir, config.quarantine_dir, lambda record: _apply_record(conn, config, record)
-    )
-    stats["spool_applied"], stats["spool_quarantined"] = applied, quarantined
+    stats["spool_applied"], stats["spool_quarantined"] = _drain_spool(conn, config)
     stats["stale_turns_closed"] = capture.close_stale_turns(conn, config)
     stats["work_measured"] = work.measure(conn)
     stats["native_notes"] = notes.ingest(conn, config)
@@ -184,38 +181,9 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         stats["retired_unindexed"] = store.drop_retired_keys(conn)
     _mark_guards(conn, config)
 
-    embedder = None
-    if config.semantic.enabled:
-        from agent_mem.memory import semantic
-
-        embedder = semantic.load_embedder(config, allow_download=allow_download)
-        previous = db.get_meta(conn, "semantic")
-        with db.transaction(conn):
-            db.set_meta(conn, "semantic", embedder.model if embedder else "unavailable")
-            if embedder is not None:
-                db.record_health(conn, "semantic")
-            elif semantic.model_cached(config):
-                # The model is present but failed to load: a real problem worth reporting.
-                db.record_health(conn, "semantic", "embedding model failed to load (lexical search only)")
-        if embedder is not None:
-            # A new embedder (upgrade, I7) re-embeds everything in one run; vectors are upserted per owner.
-            limit = 100_000 if previous not in (None, "unavailable", embedder.model) else 512
-            stats["embedded"] = semantic.embed_pending(conn, embedder, limit=limit)
-            stats["duplicates_retired"] = semantic.merge_duplicates(conn, config, embedder.model)
-
+    embedder = _semantic(conn, config, allow_download, stats)
     if force_consolidate or consolidate.due(conn, config):
-        since = db.get_meta(conn, "consolidated_at")
-        linker: Callable[[sqlite3.Connection], int] | None = None
-        if embedder is not None:
-            model = embedder.model
-
-            def link(c: sqlite3.Connection) -> int:
-                return consolidate.link_neighbours(c, model, since)
-
-            linker = link
-
-        stats["consolidation"] = consolidate.run(conn, config, linker)
-
+        stats["consolidation"] = consolidate.run(conn, config, _neighbour_linker(conn, embedder))
     stats["retention"] = retention(conn, config)
 
     # Events spooled while this run worked (embeddings, consolidation) would wait for the next run, and
@@ -223,21 +191,58 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     for _ in range(5):
         if not spool.count(config.spool_dir):
             break
-        applied, quarantined = spool.drain(
-            config.spool_dir, config.quarantine_dir, lambda record: _apply_record(conn, config, record)
-        )
+        applied, quarantined = _drain_spool(conn, config)
         stats["spool_applied"] += applied
         stats["spool_quarantined"] += quarantined
 
     if stats["spool_applied"] or stats["stale_turns_closed"]:
-        # Turns closed here (a replayed Stop, a stale turn) had no live Stop hook to start the fact worker; under load
-        # most Stops wait in the spool, and their turns stayed pending until some later session ended a turn.
-        from agent_mem.hooks import hook
-
-        if conn.execute("SELECT 1 FROM observe_queue WHERE state = 'pending' LIMIT 1").fetchone():
-            hook.spawn_observer(config)
+        _start_observer_if_pending(conn, config)
 
     conn.execute("PRAGMA optimize")
     with contextlib.suppress(sqlite3.OperationalError):
         conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
     return stats
+
+
+def _drain_spool(conn: sqlite3.Connection, config: Config) -> tuple[int, int]:
+    return spool.drain(config.spool_dir, config.quarantine_dir, lambda record: _apply_record(conn, config, record))
+
+
+def _semantic(conn: sqlite3.Connection, config: Config, allow_download: bool, stats: dict[str, Any]) -> Any:
+    """Load the embedder, record whether it works, embed what is new and merge duplicate facts. Returns it or None."""
+    if not config.semantic.enabled:
+        return None
+    from agent_mem.memory import semantic
+
+    embedder = semantic.load_embedder(config, allow_download=allow_download)
+    previous = db.get_meta(conn, "semantic")
+    with db.transaction(conn):
+        db.set_meta(conn, "semantic", embedder.model if embedder else "unavailable")
+        if embedder is not None:
+            db.record_health(conn, "semantic")
+        elif semantic.model_cached(config):
+            # The model is present but failed to load: a real problem worth reporting.
+            db.record_health(conn, "semantic", "embedding model failed to load (lexical search only)")
+    if embedder is not None:
+        # A new embedder (upgrade, I7) re-embeds everything in one run; vectors are upserted per owner.
+        limit = 100_000 if previous not in (None, "unavailable", embedder.model) else 512
+        stats["embedded"] = semantic.embed_pending(conn, embedder, limit=limit)
+        stats["duplicates_retired"] = semantic.merge_duplicates(conn, config, embedder.model)
+    return embedder
+
+
+def _neighbour_linker(conn: sqlite3.Connection, embedder: Any) -> Callable[[sqlite3.Connection], int] | None:
+    """Consolidation links memories to their nearest neighbours since the last run, when vectors exist."""
+    if embedder is None:
+        return None
+    model, since = embedder.model, db.get_meta(conn, "consolidated_at")
+    return lambda c: consolidate.link_neighbours(c, model, since)
+
+
+def _start_observer_if_pending(conn: sqlite3.Connection, config: Config) -> None:
+    # Turns closed here (a replayed Stop, a stale turn) had no live Stop hook to start the fact worker; under load
+    # most Stops wait in the spool, and their turns stayed pending until some later session ended a turn.
+    from agent_mem.hooks import hook
+
+    if conn.execute("SELECT 1 FROM observe_queue WHERE state = 'pending' LIMIT 1").fetchone():
+        hook.spawn_observer(config)

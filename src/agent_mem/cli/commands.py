@@ -16,9 +16,11 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from agent_mem import ui
 from agent_mem.core import db, identity, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store, views
+from agent_mem.ui import server
 
 
 def dispatch(ns: argparse.Namespace, config: Config) -> int:
@@ -243,80 +245,95 @@ def _purge_spooled(config: Config, matches: Callable[[dict[str, Any]], bool]) ->
 
 
 def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
-    from agent_mem import ui
-
-    # A written page holds a copy of the data; it must not outlive a purge. It is discarded only
-    # once the purge is confirmed.
+    # A written page holds a copy of the data; it must not outlive a purge. Each branch discards it only once the
+    # purge is confirmed.
     if ns.all:
-        if not _confirm(ns, "delete ALL agent-mem data"):
-            return 1
-        ui.discard(config)
-        for path in (
-            config.db_path,
-            Path(f"{config.db_path}-wal"),
-            Path(f"{config.db_path}-shm"),
-            Path(f"{config.db_path}.replaced"),
-        ):
-            if path.exists():
-                path.unlink()
-        for folder in (config.backup_dir, config.spool_dir, config.quarantine_dir, config.log_dir):
-            shutil.rmtree(folder, ignore_errors=True)
-        print("All data deleted (config and models kept).")
-        return 0
+        return _purge_all(ns, config)
     with _conn(config) as conn:
         if ns.id:
-            owner = store.parse_owner(ns.id)
-            if owner is None:
-                print("invalid id", file=sys.stderr)
-                return 2
-            ui.discard(config)
-            with db.transaction(conn):
-                deleted = store.delete_owner(conn, *owner)
-            print(f"Deleted {ns.id}." if deleted else f"{ns.id} not found.")
+            code = _purge_id(ns, config, conn)
         elif ns.project:
-            project = _project(conn, ns.project)
-            if project is None:
-                return _unknown_project(ns.project)
-            if not _confirm(ns, f"delete all data of project {project.name}"):
-                return 1
-            ui.discard(config)
-            with db.transaction(conn):
-                owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE project_id = ?", (project.id,))]
-                owners += [
-                    ("m", r[0]) for r in conn.execute("SELECT id FROM memories WHERE project_id = ?", (project.id,))
-                ]
-                _delete_owners(conn, owners)
-                conn.execute("DELETE FROM entities WHERE project_id = ?", (project.id,))
-                conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
-            removed = _purge_spooled(
-                config,
-                lambda r: (
-                    bool((r.get("event") or {}).get("cwd")) and identity.is_within(str(r["event"]["cwd"]), project.root)
-                ),
-            )
-            print(f"Deleted project {project.name} ({len(owners)} items, {removed} spooled events).")
+            code = _purge_project(ns, config, conn)
         else:
-            cutoff = timeutil.parse(ns.before) if ns.before else None
-            if cutoff is None:
-                print("--before needs an ISO date such as 2026-01-31", file=sys.stderr)
-                return 2
-            if not _confirm(ns, f"delete everything before {ns.before}"):
-                return 1
-            ui.discard(config)
-            stamp = timeutil.iso(cutoff)
-            with db.transaction(conn):
-                owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE started_at < ?", (stamp,))]
-                owners += [("m", r[0]) for r in conn.execute("SELECT id FROM memories WHERE created_at < ?", (stamp,))]
-                _delete_owners(conn, owners)
-                conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
-                conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
-            removed = _purge_spooled(config, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp)
-            print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
+            code = _purge_before(ns, config, conn)
+        if code:
+            return code
         conn.execute("VACUUM")
         # Copies left by older releases (``restore``'s .replaced, daily backups) hold the deleted data as well.
         with contextlib.suppress(OSError):
             Path(f"{config.db_path}.replaced").unlink()
         shutil.rmtree(config.backup_dir, ignore_errors=True)
+    return 0
+
+
+def _purge_all(ns: argparse.Namespace, config: Config) -> int:
+    if not _confirm(ns, "delete ALL agent-mem data"):
+        return 1
+    ui.discard(config)
+    for path in (
+        config.db_path,
+        Path(f"{config.db_path}-wal"),
+        Path(f"{config.db_path}-shm"),
+        Path(f"{config.db_path}.replaced"),
+    ):
+        if path.exists():
+            path.unlink()
+    for folder in (config.backup_dir, config.spool_dir, config.quarantine_dir, config.log_dir):
+        shutil.rmtree(folder, ignore_errors=True)
+    print("All data deleted (config and models kept).")
+    return 0
+
+
+def _purge_id(ns: argparse.Namespace, config: Config, conn: sqlite3.Connection) -> int:
+    owner = store.parse_owner(ns.id)
+    if owner is None:
+        print("invalid id", file=sys.stderr)
+        return 2
+    ui.discard(config)
+    with db.transaction(conn):
+        deleted = store.delete_owner(conn, *owner)
+    print(f"Deleted {ns.id}." if deleted else f"{ns.id} not found.")
+    return 0
+
+
+def _purge_project(ns: argparse.Namespace, config: Config, conn: sqlite3.Connection) -> int:
+    project = _project(conn, ns.project)
+    if project is None:
+        return _unknown_project(ns.project)
+    if not _confirm(ns, f"delete all data of project {project.name}"):
+        return 1
+    ui.discard(config)
+    with db.transaction(conn):
+        owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE project_id = ?", (project.id,))]
+        owners += [("m", r[0]) for r in conn.execute("SELECT id FROM memories WHERE project_id = ?", (project.id,))]
+        _delete_owners(conn, owners)
+        conn.execute("DELETE FROM entities WHERE project_id = ?", (project.id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
+    removed = _purge_spooled(
+        config,
+        lambda r: bool((r.get("event") or {}).get("cwd")) and identity.is_within(str(r["event"]["cwd"]), project.root),
+    )
+    print(f"Deleted project {project.name} ({len(owners)} items, {removed} spooled events).")
+    return 0
+
+
+def _purge_before(ns: argparse.Namespace, config: Config, conn: sqlite3.Connection) -> int:
+    cutoff = timeutil.parse(ns.before) if ns.before else None
+    if cutoff is None:
+        print("--before needs an ISO date such as 2026-01-31", file=sys.stderr)
+        return 2
+    if not _confirm(ns, f"delete everything before {ns.before}"):
+        return 1
+    ui.discard(config)
+    stamp = timeutil.iso(cutoff)
+    with db.transaction(conn):
+        owners = [("t", r[0]) for r in conn.execute("SELECT id FROM turns WHERE started_at < ?", (stamp,))]
+        owners += [("m", r[0]) for r in conn.execute("SELECT id FROM memories WHERE created_at < ?", (stamp,))]
+        _delete_owners(conn, owners)
+        conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
+        conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
+    removed = _purge_spooled(config, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp)
+    print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
     return 0
 
 
@@ -420,8 +437,6 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_view(ns: argparse.Namespace, config: Config) -> int:
-    from agent_mem import ui
-
     with _conn(config) as conn:
         # Look the project up only; viewing must not register a directory as a new project.
         project = identity.find(conn, os.path.abspath(ns.project)) if ns.project else None
@@ -454,7 +469,6 @@ def cmd_view(ns: argparse.Namespace, config: Config) -> int:
 def _served_url(config: Config, project_id: str | None) -> str | None:
     """Address of the running viewer, starting it first if needed."""
     from agent_mem.hooks.hook import spawn_viewer
-    from agent_mem.ui import server
 
     if not config.viewer.enabled:
         return None
@@ -563,8 +577,6 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
         embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
         print(f"embedding model {embedder.model} ready." if embedder else f"embedding model not available: {reason}")
     if config.viewer.enabled:
-        from agent_mem.ui import server
-
         print(server.install_autostart(config))
     print("\nDetected:\n" + _detect_table(found))
     print("\nStart a session, then run `agent-mem doctor`. `agent-mem view` opens the viewer.")
@@ -583,7 +595,6 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
         elif ns.harness != "all":
             print(f"{name}: nothing written by `setup --write` was found.")
     from agent_mem.cli.health import harness_installed
-    from agent_mem.ui import server
 
     if not any(harness_installed(name) for name in ("claude", "codex", "copilot", "opencode")):
         removed = server.remove_autostart()
@@ -715,8 +726,6 @@ def cmd_eval(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_serve(ns: argparse.Namespace, config: Config) -> int:
-    from agent_mem.ui import server
-
     if ns.autostart:
         print(server.install_autostart(config))
         return 0

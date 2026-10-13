@@ -411,9 +411,8 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     """docs/PLAN.md §14 I5: observer extra, queue, last worker run, providers, index size."""
     from agent_mem.cli import install
 
-    checks: list[Check] = []
     if not install.extras()["observer"]:
-        checks.append(
+        return [
             Check(
                 "observer",
                 False,
@@ -421,88 +420,93 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
                 "Install `agent-mem[observer]` for background fact extraction.",
                 warn_only=True,
             )
-        )
-        return checks
+        ]
     if not config.observe.enabled:
-        checks.append(Check("observer", True, "disabled in config.json"))
-        return checks
+        return [Check("observer", True, "disabled in config.json")]
     try:
-        states = dict(conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall())
-    except sqlite3.OperationalError as error:  # schema says current, table missing: a foreign or hand-edited database
-        checks.append(
-            Check(
-                "observer queue",
-                False,
-                f"{error}; schema v{db.user_version(conn)} without the observer tables",
-                "Move the data directory aside (`agent-mem paths`) or run `agent-mem restore --latest`; the queue table is created by migration 002.",
-            )
-        )
-        return checks
+        queue = _observer_queue_check(conn)
+    except sqlite3.OperationalError as error:
+        return [_missing_queue_check(conn, error)]
+    checks = [queue, _provider_check(conn, config), _entity_model_check(config)]
+    index = _fact_index_check(conn, config)
+    return [*checks, index] if index else checks
+
+
+def _missing_queue_check(conn: sqlite3.Connection, error: sqlite3.Error) -> Check:
+    # The schema says current but the table is missing: a foreign or hand-edited database.
+    return Check(
+        "observer queue",
+        False,
+        f"{error}; schema v{db.user_version(conn)} without the observer tables",
+        "Move the data directory aside (`agent-mem paths`); a new one gets the queue table from migration 002.",
+    )
+
+
+def _observer_queue_check(conn: sqlite3.Connection) -> Check:
+    states = dict(conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall())
     pending, failed = int(states.get("pending", 0)), int(states.get("failed", 0))
     last = conn.execute("SELECT ts, provider, ok FROM observe_calls ORDER BY id DESC LIMIT 1").fetchone()
     detail = f"queue pending {pending}, done {states.get('done', 0)}, raw {states.get('raw', 0)}, failed {failed}"
     detail += f"; last call {last['ts']} via {last['provider']}" if last else "; no model call yet"
-    checks.append(
-        Check(
-            "observer queue",
-            failed == 0 and pending < 200,
-            detail,
-            "Run `agent-mem observe --status`, then `agent-mem observe --retry-failed`.",
-            warn_only=True,
-        )
+    return Check(
+        "observer queue",
+        failed == 0 and pending < 200,
+        detail,
+        "Run `agent-mem observe --status`, then `agent-mem observe --retry-failed`.",
+        warn_only=True,
     )
+
+
+def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
+    """Which harness CLIs can run the observer, with their model and any pause after a quota or login error."""
     from agent_mem.observe import providers
 
-    stages = [n for n in config.observe.providers if shutil.which(n)]
+    stages = [name for name in config.observe.providers if shutil.which(name)]
     now = timeutil.iso()
     shown = []
     for name in stages:
         until = providers.paused_until(conn, name)
         paused = f", paused until {until}" if until and until > now else ""
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
-    checks.append(
-        Check(
-            "observer providers",
-            bool(stages),
-            ", ".join(shown) if stages else f"none of {config.observe.providers} on PATH",
-            'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.',
-            warn_only=True,
-        )
+    return Check(
+        "observer providers",
+        bool(stages),
+        ", ".join(shown) if stages else f"none of {config.observe.providers} on PATH",
+        'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.',
+        warn_only=True,
     )
-    from agent_mem.observe import mem0_adapter
+
+
+def _entity_model_check(config: Config) -> Check:
+    from agent_mem.observe import mem0_adapter, spacy_model
 
     model = config.observe.entity_model
-    from agent_mem.observe import spacy_model
-
     present = spacy_model.model_path(config) is not None or mem0_adapter.spacy_model_available(model)
-    checks.append(
-        Check(
-            "entity linking",
-            present,
-            f"spaCy model {model} present; mem0 links facts to the concepts they name"
-            if present
-            else f"spaCy model {model} missing; facts and search work without mem0's entity linking",
-            "Run `agent-mem models install`. Set `observe.entity_model` to the language of your facts "
-            "(de_core_news_sm, en_core_web_sm, ...).",
-            warn_only=True,
-        )
+    return Check(
+        "entity linking",
+        present,
+        f"spaCy model {model} present; mem0 links facts to the concepts they name"
+        if present
+        else f"spaCy model {model} missing; facts and search work without mem0's entity linking",
+        "Run `agent-mem models install`. Set `observe.entity_model` to the language of your facts "
+        "(de_core_news_sm, en_core_web_sm, ...).",
+        warn_only=True,
     )
+
+
+def _fact_index_check(conn: sqlite3.Connection, config: Config) -> Check | None:
     qdrant = config.mem0_dir / "qdrant"
-    if qdrant.exists():
-        size_mb = sum(p.stat().st_size for p in qdrant.rglob("*") if p.is_file()) / 1_000_000
-        facts = int(
-            conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0]
-        )
-        checks.append(
-            Check(
-                "fact index",
-                facts < 50_000,
-                f"{facts} facts, qdrant {size_mb:.0f} MB (opens in under a second up to about 20k facts)",
-                "Run `agent-mem purge --before` to trim old facts.",
-                warn_only=True,
-            )
-        )
-    return checks
+    if not qdrant.exists():
+        return None
+    size_mb = sum(p.stat().st_size for p in qdrant.rglob("*") if p.is_file()) / 1_000_000
+    facts = int(conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0])
+    return Check(
+        "fact index",
+        facts < 50_000,
+        f"{facts} facts, qdrant {size_mb:.0f} MB (opens in under a second up to about 20k facts)",
+        "Run `agent-mem purge --before` to trim old facts.",
+        warn_only=True,
+    )
 
 
 def record_setup_health(config: Config) -> None:
