@@ -877,7 +877,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
 <section class="block block-blue"><h2>Search by meaning</h2><div class="big-number"><b>${semantic === "unavailable" || semantic === "not indexed yet" ? "Off" : "On"}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Search by words works. To also search by meaning, run <code>agent-mem models install</code>." : `Finds memories with other words, too. Model: ${h(semantic.split("/").pop())}`}</span></section>
 <section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and removes outdated facts.</span></section>
 </div>
-<section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which model turns their requests into facts</small></div><div class="table-wrap"><table class="agents"><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
+<section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which AI model writes facts from their requests</small></div><div class="table-wrap"><table class="agents"><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
 <div class="columns">
 <section class="panel"><div class="panel-head"><h2>Background jobs</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Shows up after your first recorded session.")}</section>
 <div class="stack">
@@ -889,7 +889,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
 <div class="row"><b>Data folder</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
 <div class="row"><span class="grow wrap"><b>Not encrypted</b><span>Anyone who can open the data folder can read your memory.</span></span></div>
-<div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer listens on 127.0.0.1 and makes no requests to the internet. Pages saved with <code>agent-mem view --output</code> hold a copy of recent data.</span></span></div>
+<div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer opens only on this computer and loads nothing from the internet. Pages saved with <code>agent-mem view --output</code> hold a copy of recent data.</span></span></div>
 <div class="row"><span class="grow wrap"><b>Passwords and keys removed</b><span>Secrets and &lt;private&gt; sections are removed before anything is saved.</span></span></div></section>
 </div></div>`;
   }

@@ -364,12 +364,14 @@ def cmd_rules(ns: argparse.Namespace, config: Config) -> int:
                 "SELECT r.*, p.name AS project FROM rules r LEFT JOIN projects p ON p.id = r.project_id ORDER BY r.evidence DESC"
             ).fetchall()
             if not rows:
-                print("No rules learned yet. Rules are proposed after repeated corrections such as 'pnpm statt npm'.")
-            for row in rows:
-                state = "enabled" if row["enabled"] else "proposed"
                 print(
-                    f"R{row['id']} [{state}] {row['message']} · evidence {row['evidence']} · hits {row['hits']} · "
-                    f"overrides {row['overrides']} · project {row['project'] or 'global'}"
+                    "No rules learned yet. A rule is suggested after you correct the same thing, e.g. 'pnpm statt npm'."
+                )
+            for row in rows:
+                state = "on: can block" if row["enabled"] else "suggested: only warns"
+                print(
+                    f"R{row['id']} [{state}] {row['message']} · from {row['evidence']} correction(s) · used {row['hits']}x"
+                    f" · ignored {row['overrides']}x · project {row['project'] or 'all'}"
                 )
             return 0
         if ns.rule_id is None:
