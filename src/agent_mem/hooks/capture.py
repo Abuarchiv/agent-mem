@@ -649,15 +649,16 @@ def _resolve_failures(
         return
     first_ts = failures[0]["ts"]
     changed: list[str] = []
+    # The session's edits since the first failure (index events_session_ts; SQLite picks the edits, a twelve-hour
+    # session has hundreds of tool calls to parse otherwise).
     for row in conn.execute(
-        "SELECT files_json, payload FROM events WHERE session_id = ? AND kind = 'tool' AND ts >= ? AND ts <= ?",
+        "SELECT files_json FROM events WHERE session_id = ? AND ts >= ? AND ts <= ? AND kind = 'tool' "
+        "AND json_extract(payload, '$.category') = 'edit'",
         (session_id, first_ts, ts),
     ):
-        category = json.loads(row["payload"]).get("category")
-        if category == "edit":
-            for path in json.loads(row["files_json"] or "[]"):
-                if path not in changed:
-                    changed.append(path)
+        for path in json.loads(row["files_json"] or "[]"):
+            if path not in changed:
+                changed.append(path)
     for failure in failures:
         error_line = str(json.loads(failure["payload"]).get("error_line") or "")[:300]
         updated = conn.execute(

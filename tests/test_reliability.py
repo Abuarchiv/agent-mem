@@ -357,3 +357,19 @@ def test_config_values_that_would_break_silently_fall_back_and_reach_the_termina
     start = {"hook_event_name": "SessionStart", "session_id": "s", "source": "startup", "cwd": str(tmp_path)}
     shown = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
     assert "'hook_deadline_ms' must be between 100 and 10000" in shown
+
+
+def test_migration_008_lets_failure_resolution_read_only_its_session(config: Config):
+    conn = db.connect(config)
+    conn.execute("DROP INDEX events_session_ts")
+    conn.execute("PRAGMA user_version = 7")
+    conn.close()
+    conn = db.connect(config)
+    assert db.user_version(conn) == db.SCHEMA_VERSION >= 8
+    plan = conn.execute(
+        "EXPLAIN QUERY PLAN SELECT files_json, payload FROM events WHERE session_id = ? AND kind = 'tool' "
+        "AND ts >= ? AND ts <= ?",
+        ("s", "a", "b"),
+    ).fetchall()
+    assert "events_session_ts" in str([tuple(row) for row in plan])
+    conn.close()
