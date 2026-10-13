@@ -31,7 +31,7 @@
     { id: "timeline", label: "Timeline", icon: "timeline", group: "Memory", search: "Search requests, results, files and commands…" },
     { id: "memory", label: "Memories", icon: "memory", group: "Memory", search: "Search memories…" },
     { id: "learned", label: "Learned", icon: "learned", group: "Memory", search: "Search lessons, rules, fixes and preferences…" },
-    { id: "graph", label: "Graph", icon: "graph", group: "Memory", search: "Search files, commands and memories…" },
+    { id: "graph", label: "Graph", icon: "graph", group: "Memory", search: "Search files, tools and errors…" },
     { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search background jobs…" },
   ];
   // Order an agent acts on them: what you want, what was learned, what failed, what was decided, plain facts.
@@ -41,7 +41,7 @@
   const root = document.getElementById("root");
   let data = null;
   let graphController = null;
-  const state = { view: "overview", project: "all", query: "", outcome: "all", session: undefined, turn: undefined, memory: undefined, kind: "all", invalid: false, hiddenKinds: new Set(), harness: "all", more: {} };
+  const state = { view: "overview", project: "all", query: "", outcome: "all", session: undefined, turn: undefined, memory: undefined, kind: "all", invalid: false, hiddenKinds: new Set(), harness: "all", more: {}, islands: false };
 
   /* ---------------------------------------------------------------- helpers */
 
@@ -523,74 +523,84 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
 
   /* ---------------------------------------------------------------- graph */
 
-  // What a memory is linked to, in words; "changed" means its turn changed the file without the memory naming it.
-  const LINK_LABEL = { mentions: "names", changed: "came from a turn that changed", replaced: "was replaced by" };
-  const ENTITY_LABEL = { file: "File", command: "Command", setting: "Setting", code: "Code" };
-  const ENTITY_KINDS = ["file", "command", "setting", "code"];
-  const KIND_COLOR = { decision: "--yellow", fact: "--blue", preference: "--pink", dead_end: "--coral", lesson: "--green", correction: "--amber", summary: "--sand", native_note: "--lilac" };
+  // The observer's graph (observe/relations.py): things the memories talk about and how they relate.
+  const RELATION_LABEL = { uses: "uses", calls: "calls", imports: "imports", reads: "reads", writes: "writes", stores_in: "stores in", configures: "configures", depends_on: "depends on", part_of: "is part of", tests: "tests", fixes: "fixes", causes: "causes", breaks: "breaks", replaces: "replaces", runs: "runs", avoid: "gives way to" };
+  const ENTITY_LABEL = { file: "File", function: "Function", module: "Module", tool: "Tool", library: "Library", command: "Command", setting: "Setting", error: "Error", service: "Service", concept: "Concept" };
+  // Ten entity types read as five groups; ten colours on one canvas tell nothing apart.
+  const ENTITY_GROUP = { file: "code", function: "code", module: "code", tool: "tool", command: "tool", service: "tool", library: "library", setting: "setting", error: "error", concept: "idea" };
+  const GROUP_LABEL = { code: "Code", tool: "Tools & commands", library: "Libraries", setting: "Settings", error: "Errors", idea: "Concepts" };
+  const GROUP_COLOR = { code: "--blue", tool: "--green", library: "--yellow", setting: "--pink", error: "--coral", idea: "--lilac" };
+  const ENTITY_COLOR = Object.fromEntries(Object.entries(ENTITY_GROUP).map(([type, group]) => [type, GROUP_COLOR[group]]));
+  const GROUPS = Object.keys(GROUP_LABEL);
+  // Problem relations stand out; the rest share one quiet colour.
+  const relationTone = (type) => (type === "fixes" ? "--good" : type === "causes" || type === "breaks" ? "--bad" : type === "avoid" || type === "replaces" ? "--warn" : "--ink");
   const graphNodes = () => data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
+  const memoryById = (id) => data.memories.find((memory) => memory.id === id);
 
   function graphView() {
     const nodes = graphNodes();
-    const memoryCount = nodes.filter((node) => node.type === "memory").length;
-    const entityCount = nodes.length - memoryCount;
-    const kinds = MEMORY_KINDS.filter((kind) => nodes.some((node) => node.type === "memory" && node.kind === kind));
-    return `<div class="page-head"><div><h1>Graph</h1><p class="lede">Which memories belong together. A square is a file, command or setting; a dot is a memory that names it or came from a turn that changed it. Click a square to read everything known about that file, click a dot to read the memory.</p></div>
-<div class="pill-group" role="group" aria-label="Show memory kinds">${kinds.map((kind) => `<button type="button" class="pill" data-action="graph-kind" data-value="${kind}" aria-pressed="${!state.hiddenKinds.has(kind)}"><i class="swatch kind-${kind}"></i>${h(kindLabel(kind))}</button>`).join("")}</div></div>
+    const ids = new Set(nodes.map((node) => node.id));
+    const edges = data.graph.edges.filter((edge) => ids.has(edge.a) && ids.has(edge.b));
+    const groups = GROUPS.filter((group) => nodes.some((node) => ENTITY_GROUP[node.type] === group));
+    const islands = smallIslands(nodes, edges).size;
+    const progress = data.graph.total ? Math.min(100, Math.round(data.graph.read / data.graph.total * 100)) : 100;
+    return `<div class="page-head"><div><h1>Graph</h1><p class="lede">How the things your agents work with relate: files, tools, libraries, settings and errors, connected by what the memories say about them (“semantic.py uses fastembed”, “the patch fixes the lock error”). Click a thing to read every relation and the memory it comes from.</p></div>
+<div class="pill-group" role="group" aria-label="Show kinds of things">${groups.map((group) => `<button type="button" class="pill" data-action="graph-kind" data-value="${group}" aria-pressed="${!state.hiddenKinds.has(group)}"><i class="swatch" style="background:var(${GROUP_COLOR[group]})"></i>${h(GROUP_LABEL[group])} ${num(nodes.filter((node) => ENTITY_GROUP[node.type] === group).length)}</button>`).join("")}${islands ? `<button type="button" class="pill" data-action="graph-islands" aria-pressed="${state.islands}">Single pairs ${num(islands)}</button>` : ""}</div></div>
+${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The background model has read ${num(data.graph.read)} of ${num(data.graph.total)} memories (${progress}%); the graph grows as it reads the rest.</span></p>` : ""}
 <div class="graph-layout">
 <section class="graph-stage" aria-label="Graph canvas"><div id="graph-host" class="graph-host"></div>
 <div class="graph-controls"><button type="button" class="round-button" data-action="zoom" data-value="out" aria-label="Zoom out">${icon("minus", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="fit" aria-label="Fit graph">${icon("fit", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="in" aria-label="Zoom in">${icon("plus", 18)}</button></div>
 <span class="graph-hint">Drag to move · scroll to zoom · F to fit · Esc to clear</span></section>
 <aside id="graph-inspector" class="inspector" aria-live="polite"></aside>
 </div>
-<p class="caption">${plural(entityCount, "file, command or setting", "files, commands and settings")} that at least two memories share, with ${plural(memoryCount, "memory", "memories")}.${data.graph.entities_total > entityCount ? ` The ${num(entityCount)} most shared of ${num(data.graph.entities_total)} are shown.` : ""}</p>`;
+<p class="caption">${plural(nodes.length, "thing")} and ${plural(edges.length, "relation")}, read from your memories by the background model.</p>`;
   }
 
-  function createGraph(host, inspector, sourceNodes, sourceEdges) {
-    // Squares on a spiral, most shared in the middle; each memory starts next to its first square, so clusters
-    // form around files instead of the memories ringing the whole graph.
-    const nodes = sourceNodes.map((node) => ({ ...node, x: 0, y: 0, vx: 0, vy: 0, r: node.type === "entity" ? 5 + Math.min(22, Math.sqrt(node.degree) * 4.2) : 5, charge: node.type === "entity" ? 5 : 1 }));
+  // Things in a cluster of fewer than three: a lone "A uses B" says little next to the connected picture.
+  function smallIslands(nodes, edges) {
+    const parent = new Map(nodes.map((node) => [node.id, node.id]));
+    const find = (id) => { while (parent.get(id) !== id) { parent.set(id, parent.get(parent.get(id))); id = parent.get(id); } return id; };
+    for (const edge of edges) if (parent.has(edge.a) && parent.has(edge.b)) parent.set(find(edge.a), find(edge.b));
+    const size = new Map();
+    for (const node of nodes) size.set(find(node.id), (size.get(find(node.id)) ?? 0) + 1);
+    return new Set(nodes.filter((node) => size.get(find(node.id)) < 3).map((node) => node.id));
+  }
+
+  function createGraph(host, inspector, allNodes, allEdges) {
+    const islands = smallIslands(allNodes, allEdges);
+    const sourceNodes = state.islands ? allNodes : allNodes.filter((node) => !islands.has(node.id));
+    const sourceEdges = allEdges;
+    const nodes = sourceNodes.map((node) => ({ ...node }));
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    const edges = sourceEdges.filter((edge) => byId.has(edge.a) && byId.has(edge.b));
-    const neighbours = new Map(nodes.map((node) => [node.id, []]));
-    for (const edge of edges) { neighbours.get(edge.a).push([edge.b, edge]); neighbours.get(edge.b).push([edge.a, edge]); }
-    nodes.filter((node) => node.type === "entity").sort((a, b) => b.degree - a.degree).forEach((node, index) => {
-      const angle = index * 2.3999632297; const radius = Math.sqrt(index) * 120;
-      node.x = Math.cos(angle) * radius; node.y = Math.sin(angle) * radius;
-    });
-    nodes.filter((node) => node.type === "memory").forEach((node, index) => {
-      const anchor = neighbours.get(node.id).map(([id]) => byId.get(id)).find((other) => other.type === "entity");
-      const angle = index * 2.3999632297;
-      node.x = (anchor?.x ?? 0) + Math.cos(angle) * 40; node.y = (anchor?.y ?? 0) + Math.sin(angle) * 40;
-    });
-    const memoryHref = (node) => hashFor("memory", { m: String(node.memory_id) });
+    const edges = sourceEdges.filter((edge) => byId.has(edge.a) && byId.has(edge.b)).map((edge) => ({ ...edge, source: byId.get(edge.a), target: byId.get(edge.b) }));
+    const around = new Map(nodes.map((node) => [node.id, []]));
+    for (const edge of edges) { around.get(edge.a).push(edge); around.get(edge.b).push(edge); }
+    for (const node of nodes) { node.degree = around.get(node.id).length; node.r = 6 + Math.min(18, Math.sqrt(node.degree) * 4); }
+    const sentence = (edge) => `<b>${h(edge.source.label)}</b> <span class="rel" style="color:var(${relationTone(edge.type)})">${h(RELATION_LABEL[edge.type] ?? edge.type)}</span> <b>${h(edge.target.label)}</b>`;
+    const evidence = (edge) => edge.memory_ids.map(memoryById).filter(Boolean).slice(0, 2).map((memory) => `<a class="evidence" href="${hashFor("memory", { m: String(memory.id) })}">${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<span>${h(firstLine(memoryText(memory), 150))}</span></a>`).join("");
     const describe = (node) => {
       if (!node) {
-        const top = nodes.filter((n) => n.type === "entity").sort((a, b) => b.degree - a.degree).slice(0, 6);
-        inspector.innerHTML = `<span class="kicker">Graph</span><h2>Most talked about</h2><p>The files, commands and settings most memories are about. Click one, here or in the graph.</p><ul class="node-list">${top.map((n) => `<li><button type="button" class="link-button" data-action="graph-select" data-value="${h(n.id)}"><i class="square"></i><span>${h(n.label)}</span><span class="muted">${plural(neighbours.get(n.id).length, "memory", "memories")}</span></button></li>`).join("")}</ul>`;
+        const top = [...nodes].sort((a, b) => b.degree - a.degree).slice(0, 8);
+        inspector.innerHTML = `<span class="kicker">Graph</span><h2>Most connected</h2><p>The things with the most relations. Click one, here or in the graph.</p><ul class="node-list">${top.map((n) => `<li><button type="button" class="link-button" data-action="graph-select" data-value="${h(n.id)}"><i style="background:var(${ENTITY_COLOR[n.type] ?? "--lilac"})"></i><span class="wrap">${h(n.label)}</span><span class="muted">${plural(n.degree, "relation")}</span></button></li>`).join("")}</ul>`;
         return;
       }
-      if (node.type === "entity") {
-        const linked = neighbours.get(node.id).map(([id, edge]) => [byId.get(id), edge]).filter(([other]) => other?.type === "memory");
-        const byKind = MEMORY_KINDS.map((kind) => [kind, linked.filter(([other]) => other.kind === kind)]).filter(([, items]) => items.length);
-        inspector.innerHTML = `<span class="kicker">${h(ENTITY_LABEL[node.kind] ?? node.kind)}</span><h2 class="mono-title">${h(node.label)}</h2><p>${plural(linked.length, "memory", "memories")} ${linked.length === 1 ? "is" : "are"} about it${node.project_id ? ` in ${h(projectName(node.project_id))}` : ""}.</p>${byKind.map(([kind, items]) => `<span class="kicker">${h(kindLabel(kind))} (${items.length})</span><ul class="node-list">${items.map(([other, edge]) => `<li><a href="${memoryHref(other)}"><i style="background:var(${KIND_COLOR[other.kind] ?? "--sand"})"></i><span class="wrap">${h(firstLine(other.label, 140))}</span></a>${edge.kind === "changed" ? '<span class="muted small">from a turn that changed it</span>' : ""}</li>`).join("")}</ul>`).join("")}`;
-        return;
-      }
-      const linked = neighbours.get(node.id).map(([id, edge]) => [byId.get(id), edge]);
-      inspector.innerHTML = `<span class="kicker">${h(kindLabel(node.kind))} · M${node.memory_id}</span><p class="memory-quote">${inline(node.label)}</p><a class="text-link" href="${memoryHref(node)}">Open memory ${icon("right", 14)}</a><span class="kicker">Linked to</span><ul class="node-list">${linked.map(([other, edge]) => `<li><button type="button" class="link-button" data-action="graph-select" data-value="${h(other.id)}">${other.type === "entity" ? '<i class="square"></i>' : `<i style="background:var(${KIND_COLOR[other.kind] ?? "--sand"})"></i>`}<span class="wrap">${h(other.type === "entity" ? other.label : firstLine(other.label, 80))}</span><span class="muted small">${h(LINK_LABEL[edge.kind] ?? edge.kind)}</span></button></li>`).join("")}</ul>`;
+      const list = around.get(node.id);
+      const out = list.filter((edge) => edge.source === node), into = list.filter((edge) => edge.target === node);
+      const block = (title, items) => (items.length ? `<span class="kicker">${title}</span><ul class="relation-list">${items.map((edge) => `<li><p>${sentence(edge)}</p>${evidence(edge)}</li>`).join("")}</ul>` : "");
+      inspector.innerHTML = `<span class="kicker"><i class="swatch" style="background:var(${ENTITY_COLOR[node.type] ?? "--lilac"})"></i>${h(ENTITY_LABEL[node.type] ?? node.type)}</span><h2 class="mono-title">${h(node.label)}</h2><p>${plural(list.length, "relation")}, named in ${plural(node.memories, "memory", "memories")}${node.project_id ? ` of ${h(projectName(node.project_id))}` : ""}.</p>${block("What it does", out)}${block("What acts on it", into)}`;
     };
     if (nodes.length === 0) {
-      host.innerHTML = `<div class="graph-empty">No connections yet. They appear once two memories name the same file, command or setting.</div>`;
+      host.innerHTML = `<div class="graph-empty">No relations yet. The background model reads new memories after a session and adds what they say about your files and tools.</div>`;
       inspector.innerHTML = "";
       return { zoomBy() {}, reset() {}, setQuery() {}, setHidden() {}, select() {}, destroy() {} };
     }
-    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Graph: ${nodes.length} nodes with ${edges.length} links. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
+    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Graph: ${nodes.length} things with ${edges.length} relations. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
     const canvas = host.querySelector("canvas");
     const context = canvas.getContext("2d");
     const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
     const view = { x: 0, y: 0, scale: 1 };
-    let width = 0, height = 0, raf = 0, alpha = 1, query = "", hidden = new Set(), selected, hover, drag, pointer, lastX = 0, lastY = 0, moved = 0;
-    const shown = (node) => node.type === "entity" ? neighbours.get(node.id).some(([id]) => shown(byId.get(id))) : !hidden.has(node.kind);
+    let width = 0, height = 0, query = "", hidden = new Set(), selected, hover, drag, pointer, lastX = 0, lastY = 0, moved = 0;
+    const shown = (node) => !hidden.has(ENTITY_GROUP[node.type] ?? "idea");
     const hit = (node) => { const needle = query.trim().toLocaleLowerCase(); return needle === "" || node.label.toLocaleLowerCase().includes(needle); };
     const screen = (node) => ({ x: (node.x - view.x) * view.scale + width / 2, y: (node.y - view.y) * view.scale + height / 2 });
     const world = (cx, cy) => { const rect = canvas.getBoundingClientRect(); return { x: (cx - rect.left - width / 2) / view.scale + view.x, y: (cy - rect.top - height / 2) / view.scale + view.y }; };
@@ -600,86 +610,75 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
       context.clearRect(0, 0, width, height);
       context.fillStyle = css("--graph-bg", "#F8F4EA"); context.fillRect(0, 0, width, height);
       const focus = selected ?? hover;
-      const near = new Set(focus ? neighbours.get(focus.id).map(([id]) => id) : []);
-      context.lineCap = "round";
-      for (const edge of edges) {
-        const a = byId.get(edge.a), b = byId.get(edge.b);
-        if (!shown(a) || !shown(b)) continue;
-        const pa = screen(a), pb = screen(b);
-        const hot = focus && (edge.a === focus.id || edge.b === focus.id);
-        context.globalAlpha = !(hit(a) || hit(b)) ? 0.04 : focus ? (hot ? 0.85 : 0.06) : edge.kind === "changed" ? 0.14 : 0.28;
-        context.strokeStyle = ink; context.lineWidth = hot ? 2 : 1;
-        context.setLineDash(edge.kind === "mentions" ? [] : [4, 4]);
-        context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
+      const near = new Set(focus ? around.get(focus.id).flatMap((edge) => [edge.a, edge.b]) : []);
+      const visible = edges.filter((edge) => shown(edge.source) && shown(edge.target));
+      for (const edge of visible) {
+        const a = screen(edge.source), b = screen(edge.target);
+        const hot = focus && (edge.source === focus || edge.target === focus);
+        const tone = relationTone(edge.type);
+        context.globalAlpha = !(hit(edge.source) || hit(edge.target)) ? 0.05 : focus ? (hot ? 0.95 : 0.06) : tone === "--ink" ? 0.38 : 0.75;
+        context.strokeStyle = css(tone, ink); context.fillStyle = context.strokeStyle; context.lineWidth = (hot ? 2.2 : 1.4) * Math.min(1.8, 0.8 + edge.memory_ids.length * 0.25);
+        // The arrow stops at the target's rim and points at it: direction is the relation's meaning.
+        const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+        const tr = edge.target.r * view.scale + 2, sr = edge.source.r * view.scale;
+        const sx = a.x + ux * sr, sy = a.y + uy * sr, ex = b.x - ux * tr, ey = b.y - uy * tr;
+        context.beginPath(); context.moveTo(sx, sy); context.lineTo(ex, ey); context.stroke();
+        if (hot || view.scale > 0.9) {
+          const size = hot ? 8 : 6;
+          context.beginPath(); context.moveTo(ex, ey); context.lineTo(ex - ux * size - uy * size * 0.5, ey - uy * size + ux * size * 0.5); context.lineTo(ex - ux * size + uy * size * 0.5, ey - uy * size - ux * size * 0.5); context.closePath(); context.fill();
+        }
       }
-      context.setLineDash([]);
       const labels = [];
       for (const node of nodes) {
         if (!shown(node)) continue;
-        const p = screen(node); const active = !focus || node === focus || near.has(node.id); const r = Math.max(3, node.r * view.scale);
-        context.globalAlpha = !hit(node) ? 0.12 : active ? 1 : 0.18;
-        context.strokeStyle = ink; context.lineWidth = node === selected ? 3 : 1.4;
-        if (node.type === "entity") {
-          context.fillStyle = css("--surface-strong", "#ECE6D8");
-          context.beginPath(); context.roundRect(p.x - r, p.y - r, r * 2, r * 2, Math.min(6, r / 2)); context.fill(); context.stroke();
-        } else {
-          context.fillStyle = css(KIND_COLOR[node.kind] ?? "--sand", "#E2D9C3");
-          context.beginPath(); context.arc(p.x, p.y, r, 0, Math.PI * 2); context.fill(); context.stroke();
-        }
-        // Squares always carry their name; a memory's text only when it is in focus.
-        const named = node.type === "entity" ? (!focus || active) : (node === focus || (focus?.type === "entity" && near.has(node.id) && view.scale > 1.2));
-        if (named && hit(node)) labels.push({ node, p, r, active, priority: node === focus ? -1 : node.type === "entity" ? -node.degree : 1000 });
+        const p = screen(node); const active = !focus || node === focus || near.has(node.id); const r = Math.max(3.5, node.r * view.scale);
+        context.globalAlpha = !hit(node) ? 0.12 : active ? 1 : 0.15;
+        context.fillStyle = css(ENTITY_COLOR[node.type] ?? "--lilac", "#E2D9C3"); context.strokeStyle = ink; context.lineWidth = node === selected ? 3 : 1.3;
+        context.beginPath(); context.arc(p.x, p.y, r, 0, Math.PI * 2); context.fill(); context.stroke();
+        if (active && hit(node)) labels.push({ node, p, r, priority: node === focus ? -1e9 : near.has(node.id) ? -1e6 - node.degree : -node.degree });
       }
+      // Relation names on the edges of the thing in focus, then node names; overlapping labels are skipped.
       const placed = [];
-      for (const { node, p, r, active } of labels.sort((a, b) => a.priority - b.priority)) {
-        const text = node.type === "entity" ? node.label : firstLine(node.label, 48);
-        context.font = `${node.type === "entity" ? 700 : 500} ${node.type === "entity" ? 12 : 11}px ${css("--sans", "sans-serif")}`;
-        const w = context.measureText(text).width; const x = p.x + r + 6;
-        const box = { x: x - 4, y: p.y - 10, w: w + 8, h: 19 };
-        if (node !== focus && placed.some((o) => box.x < o.x + o.w && o.x < box.x + box.w && box.y < o.y + o.h && o.y < box.y + box.h)) continue;
+      const place = (text, x, y, weight, color) => {
+        context.font = `${weight} 12px ${css("--sans", "sans-serif")}`;
+        const w = context.measureText(text).width; const box = { x: x - 4, y: y - 13, w: w + 8, h: 18 };
+        if (placed.some((o) => box.x < o.x + o.w && o.x < box.x + box.w && box.y < o.y + o.h && o.y < box.y + box.h)) return;
         placed.push(box);
-        context.globalAlpha = (active ? 1 : 0.3) * 0.88; context.fillStyle = css("--graph-bg", "#F8F4EA"); context.fillRect(box.x, box.y, box.w, box.h);
-        context.globalAlpha = active ? 1 : 0.3; context.fillStyle = ink; context.fillText(text, x, p.y + 4);
+        context.globalAlpha = 0.9; context.fillStyle = css("--graph-bg", "#F8F4EA"); context.fillRect(box.x, box.y, box.w, box.h);
+        context.globalAlpha = 1; context.fillStyle = color; context.fillText(text, x, y);
+      };
+      for (const { node, p, r } of labels.sort((a, b) => a.priority - b.priority)) {
+        place(node.label.length > 32 ? `${node.label.slice(0, 31)}…` : node.label, p.x + r + 5, p.y + 4, node === focus ? 800 : node.degree >= 3 ? 700 : 500, ink);
+      }
+      if (focus) for (const edge of around.get(focus.id)) {
+        if (!shown(edge.source) || !shown(edge.target)) continue;
+        const a = screen(edge.source), b = screen(edge.target);
+        place(RELATION_LABEL[edge.type] ?? edge.type, (a.x + b.x) / 2 - 18, (a.y + b.y) / 2 + 4, 600, css(relationTone(edge.type), ink));
       }
       context.globalAlpha = 1;
     };
-    const tick = () => {
-      raf = 0;
-      if (alpha > 0.02) {
-        for (let i = 0; i < nodes.length; i += 1) {
-          const a = nodes[i];
-          for (let j = i + 1; j < nodes.length; j += 1) {
-            const b = nodes[j]; let dx = b.x - a.x, dy = b.y - a.y; const d2 = Math.max(dx * dx + dy * dy, 64); if (d2 > 90000) continue; const d = Math.sqrt(d2); const f = 260 * a.charge * b.charge / d2; dx /= d; dy /= d;
-            if (drag !== a) { a.vx -= dx * f * alpha; a.vy -= dy * f * alpha; }
-            if (drag !== b) { b.vx += dx * f * alpha; b.vy += dy * f * alpha; }
-          }
-          if (drag !== a) { a.vx -= a.x * 0.0015 * alpha; a.vy -= a.y * 0.0015 * alpha; }
-        }
-        for (const edge of edges) {
-          const a = byId.get(edge.a), b = byId.get(edge.b); const dx = b.x - a.x, dy = b.y - a.y; const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          const f = (d - (edge.kind === "replaced" ? 60 : 34)) * 0.04 * alpha;
-          if (drag !== a) { a.vx += dx / d * f; a.vy += dy / d * f; }
-          if (drag !== b) { b.vx -= dx / d * f; b.vy -= dy / d * f; }
-        }
-        for (const node of nodes) { if (drag === node) continue; node.vx = Math.max(-10, Math.min(10, node.vx)) * 0.85; node.vy = Math.max(-10, Math.min(10, node.vy)) * 0.85; node.x += node.vx; node.y += node.vy; }
-        alpha *= 0.985;
-      }
-      draw();
-      if (alpha > 0.02) raf = requestAnimationFrame(tick);
-    };
-    const wake = () => { alpha = Math.max(alpha, 0.3); if (!raf) raf = requestAnimationFrame(tick); };
+    // d3-force: links pull related things together, many-body charge keeps them apart, collision keeps labels
+    // readable, a weak pull to the centre keeps separate clusters on screen.
+    const simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(edges).distance((edge) => 46 + (edge.source.r + edge.target.r)).strength(0.55))
+      .force("charge", d3.forceManyBody().strength((node) => -120 - node.degree * 28).distanceMax(520))
+      .force("collide", d3.forceCollide((node) => node.r + 14).iterations(2))
+      .force("x", d3.forceX(0).strength(0.045))
+      .force("y", d3.forceY(0).strength(0.06))
+      .alphaDecay(0.03)
+      .on("tick", draw);
     const select = (node) => { selected = node; describe(node); draw(); };
     const resize = () => { width = host.clientWidth; height = host.clientHeight; const ratio = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.max(1, Math.floor(width * ratio)); canvas.height = Math.max(1, Math.floor(height * ratio)); context.setTransform(ratio, 0, 0, ratio, 0, 0); draw(); };
-    const fit = () => { const list = nodes.filter(shown); if (!list.length) return; const xs = list.map((n) => n.x), ys = list.map((n) => n.y); const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys); view.x = (minX + maxX) / 2; view.y = (minY + maxY) / 2; view.x += 60; view.scale = Math.min(2.2, Math.max(0.18, Math.min(width / (Math.max(maxX - minX, 160) + 380), height / (Math.max(maxY - minY, 160) + 120)))); draw(); };
+    const fit = () => { const list = nodes.filter(shown); if (!list.length) return; const xs = list.map((n) => n.x), ys = list.map((n) => n.y); const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys); view.x = (minX + maxX) / 2 + 40; view.y = (minY + maxY) / 2; view.scale = Math.min(2, Math.max(0.15, Math.min(width / (maxX - minX + 260), height / (maxY - minY + 120)))); draw(); };
     const zoom = (factor, ox = 0, oy = 0) => { const next = Math.min(3, Math.max(0.15, view.scale * factor)); view.x += ox / view.scale - ox / next; view.y += oy / view.scale - oy / next; view.scale = next; draw(); };
-    const down = (e) => { const rect = canvas.getBoundingClientRect(); pointer = e.pointerId; drag = at(e.clientX, e.clientY); moved = 0; lastX = e.clientX - rect.left; lastY = e.clientY - rect.top; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing"; };
+    const down = (e) => { const rect = canvas.getBoundingClientRect(); pointer = e.pointerId; drag = at(e.clientX, e.clientY); moved = 0; lastX = e.clientX - rect.left; lastY = e.clientY - rect.top; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing"; if (drag) { drag.fx = drag.x; drag.fy = drag.y; } };
     const move = (e) => {
       if (pointer === undefined) { const node = at(e.clientX, e.clientY); if (node !== hover) { hover = node; canvas.style.cursor = node ? "pointer" : "grab"; draw(); } return; }
       const rect = canvas.getBoundingClientRect(); const dx = e.clientX - rect.left - lastX, dy = e.clientY - rect.top - lastY; moved += Math.abs(dx) + Math.abs(dy);
-      if (drag) { const p = world(e.clientX, e.clientY); drag.x = p.x; drag.y = p.y; wake(); } else { view.x -= dx / view.scale; view.y -= dy / view.scale; draw(); }
+      if (drag) { const p = world(e.clientX, e.clientY); drag.fx = p.x; drag.fy = p.y; simulation.alphaTarget(0.15).restart(); } else { view.x -= dx / view.scale; view.y -= dy / view.scale; draw(); }
       lastX = e.clientX - rect.left; lastY = e.clientY - rect.top;
     };
-    const up = (e) => { if (e.pointerId !== pointer) return; if (moved < 5) select(at(e.clientX, e.clientY)); pointer = undefined; drag = undefined; canvas.style.cursor = "grab"; };
+    const up = (e) => { if (e.pointerId !== pointer) return; if (moved < 5) select(at(e.clientX, e.clientY)); if (drag) { drag.fx = null; drag.fy = null; simulation.alphaTarget(0); } pointer = undefined; drag = undefined; canvas.style.cursor = "grab"; };
     const leave = () => { if (pointer === undefined && hover) { hover = undefined; draw(); } };
     const wheel = (e) => { e.preventDefault(); const rect = canvas.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - rect.left - width / 2, e.clientY - rect.top - height / 2); };
     const key = (e) => { if (e.key === "f" || e.key === "F") fit(); else if (e.key === "+" || e.key === "=") zoom(1.15); else if (e.key === "-" || e.key === "_") zoom(1 / 1.15); else if (e.key === "Escape") select(undefined); else return; e.preventDefault(); };
@@ -689,15 +688,18 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
     canvas.addEventListener("pointerdown", down); canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up); canvas.addEventListener("pointerleave", leave); canvas.addEventListener("wheel", wheel, { passive: false }); canvas.addEventListener("keydown", key);
     scheme?.addEventListener?.("change", draw);
     observer?.observe(host);
-    resize(); fit(); describe(undefined); wake();
-    setTimeout(fit, 1500);
+    // Settle the layout before the first frame, so the graph appears in place instead of exploding outwards.
+    simulation.stop(); for (let i = 0; i < 260; i += 1) simulation.tick();
+    resize(); fit(); describe(undefined);
+    simulation.alpha(0.05).restart();
     return {
       zoomBy: (factor) => zoom(factor),
       reset: () => { select(undefined); fit(); },
       setQuery: (next) => { query = next; draw(); },
       setHidden: (kinds) => { hidden = new Set(kinds); if (selected && !shown(selected)) select(undefined); draw(); },
-      select: (id) => select(byId.get(id)),
-      destroy: () => { if (raf) cancelAnimationFrame(raf); observer?.disconnect(); scheme?.removeEventListener?.("change", draw); },
+      // From the list or a link: bring the thing and its neighbours into view, readable.
+      select: (id) => { const node = byId.get(Number(id)) ?? byId.get(id); if (node) { view.x = node.x + 60 / Math.max(view.scale, 1.3); view.y = node.y; view.scale = Math.max(view.scale, 1.3); } select(node); },
+      destroy: () => { simulation.stop(); observer?.disconnect(); scheme?.removeEventListener?.("change", draw); },
     };
   }
 
@@ -761,6 +763,7 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
       if (state.turn !== undefined && state.session === undefined) state.session = data.turns.find((turn) => String(turn.id) === state.turn)?.session_id;
     }
     state.memory = state.view === "memory" ? params.get("m") ?? undefined : undefined;
+    state.graphNode = state.view === "graph" ? params.get("n") ?? undefined : undefined;
   }
 
   function renderView() {
@@ -773,6 +776,7 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
       graphController = createGraph(document.getElementById("graph-host"), document.getElementById("graph-inspector"), graphNodes(), data.graph.edges);
       graphController.setHidden(state.hiddenKinds);
       graphController.setQuery(state.query);
+      if (state.graphNode !== undefined) graphController.select(state.graphNode);
     }
     syncChrome();
   }
@@ -801,6 +805,7 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
       graphController?.setHidden(state.hiddenKinds);
       return;
     }
+    if (action === "graph-islands") { state.islands = !state.islands; renderView(); return; }
     if (action === "graph-select") { graphController?.select(value); return; }
     if (action === "zoom" && graphController) {
       if (value === "in") graphController.zoomBy(1.2); else if (value === "out") graphController.zoomBy(1 / 1.2); else graphController.reset();

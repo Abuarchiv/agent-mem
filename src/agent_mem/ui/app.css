@@ -419,3 +419,12 @@ code.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .learn-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .learn-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; }
 .learn-meta a { color: inherit; }
+.relation-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.relation-list li { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; background: var(--surface-strong); }
+.relation-list p { margin: 0; color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.relation-list .rel { font-weight: 700; }
+.evidence { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.4; text-decoration: none; }
+.evidence:hover { color: var(--ink); }
+.evidence .tag { flex-shrink: 0; }
+.inspector .kicker .swatch { vertical-align: -1px; }
+.graph-progress { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--muted); font-size: 13px; }

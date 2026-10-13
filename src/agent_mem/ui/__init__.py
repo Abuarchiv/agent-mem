@@ -31,8 +31,7 @@ LIMITS = {
     "turns": 250,
     "actions_per_turn": 30,
     "memories": 1500,
-    "graph_entities": 70,
-    "graph_memories": 260,
+    "graph_edges": 600,
     "recipes": 200,
     "rules": 200,
     "profile": 200,
@@ -332,131 +331,52 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
 # Native notes and memories saved through the MCP tool name their harness in ``origin``.
 _ORIGIN_HARNESS = {"claude-auto-memory": "claude", "codex-memory": "codex"}
 
-# The concrete things memories talk about, as agentmemory's graph extracts them (files, commands, settings,
-# identifiers), read from the memory text without a model: paths and file names, and `code spans`.
-_EXT = r"(?:py|md|js|ts|tsx|json|jsonl|sql|sh|ps1|toml|css|html|yaml|yml|cfg|lock|plist)"
-_FILE = re.compile(rf"(?<![\w/.-])((?:[\w.-]+/)*[\w-]+(?:\.[\w-]+)*\.{_EXT})(?![\w/])")
-_CODE = re.compile(r"`([^`\n]{1,60})`")
-_SHELL_PLUMBING = {"cd", "ls", "cat", "echo", "mkdir", "rm", "cp", "mv", "sed", "grep", "head", "tail", "find"}
-_RUNNERS = {"uv", "uvx", "npx", "npm", "pnpm", "python", "python3", "pip", "cargo", "go", "bun"}
-# Scratch files of one run connect nothing later. Matched as text, nothing is created there.
-_TEMP = ("/tmp/", "/private/", "scratchpad", "/var/folders/", "/tool-results/")  # noqa: S108
-
-
-def _file_key(path: str) -> str:
-    """A file is its name; ``__init__.py`` keeps its folder, or every package would be one node."""
-    parts = path.strip("/").split("/")
-    return "/".join(parts[-2:]) if parts[-1] == "__init__.py" else parts[-1]
-
-
-def _command_label(words: list[str]) -> str:
-    """`uv run pytest -q` and `uv run pytest tests/x.py` are one command: the runner, its verb and the tool."""
-    plain = [word for word in words if not word.startswith("-")]
-    size = 3 if plain and plain[0] in _RUNNERS and len(plain) > 2 else 2
-    return " ".join(plain[:size])
-
-
-def memory_entities(text: str) -> dict[tuple[str, str], str]:
-    """(kind, key) -> label for the files, commands, settings and identifiers a memory names."""
-    found: dict[tuple[str, str], str] = {}
-    for match in _FILE.finditer(text):
-        if not any(part in match.group(1) for part in _TEMP):
-            found[("file", _file_key(match.group(1)).lower())] = _file_key(match.group(1))
-    for match in _CODE.finditer(text):
-        span = match.group(1).strip()
-        if _FILE.fullmatch(span) or span.startswith(("-", "<")) or len(span) < 3:
-            continue
-        words = span.split()
-        plain = [word for word in words if not word.startswith("-")]
-        if len(plain) > 1:
-            if plain[0] in _SHELL_PLUMBING:
-                continue
-            label, kind = _command_label(words), "command"
-        elif len(words) > 1 or (span.startswith(("/", "~")) and span.count("/") > 1):
-            continue  # a bare word with flags, or a directory of this machine
-        elif re.fullmatch(r"[a-z_]+(?:\.[a-z_]+)+", span):
-            label, kind = span, "setting"
-        elif re.search(r"[_./()@:-]|[a-z][A-Z]", span):
-            label, kind = span, "code"  # an identifier; a plain word such as `hooks` names nothing specific
-        else:
-            continue
-        found.setdefault((kind, label.lower()), label)
-    return found
-
 
 def memory_graph(conn: sqlite3.Connection, project_id: str | None) -> dict[str, Any]:
-    """Memories linked through the things they name. An entity becomes a node once two memories share it;
-    each memory is linked to it, and to the files its turn changed when that turn changed only a few."""
+    """The graph the observer read from the memories (``observe/relations.py``): things and typed relations, each
+    relation with the memories that state it. Only relations of current memories count."""
+    scope = "AND r.project_id = ?" if project_id is not None else ""
+    params: tuple[Any, ...] = (project_id,) if project_id is not None else ()
     rows = conn.execute(
-        "SELECT m.id, m.project_id, m.kind, m.title, m.body, m.superseded_by, t.files_json FROM memories m "
-        "LEFT JOIN turns t ON t.id = m.turn_id WHERE m.invalid_at IS NULL AND m.source != 'native' "
-        f"{'AND m.project_id = ?' if project_id is not None else ''} ORDER BY m.id DESC",
-        (project_id,) if project_id is not None else (),
+        "SELECT r.source_id, r.target_id, r.type, GROUP_CONCAT(r.memory_id) AS ids FROM relations r "
+        f"JOIN memories m ON m.id = r.memory_id AND m.invalid_at IS NULL WHERE 1 = 1 {scope} "
+        "GROUP BY r.source_id, r.target_id, r.type ORDER BY COUNT(*) DESC LIMIT ?",
+        (*params, LIMITS["graph_edges"]),
     ).fetchall()
-    # The project's own name ("agent-mem") is in half its memories and would tie them all to one node.
-    own = {str(name).lower() for (name,) in conn.execute("SELECT name FROM projects")}
-    links: dict[tuple[str, str, str], dict[int, str]] = {}
-    labels: dict[tuple[str, str, str], str] = {}
-    memory_rows = {}
-    for row in rows:
-        memory_rows[row["id"]] = row
-        project = row["project_id"] or ""
-        for (kind, key), label in memory_entities(f"{row['title'] or ''}\n{row['body'] or ''}").items():
-            if key in own:
-                continue
-            links.setdefault((project, kind, key), {})[row["id"]] = "mentions"
-            labels.setdefault((project, kind, key), label)
-        files = _json_list(row["files_json"])
-        if 0 < len(files) <= 4:  # a turn that touched a dozen files says little about each
-            for path in (f for f in files if not any(part in f for part in _TEMP)):
-                key = (project, "file", _file_key(path).lower())
-                links.setdefault(key, {}).setdefault(row["id"], "changed")
-                labels.setdefault(key, _file_key(path))
-    shared = sorted((key for key, members in links.items() if len(members) >= 2), key=lambda k: -len(links[k]))
-    entities = shared[: LIMITS["graph_entities"]]
-    chosen: dict[int, int] = {}
-    for key in entities:
-        for memory_id in links[key]:
-            chosen[memory_id] = chosen.get(memory_id, 0) + 1
-    # The most connected memories first, newer ones on ties.
-    kept = set(sorted(chosen, key=lambda mid: (-chosen[mid], -mid))[: LIMITS["graph_memories"]])
+    edges = [
+        {
+            "a": row["source_id"],
+            "b": row["target_id"],
+            "type": row["type"],
+            "memory_ids": sorted({int(i) for i in str(row["ids"]).split(",")}, reverse=True)[:8],
+        }
+        for row in rows
+    ]
+    ids = sorted({edge["a"] for edge in edges} | {edge["b"] for edge in edges})
     nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    for index, key in enumerate(entities):
-        members = {mid: how for mid, how in links[key].items() if mid in kept}
-        if len(members) < 2:
-            continue
-        node_id = f"e{index}"
-        nodes.append(
-            {
-                "id": node_id,
-                "type": "entity",
-                "kind": key[1],
-                "label": labels[key],
-                "project_id": key[0] or None,
-                "degree": len(links[key]),
-            }
-        )
-        edges += [{"a": node_id, "b": f"m{mid}", "kind": how} for mid, how in members.items()]
-    linked = {edge["b"] for edge in edges}
-    for memory_id in sorted(kept, reverse=True):
-        if f"m{memory_id}" not in linked:
-            continue
-        row = memory_rows[memory_id]
-        text = (row["body"] or "").strip() if len(row["body"] or "") > len(row["title"] or "") else row["title"]
-        nodes.append(
-            {
-                "id": f"m{memory_id}",
-                "type": "memory",
-                "kind": row["kind"],
-                "memory_id": memory_id,
-                "label": (text or "")[:160],
-                "project_id": row["project_id"] or None,
-            }
-        )
-        if row["superseded_by"] and f"m{row['superseded_by']}" in linked:
-            edges.append({"a": f"m{memory_id}", "b": f"m{row['superseded_by']}", "kind": "replaced"})
-    return {"nodes": nodes, "edges": edges, "entities_total": len(shared)}
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        for row in conn.execute(
+            "SELECT c.id, c.label, c.type, c.project_id, (SELECT COUNT(*) FROM concept_links l JOIN memories m "
+            "ON m.id = l.memory_id AND m.invalid_at IS NULL WHERE l.concept_id = c.id) AS memories "
+            f"FROM concepts c WHERE c.id IN ({marks})",
+            ids,
+        ):
+            nodes.append(
+                {
+                    "id": row["id"],
+                    "label": row["label"],
+                    "type": row["type"],
+                    "project_id": row["project_id"] or None,
+                    "memories": row["memories"],
+                }
+            )
+    read = conn.execute(
+        "SELECT COUNT(*) FROM memories m WHERE m.invalid_at IS NULL AND m.source != 'native' "
+        "AND m.id <= CAST(COALESCE((SELECT value FROM meta WHERE key = 'graph.last:' || m.project_id), 0) AS INTEGER)"
+    ).fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM memories WHERE invalid_at IS NULL AND source != 'native'").fetchone()[0]
+    return {"nodes": nodes, "edges": edges, "read": read, "total": total}
 
 
 def _asset(name: str) -> bytes:
@@ -476,7 +396,8 @@ def render(snapshot: dict[str, Any]) -> str:
         for family, weights, file in FONTS
     )
     css = faces + _asset("app.css").decode("utf-8")
-    script = _asset("app.js").decode("utf-8")
+    # d3-force lays out the graph; vendored, so the page still loads nothing (ui/d3-force.min.js, ISC licence).
+    script = _asset("d3-force.min.js").decode("utf-8") + "\n" + _asset("app.js").decode("utf-8")
     digest = base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii")
     policy = (
         "default-src 'none'; "
