@@ -22,6 +22,15 @@ Never run `uv sync` while a measurement is running against the same virtual envi
 
 The provider `fake` answers from a JSON file named in `AGENT_MEM_FAKE_LLM` (a list of answers, consumed in order) or, without the file, extracts one fact per user message. `tests/test_observe_worker.py` shows the pattern: set `config.observe.providers = ["fake"]`, drive turns through `hook.run`, run `Worker.run(drain=False)`, assert on `memories`, `observe_queue` and `observe_calls`.
 
+## Changing the viewer
+
+The page script is `src/agent_mem/ui/app.ts`. The package ships the built `app.js` next to it, so installs need no Node. After an edit, type-check and rebuild, and commit both files (CI fails if they differ):
+
+```sh
+npm install --no-save typescript@^7
+npx tsc -p src/agent_mem/ui
+```
+
 ## Changing the schema
 
 Add a new numbered file in `src/agent_mem/core/schema/` and a migration test. Never edit an existing file.

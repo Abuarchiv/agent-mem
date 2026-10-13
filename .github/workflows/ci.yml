@@ -87,3 +87,16 @@ jobs:
       - name: Audit dependencies
         shell: bash
         run: uvx pip-audit --strict -r <(uv export --no-dev --no-hashes --no-emit-project --all-extras --locked)
+
+  viewer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Type-check the viewer and check that app.js is built from app.ts
+        run: |
+          npm install --no-save --no-audit --no-fund typescript@^7
+          npx tsc -p src/agent_mem/ui
+          git diff --exit-code src/agent_mem/ui/app.js

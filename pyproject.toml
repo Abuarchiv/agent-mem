@@ -50,6 +50,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_mem"]
+# The wheel ships the built viewer script (ui/app.js); its TypeScript source stays in the sdist.
+exclude = ["src/agent_mem/ui/app.ts", "src/agent_mem/ui/tsconfig.json"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "plugins" = "agent_mem/plugins"
