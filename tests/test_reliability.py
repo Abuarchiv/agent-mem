@@ -410,3 +410,20 @@ def test_a_lone_surrogate_in_a_payload_is_saved_not_lost(config: Config, project
     assert conn.execute("SELECT prompt FROM turns").fetchone()[0] == "show the file �"
     assert json.loads(conn.execute("SELECT payload FROM events WHERE kind = 'tool'").fetchone()[0])["output"] == "a�b"
     conn.close()
+
+
+def test_an_unexpected_error_in_a_hook_leaves_a_note_instead_of_nothing(config: Config, tmp_path: Path):
+    """A UnicodeEncodeError lost an event with only a log line; doctor and the viewer showed nothing."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys\nfrom agent_mem.hooks import hook\n"
+        "def broken(*args, **kwargs):\n    raise RuntimeError('boom')\n"
+        "hook.run = broken\nhook.main(['claude', 'UserPromptSubmit'], b'{}')\n"
+    )
+    env = {**os.environ, "AGENT_MEM_DATA_DIR": str(config.data_dir)}
+    done = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=False)
+    assert done.returncode == 0 and done.stdout == ""  # the agent still sees nothing
+    notes = [json.loads(p.read_text()) for p in config.quarantine_dir.glob("*.json")]
+    assert [n["reason"] for n in notes] == ["unexpected RuntimeError: boom"]

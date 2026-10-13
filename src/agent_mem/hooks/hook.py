@@ -455,7 +455,10 @@ def main(argv: list[str], stdin_bytes: bytes | None = None) -> int:
         text = run(harness, event_name, stdin_bytes=stdin_bytes)
     except Exception as error:  # the agent must never see a crash
         with contextlib.suppress(Exception):
-            logutil.write(load().log_dir, "hook", harness=harness, error=f"unexpected {type(error).__name__}")
+            config = load()
+            logutil.write(config.log_dir, "hook", harness=harness, error=f"unexpected {type(error).__name__}")
+            # The event is lost; a note makes doctor and the viewer say so instead of staying silent.
+            _quarantine_note(config, harness, event_name, f"unexpected {type(error).__name__}: {error}")
         text = ""
     if text:
         sys.stdout.write(text)
