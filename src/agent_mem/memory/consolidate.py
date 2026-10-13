@@ -216,18 +216,19 @@ def record_anchors(conn: sqlite3.Connection, limit: int = 2000) -> int:
         "WHERE e.kind = 'file' AND a.path IS NULL LIMIT ?",
         (limit,),
     ).fetchall()
-    count = 0
+    # Files are hashed before the write lock is taken: up to 2000 reads would hold every hook back.
+    anchors = []
+    for row in rows:
+        path = Path(row["key"])
+        full = path if path.is_absolute() else Path(row["root"]) / path
+        anchors.append((row["owner_type"], row["owner_id"], row["key"], identity.git_blob_hash(full), timeutil.iso()))
     with db.transaction(conn):
-        for row in rows:
-            path = Path(row["key"])
-            full = path if path.is_absolute() else Path(row["root"]) / path
-            conn.execute(
-                "INSERT INTO anchors(owner_type, owner_id, path, blob_hash, recorded_at) VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT DO NOTHING",
-                (row["owner_type"], row["owner_id"], row["key"], identity.git_blob_hash(full), timeutil.iso()),
-            )
-            count += 1
-    return count
+        conn.executemany(
+            "INSERT INTO anchors(owner_type, owner_id, path, blob_hash, recorded_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT DO NOTHING",
+            anchors,
+        )
+    return len(anchors)
 
 
 def anchor_status(conn: sqlite3.Connection, owner: tuple[str, int]) -> list[tuple[str, str]]:
@@ -263,7 +264,7 @@ def _invalidate_deleted(conn: sqlite3.Connection) -> int:
         states = anchor_status(conn, ("m", int(row["id"])))
         if states and all(state == "deleted" for _, state in states):
             with db.transaction(conn):
-                conn.execute("UPDATE memories SET invalid_at = ? WHERE id = ?", (timeutil.iso(), row["id"]))
+                store.retire(conn, int(row["id"]), None)  # its mem0 copy goes too, or extraction keeps it current
             count += 1
     return count
 

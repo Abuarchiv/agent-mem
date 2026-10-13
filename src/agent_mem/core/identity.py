@@ -201,10 +201,12 @@ def relative_path(root: Path, path: str) -> str:
 
 
 def git_blob_hash(path: Path) -> str | None:
-    """Git's blob hash of a file, computed without spawning git."""
+    """Git's blob hash of a file, computed without spawning git, read in chunks (a linked file may be gigabytes)."""
     try:
-        data = path.read_bytes()
+        with path.open("rb") as fh:
+            digest = hashlib.sha1(f"blob {os.fstat(fh.fileno()).st_size}\0".encode(), usedforsecurity=False)
+            while chunk := fh.read(1 << 20):
+                digest.update(chunk)
     except OSError:
         return None
-    header = f"blob {len(data)}\0".encode()
-    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+    return digest.hexdigest()

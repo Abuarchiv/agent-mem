@@ -180,6 +180,22 @@ def test_anchors_detect_changed_and_deleted_files(driver: Driver, conn, project)
     assert consolidate.anchor_status(conn, ("t", 1)) == [("app.py", "deleted")]
 
 
+def test_a_decision_about_a_deleted_file_leaves_mem0_too(driver: Driver, conn, config: Config, project):
+    driver.prompt("s1", "edit app")
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "done")
+    pid, turn = conn.execute("SELECT project_id, id FROM turns").fetchone()
+    store.add_memory(
+        conn, project_id=pid, kind="decision", title="app.py keeps the retry", body="",
+        source="agent", trust="agent", turn_id=turn, dedupe="mem0:abc",
+    )  # fmt: skip
+    (project / "app.py").write_text("x = 1\n")
+    consolidate.record_anchors(conn)
+    (project / "app.py").unlink()
+    assert consolidate.run(conn, config)["invalidated"] == 1
+    assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["abc"]
+
+
 def test_link_neighbours_adds_related_keys(driver: Driver, conn, config: Config):
     driver.prompt("s1", "setup")
     pid = _pid(conn)

@@ -99,6 +99,11 @@ def render(project: str, rows: list[sqlite3.Row]) -> str:
     return head + "\n".join(lines)
 
 
+def _items(data: dict, field: str) -> list:
+    value = data.get(field)
+    return value if isinstance(value, list) else []
+
+
 def parse(text: str, memory_ids: set[int], project: str) -> tuple[dict[str, tuple[str, str]], list[tuple]]:
     """Entities by key -> (label, type) and relations (source key, type, target key, memory id). Anything that
     does not fit the schema, names an unknown memory or links a thing to itself is dropped."""
@@ -107,7 +112,7 @@ def parse(text: str, memory_ids: set[int], project: str) -> tuple[dict[str, tupl
         return {}, []
     own = key(project)
     entities: dict[str, tuple[str, str]] = {}
-    for item in data.get("entities") or []:
+    for item in _items(data, "entities"):
         if not isinstance(item, dict) or not isinstance(item.get("name"), str):
             continue
         name = item["name"].strip().strip("`").strip()
@@ -117,7 +122,7 @@ def parse(text: str, memory_ids: set[int], project: str) -> tuple[dict[str, tupl
             label = "/".join(parts[-2:] if parts[-1] == "__init__.py" else parts[-1:]) if kind == "file" else name
             entities.setdefault(key(name), (label, kind))
     relations: list[tuple] = []
-    for item in data.get("relations") or []:
+    for item in _items(data, "relations"):
         if not isinstance(item, dict) or item.get("type") not in RELATION_TYPES:
             continue
         source, target = item.get("source"), item.get("target")
@@ -141,7 +146,19 @@ def extract(conn: sqlite3.Connection, llm: Any, project_id: str, rows: list[sqli
     text = llm.generate_response(
         [{"role": "user", "content": render(name, rows)}], response_format={"type": "json_object"}
     )
-    entities, relations = parse(text, {int(row["id"]) for row in rows}, name)
+    last = str(max(int(row["id"]) for row in rows))
+    try:
+        entities, relations = parse(text, {int(row["id"]) for row in rows}, name)
+    except ValueError:
+        # No JSON twice for the same batch: skip it. Retried on every run, it would cost a call each time and hold
+        # back every later memory of this project and every other project behind it.
+        failed = f"graph.failed:{project_id}"
+        with db.transaction(conn):
+            if db.get_meta(conn, failed) == last:
+                db.set_meta(conn, _meta_key(project_id), last)
+            else:
+                db.set_meta(conn, failed, last)
+        raise
     stored = 0
     with db.transaction(conn):
         alive = {
@@ -178,5 +195,5 @@ def extract(conn: sqlite3.Connection, llm: Any, project_id: str, rows: list[sqli
                 (project_id, source, target, kind, memory),
             )
             stored += cursor.rowcount
-        db.set_meta(conn, _meta_key(project_id), str(max(int(row["id"]) for row in rows)))
+        db.set_meta(conn, _meta_key(project_id), last)
     return stored

@@ -82,3 +82,16 @@ def test_the_page_embeds_d3_force_in_its_one_hashed_script(conn, config: Config)
     page = ui.render(ui.build_snapshot(conn, config))
     script = page.rsplit("<script>", 1)[1]
     assert "forceSimulation" in script and "function graphView" in script  # one script, one hash in the CSP
+
+
+def test_a_batch_without_json_twice_is_skipped_so_it_cannot_block_the_graph(conn) -> None:
+    import pytest
+
+    _memories(conn)
+    answer = Answer({})
+    answer.text = "I cannot help with that."
+    [(project_id, rows)] = relations.pending(conn)
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            relations.extract(conn, answer, project_id, rows)
+    assert relations.pending(conn) == []
