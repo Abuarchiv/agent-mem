@@ -180,7 +180,7 @@ def test_worker_without_embedder_stores_raw(config: Config, monkeypatch) -> None
         turn_ids=[1], session_id="s", project_id=None, harness="claude", messages=[{"role": "user", "content": "x"}]
     )
     assert w.process(b) == "raw"
-    # The fallback is no longer silent: the next session start tells the user.
+    # The fallback is announced: the next session start tells the user.
     assert any("facts unavailable" in line for line in hook.problems(conn))
     conn.close()
 

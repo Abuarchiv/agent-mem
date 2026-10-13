@@ -265,7 +265,7 @@ def test_briefing_rotates_what_is_injected_but_never_used(driver: Driver, conn, 
     later = inject.session_start(conn, config, project_id, "claude:y", "claude")
     assert later is not None
     assert any(owner[0] == "m" and owner not in shown for owner in later.owners)  # others get their turn
-    # Injections no longer raise activation (they did, and stale items kept coming back).
+    # Injections do not raise activation; otherwise stale items keep coming back.
     stats = learn.owner_stats(conn, list(shown))
     assert all(stat.injected == 4 and stat.briefing_factor < 1.0 for stat in stats.values())
 

@@ -375,7 +375,7 @@ def test_day_words_are_no_topic(driver: Driver, conn):
 def test_an_exact_match_is_not_outvoted_by_recent_work_on_a_file_with_the_word_in_its_path(
     driver: Driver, conn, config: Config
 ):
-    """The graph used to vote like a text match with whatever touched such a file last."""
+    """The graph does not vote like a text match; it only reorders hits that text and vectors found."""
     from agent_mem.memory import store
 
     driver.prompt("s0", "seed")

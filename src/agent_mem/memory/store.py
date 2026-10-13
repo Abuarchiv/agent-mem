@@ -246,7 +246,7 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
         conn.execute(f"DELETE FROM {table} WHERE owner_type = ? AND owner_id = ?", (owner_type, owner_id))
     if owner_type == "t":
         # What was drawn from the turn holds its content too: facts and lessons (with their mem0 copies) and the
-        # session summary. memories.turn_id is ON DELETE SET NULL, so they used to stay behind.
+        # session summary. memories.turn_id is ON DELETE SET NULL, so the cascade does not reach them.
         for (memory_id,) in conn.execute("SELECT id FROM memories WHERE turn_id = ?", (owner_id,)).fetchall():
             delete_owner(conn, "m", int(memory_id))
         conn.execute(

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-# Words the screen no longer uses (they confused users); the model-facing context block may still use them.
+# Words the screen avoids because users do not know them; the model-facing context block may still use them.
 JARGON = (
     "harness",
     "spool",

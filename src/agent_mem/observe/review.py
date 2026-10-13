@@ -60,8 +60,8 @@ OLDER = MAX_FACTS - RECENT  # ... plus the next slice of older ones, so each old
 
 
 def _facts(conn: sqlite3.Connection, project_id: str) -> list[sqlite3.Row]:
-    """The newest facts and a rotating slice of the rest. Only the newest 150 used to be read: in a project with
-    more, the oldest facts, the ones a later decision makes wrong, were never checked again."""
+    """The newest facts and a rotating slice of the rest, so that in a large project the oldest facts, the ones a
+    later decision makes wrong, are checked too."""
     marks = ",".join("?" for _ in KINDS)
     where = f"project_id = ? AND invalid_at IS NULL AND trust IN ('observer', 'agent') AND kind IN ({marks})"
     columns = "id, kind, title, body, created_at"
