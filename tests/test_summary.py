@@ -236,20 +236,20 @@ def _memory(conn, project_id: str, text: str, kind: str = "preference") -> int:
 def test_briefing_rotates_what_is_injected_but_never_used(driver: Driver, conn, config: Config):
     from agent_mem.memory import learn
 
+    config.budgets.session_start = 1000  # the briefing fills its budget; 60 memories still have to take turns
     driver.prompt("s1", "setup")
     driver.stop("s1", "ok")
     project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
-    ids = [_memory(conn, project_id, f"Preference number {n} about formatting") for n in range(6)]
+    ids = [_memory(conn, project_id, f"Preference number {n} about formatting") for n in range(60)]
     first = inject.session_start(conn, config, project_id, "claude:x", "claude")
     assert first is not None
     shown = {owner for owner in first.owners if owner[0] == "m"}
-    assert len(shown) == 5
+    assert 5 <= len(shown) < len(ids)
     for n in range(4):  # injected at four starts, never opened, cited or edited
         learn.record_access(conn, list(shown), "injected", f"claude:s{n}")
     later = inject.session_start(conn, config, project_id, "claude:y", "claude")
     assert later is not None
-    left_out = ("m", next(i for i in ids if ("m", i) not in shown))
-    assert left_out in later.owners  # the one that never got a turn now does
+    assert any(owner[0] == "m" and owner not in shown for owner in later.owners)  # others get their turn
     # Injections no longer raise activation (they did, and stale items kept coming back).
     stats = learn.owner_stats(conn, list(shown))
     assert all(stat.injected == 4 and stat.briefing_factor < 1.0 for stat in stats.values())

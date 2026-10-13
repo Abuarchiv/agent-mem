@@ -65,7 +65,7 @@ def test_config_validation(tmp_path: Path):
     )
     cfg = config_module.load(data)
     assert cfg.capture is False
-    assert cfg.budgets.prompt == 200
+    assert cfg.budgets.prompt == config_module.Budgets().prompt
     assert cfg.retrieval.inject_min_score == 0.5
     assert any("nope" in w for w in cfg.warnings) and any("budgets.prompt" in w for w in cfg.warnings)
     (data / "config.json").write_text("{broken")

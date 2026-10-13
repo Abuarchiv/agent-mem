@@ -2,6 +2,10 @@
 
 ## Unreleased (2.0 track)
 
+### More context
+
+- Budgets fill what each harness passes on in one hook output (Claude Code 10,000 characters, Codex 8,000 tokens with `additionalContextLimit`, Copilot 10 KB after a tool, OpenCode unlimited): session start 8,000 tokens, prompt 2,400, compaction 4,000, file history 1,200, cut per harness. The briefing grows its slots until the budget is used; on real data Claude gets about 9,000 characters (49 entries) instead of about 4,000, Codex about 29,000 (198 entries). The prompt hook shows up to 10 confident hits with an excerpt of their text instead of 3 titles. Codex hooks changed: confirm them once with `/hooks`.
+
 ### From claude-mem's documentation
 
 - Observer failures from `claude -p` were read from stderr only, which carries just a tag; the readable error is on stdout. The model fallback now works for Claude and a usage limit pauses the stage. Explicit `ERROR` lines win, because codex echoes the prompt into stderr. "exceeded" alone (context length) no longer pauses a stage.

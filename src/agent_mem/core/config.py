@@ -38,14 +38,15 @@ DEFAULT_EXCLUDE_GLOBS = [
 
 @dataclass
 class Budgets:
-    """Maximum injected tokens per moment (estimated as characters / 4)."""
+    """Maximum injected tokens per moment (estimated as characters / 4). Context windows are large; these fill what
+    each harness passes on in one hook output (``hooks/inject.HOST_TOKENS`` cuts them per harness)."""
 
-    session_start: int = 1000
-    prompt: int = 200
-    failure: int = 120
-    warning: int = 80
-    file_history: int = 160
-    compact: int = 400
+    session_start: int = 8000
+    prompt: int = 2400
+    failure: int = 400
+    warning: int = 300
+    file_history: int = 1200
+    compact: int = 4000
 
 
 @dataclass
@@ -258,15 +259,15 @@ def _read_json(path: Path, warnings: list[str]) -> dict[str, Any]:
 
 
 # A well-typed value can still break agent-mem silently: a deadline of 0 spools every event, stdin_bytes 0 records
-# nothing, backup_keep 0 deletes every backup, duplicate_min_cosine 0 retires every older fact. Range checked here.
+# nothing, duplicate_min_cosine 0 retires every older fact. Range checked here.
 _BOUNDS: dict[str, tuple[float, float]] = {
     "hook_deadline_ms": (100, 10_000),
-    "budgets.session_start": (0, 8_000),
-    "budgets.prompt": (0, 4_000),
-    "budgets.failure": (0, 2_000),
-    "budgets.warning": (0, 2_000),
-    "budgets.file_history": (0, 2_000),
-    "budgets.compact": (0, 8_000),
+    "budgets.session_start": (0, 200_000),
+    "budgets.prompt": (0, 100_000),
+    "budgets.failure": (0, 20_000),
+    "budgets.warning": (0, 20_000),
+    "budgets.file_history": (0, 20_000),
+    "budgets.compact": (0, 200_000),
     "retrieval.inject_min_score": (0, 1),
     "retrieval.min_term_coverage": (0, 1),
     "retrieval.max_per_session": (1, 1_000),

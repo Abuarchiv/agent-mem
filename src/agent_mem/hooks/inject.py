@@ -9,7 +9,7 @@ import contextlib
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 
 from agent_mem.core import spool, timeutil
@@ -88,13 +88,19 @@ def render(lines: list[tuple[str, tuple[str, int] | None]], budget_tokens: int) 
     return Block(text="\n".join([HEADER, *kept, FOOTER]), owners=owners)
 
 
-def hit_line(hit: search.Hit) -> str:
+def hit_line(hit: search.Hit, detail: int = 120) -> str:
+    """One hit; ``detail`` characters of its answer (turn) or body (memory) follow the title."""
     day = timeutil.day(hit.ts) if hit.ts else ""
     origin = hit.harness or hit.kind
     title = first_line(request_text(hit.title or hit.text), 140)
     line = f"- [{hit.label} · {day} · {origin}] {title}"
     if hit.kind == "turn" and hit.answer.strip():
-        line += f" → {first_line(hit.answer, 120)}"
+        line += f" → {_clip(' '.join(hit.answer.split()), detail)}"
+    elif hit.kind != "turn" and detail > 140:
+        # A memory's text is "title\nbody"; the body is the full statement the title shortens.
+        body = " ".join(hit.text.partition("\n")[2].split())
+        if len(body) > len(title.rstrip("…")) + 20:
+            line = f"- [{hit.label} · {day} · {origin}] {_clip(body, detail)}"
     if hit.files:
         line += f" (files: {', '.join(hit.files[:3])})"
     return line
@@ -230,8 +236,8 @@ def _memory_lines(
     rows = conn.execute(
         "SELECT id, kind, title, body, created_at, importance, origin FROM memories "
         f"WHERE (project_id = ? OR project_id IS NULL) AND invalid_at IS NULL AND kind IN ({marks}) "
-        "ORDER BY created_at DESC LIMIT 200",
-        (project_id, *kinds),
+        "ORDER BY created_at DESC LIMIT ?",
+        (project_id, *kinds, max(200, limit * 4)),
     ).fetchall()
     own = notes.own_notes(harness)
     rows = [r for r in rows if r["origin"] not in own]
@@ -276,25 +282,69 @@ def now_line() -> str:
 def session_start(
     conn: sqlite3.Connection, config: Config, project_id: str, session_id: str, harness: str
 ) -> Block | None:
+    """The briefing, filled up to the budget: slots double until the budget is nearly used or nothing new comes."""
+    budget = config.budgets.session_start
+    scale = max(1.0, budget / 1000)
+    block, count = None, -1
+    for _ in range(4):
+        lines = _briefing_lines(conn, config, project_id, session_id, harness, scale)
+        if not lines or len(lines) == count:
+            break
+        block, count = render([(now_line(), None), *lines], budget), len(lines)
+        if block is None or tokens(block.text) >= budget * 0.85:
+            break
+        scale *= 2
+    return block
+
+
+def _briefing_lines(
+    conn: sqlite3.Connection, config: Config, project_id: str, session_id: str, harness: str, scale: float
+) -> list[tuple[str, tuple[str, int] | None]]:
     lines: list[tuple[str, tuple[str, int] | None]] = [(line, None) for line in _health_lines(conn, config)]
     profile = _profile_line(conn, project_id)
     if profile:
         lines.append((profile, None))
-    memories = _memory_lines(conn, project_id, harness)
+    # At scale 1: 5 memories, 3 lessons, 2 notes, 10 work entries; render cuts the end when the budget is full.
+    memories = _memory_lines(conn, project_id, harness, limit=round(5 * scale))
     lines.extend(memories)
     # Lessons have their own slots: rules for next time, ranked by use like the rest (``observe/summary.py``).
-    lines.extend(_memory_lines(conn, project_id, harness, limit=3, kinds=("lesson",)))
-    # Another harness's notes (memory/notes.py) get their own two slots: long session summaries would otherwise
+    lines.extend(_memory_lines(conn, project_id, harness, limit=round(3 * scale), kinds=("lesson",)))
+    # Another harness's notes (memory/notes.py) get their own slots: long session summaries would otherwise
     # take every fact slot of a project the user mostly works in with that harness (measured on real data).
-    lines.extend(_memory_lines(conn, project_id, harness, limit=2, kinds=("native_note",)))
+    lines.extend(_memory_lines(conn, project_id, harness, limit=round(2 * scale), kinds=("native_note",)))
     lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
     last = _last_session_lines(conn, project_id, session_id)
     lines.extend(last)
     # The work log as an index, like claude-mem's: titles with ids the agent can open (mem_get). Last, so the budget
     # drops it before facts and lessons; the agent sees what happened lately and can tell a newer decision itself.
-    lines.extend(_work_lines(conn, project_id, session_id, {owner for _, owner in last if owner}))
-    return render([(now_line(), None), *lines], config.budgets.session_start) if lines else None
+    lines.extend(_work_lines(conn, project_id, session_id, {owner for _, owner in last if owner}, round(10 * scale)))
+    return lines
+
+
+# What each harness passes to the model per hook output, in tokens (~4 ASCII characters each); more is moved to a
+# file the model is not told to read. Claude Code: 10,000 characters per string, no setting (code.claude.com hooks).
+# Codex: about 2,500 tokens unless the handler sets ``additionalContextLimit`` (plugins/codex/hooks.json sets 8,000).
+# Copilot: postToolUse 10 KB, sessionStart 10 MiB. OpenCode: our plugin passes everything. Checked 2026-10-13.
+HOST_TOKENS: dict[str, dict[str, int]] = {
+    "claude": {"*": 2_400},
+    "codex": {"session_start": 7_800, "prompt": 7_800, "tool": 7_800, "*": 2_400},
+    "copilot": {"tool": 2_400, "pre_tool": 2_400},
+}
+
+
+def for_host(config: Config, harness: str, kind: str) -> Config:
+    """``config`` with each budget cut to what the harness hands to the model in one piece. Before a tool call the
+    warning and the file history go out together, so the history gets what the warning leaves."""
+    caps = HOST_TOKENS.get(harness, {})
+    cap = caps.get(kind, caps.get("*"))
+    if cap is None:
+        return config
+    budgets = config.budgets
+    cut = {name: min(value, cap) for name, value in vars(budgets).items()}
+    if kind == "pre_tool":
+        cut["file_history"] = min(cut["file_history"], max(cap - cut["warning"], 0))
+    return replace(config, budgets=replace(budgets, **cut))
 
 
 def _work_lines(
@@ -376,17 +426,30 @@ def prompt_hints(
         text=prompt,
         project_id=project_id,
         exclude_session=session_id,
-        limit=5,
+        limit=PROMPT_HITS + 2,
         exclude_origins=notes.own_notes(harness),
     )
-    hits = [h for h in search.search(conn, config, query) if search.confident(h, config, terms)][:3]
+    # Only confident hits: on wording alone a weaker one cannot be told from an unrelated one ("was läuft heute im
+    # kino" against a turn about the viewer that runs; c32 in B.32), and noise is not context.
+    hits = [h for h in search.search(conn, config, query) if search.confident(h, config, terms)][:PROMPT_HITS]
     if not hits:
         return None
     learn.record_access(conn, [h.owner for h in hits], "shown", session_id)
+    detail = _detail(config.budgets.prompt, len(hits))
     # The budget keeps the best-ranked hits; the kept ones are then shown oldest first.
-    fitting = render([(hit_line(h), h.owner) for h in hits], config.budgets.prompt)
+    fitting = render([(hit_line(h, detail), h.owner) for h in hits], config.budgets.prompt)
     kept = sorted((h for h in hits if fitting and h.owner in fitting.owners), key=lambda h: h.ts)
-    return render([(hit_line(h), h.owner) for h in kept], config.budgets.prompt)
+    return render([(hit_line(h, detail), h.owner) for h in kept], config.budgets.prompt)
+
+
+PROMPT_HITS = 10
+
+
+def _detail(budget_tokens: int, hits: int) -> int:
+    """Characters of body per hit: the prompt budget shared by the hits, after their titles (~60 tokens each)."""
+    if hits == 0:
+        return 120
+    return max(120, min(1_200, (budget_tokens // hits - 60) * 4))
 
 
 def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block | None:
