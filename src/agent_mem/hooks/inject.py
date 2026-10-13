@@ -599,7 +599,11 @@ def overview(conn: sqlite3.Connection, session_id: str, config: Config | None = 
     ).fetchone()
     sessions = conn.execute("SELECT COUNT(*) FROM sessions WHERE project_id = ?", (project_id,)).fetchone()[0]
     turns = conn.execute("SELECT COUNT(*) FROM turns WHERE project_id = ?", (project_id,)).fetchone()[0]
-    lines = [f"{memories} memories ({new} new today) · {sessions} sessions · {turns} turns in this project"]
+    memory = "memory" if memories == 1 else "memories"
+    lines = [
+        f"{memories} {memory} ({new} new today) · {sessions} session{'s' * (sessions != 1)}"
+        f" · {turns} turn{'s' * (turns != 1)} in this project"
+    ]
     with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
         waiting = conn.execute("SELECT COUNT(*) FROM observe_queue WHERE state = 'pending'").fetchone()[0]
         line = _facts_line(conn, config, row[1]) if config is not None else None

@@ -25,7 +25,7 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     start = json.dumps({"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"})
     data = json.loads(hook.run("claude", None, start, config))
     assert "hookSpecificOutput" not in data  # nothing to inject yet, but the user sees the panel
-    assert "Nothing to recall here yet" in data["systemMessage"] and "1 sessions" in data["systemMessage"]
+    assert "Nothing to recall here yet" in data["systemMessage"] and "1 session ·" in data["systemMessage"]
     hook.run("claude", None, _prompt_payload(project, "s", "Build the parser for invoices"), config)
     hook.run(
         "claude",

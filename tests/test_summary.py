@@ -354,3 +354,14 @@ def test_work_log_budget_keeps_the_newest_turn(driver: Driver, conn):
     assert block is not None
     assert f"[T{second} · " in block.text
     assert f"[T{first} · " not in block.text
+
+
+def test_the_panel_counts_in_singular_for_one(driver: Driver, conn):
+    """A new project read "1 memories · 1 sessions · 1 turns"."""
+    from agent_mem.memory import store
+
+    driver.prompt("s1", "Der Parser stürzt bei leeren Rechnungen ab")
+    driver.stop("s1", "Behoben.")
+    project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
+    store.add_memory(conn, project_id=project_id, kind="fact", title="t", body="b", source="agent", trust="observer")
+    assert inject.overview(conn, "claude:s1")[0] == "1 memory (1 new today) · 1 session · 1 turn in this project"
