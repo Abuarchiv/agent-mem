@@ -42,6 +42,9 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     cfg = Config(data_dir=tmp_path / "data")
     cfg.semantic.enabled = False
+    # Tests check what a hook writes, not its 400 ms deadline: on a slow runner the first hook (it creates the
+    # schema) misses it and its event goes to the spool. Tests of the deadline set their own.
+    cfg.hook_deadline_ms = 10_000
     monkeypatch.setenv("AGENT_MEM_DATA_DIR", str(cfg.data_dir))
     return cfg
 
