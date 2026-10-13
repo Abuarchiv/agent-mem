@@ -65,6 +65,18 @@ def finish(conn: sqlite3.Connection, turn_ids: list[int], state: str, provider: 
         )
 
 
+def defer(conn: sqlite3.Connection, turn_ids: list[int], until: str) -> None:
+    """Back to ``pending`` until ``until`` without using up an attempt: the day's call limit is reached, which
+    says nothing about the turn. Before, such turns were kept raw for good and never got facts."""
+    now = timeutil.iso()
+    for turn_id in turn_ids:
+        conn.execute(
+            "UPDATE observe_queue SET state = 'pending', attempts = MAX(attempts - 1, 0), next_try = ?, "
+            "lease_until = NULL, updated_at = ? WHERE turn_id = ?",
+            (until, now, turn_id),
+        )
+
+
 def fail(conn: sqlite3.Connection, turn_ids: list[int], error: str) -> None:
     """Back off 1 min, 5 min, 30 min, 6 h; after that the turn is ``failed`` until ``--retry-failed``."""
     now = timeutil.now()

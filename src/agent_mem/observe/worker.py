@@ -15,6 +15,7 @@ import re
 import sqlite3
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,15 @@ def _record_call(
 
 def _calls_today(conn: sqlite3.Connection) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM observe_calls WHERE ts >= ?", (timeutil.iso()[:10],)).fetchone()[0])
+
+
+def _next_day() -> str:
+    """When ``_calls_today`` starts again from zero (UTC midnight)."""
+    return timeutil.iso((timeutil.now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0))
+
+
+class LimitReached(Exception):
+    """The day's model calls are used up; the turn waits for tomorrow instead of being kept raw for good."""
 
 
 def _lower_priority() -> None:
@@ -164,8 +174,10 @@ class Worker:
                 with contextlib.suppress(sqlite3.Error):
                     db.record_health(self.conn, "observer", f"facts unavailable, turns kept raw: {error}")
                 chain = []
-        if _calls_today(self.conn) >= self.config.observe.daily_limit:
+        if chain and _calls_today(self.conn) >= self.config.observe.daily_limit:
             chain = [name for name in chain if name == "ollama"]
+            if not chain:
+                raise LimitReached
         last_error = None
         for name in chain:
             llm = providers.make_llm(name, providers.model_for(self.config, name))
@@ -287,6 +299,9 @@ class Worker:
             self.stats["bundles"] += 1
             try:
                 provider = self.process(b)
+            except LimitReached:
+                queue.defer(self.conn, b.turn_ids, _next_day())
+                continue
             except providers.ProviderError as error:
                 if providers.any_left(self.config, b.harness, self.conn):
                     queue.fail(self.conn, b.turn_ids, str(error))
@@ -451,17 +466,21 @@ def run(
 
 
 def _reindex(config: Config, conn: sqlite3.Connection) -> int:
+    # Every kind the observer mirrors (``mirror``), with the tag it was extracted with: without decisions, dead ends
+    # and rules in mem0 the next extraction writes them again as new.
+    tags = {kind: tag for tag, kind in _KINDS.items() if kind != "fact"}
     rows = conn.execute(
-        "SELECT id, project_id, body, turn_id, origin FROM memories "
-        "WHERE kind = 'fact' AND invalid_at IS NULL AND dedupe_key LIKE 'mem0:%' ORDER BY id"
+        "SELECT id, project_id, kind, body, turn_id, origin FROM memories "
+        "WHERE invalid_at IS NULL AND dedupe_key LIKE 'mem0:%' ORDER BY id"
     ).fetchall()
     adapter = Mem0Adapter(config, llm="fake")  # no extraction; add_raw only embeds
     try:
         adapter.reindex([])  # wipe
         count = 0
         for row in rows:
+            tag = tags.get(str(row["kind"]))
             facts = adapter.add_raw(
-                [str(row["body"])],
+                [f"[{tag}] {row['body']}" if tag else str(row["body"])],
                 namespace_for(row["project_id"]),
                 {"turn_id": row["turn_id"], "harness": row["origin"], "memory_id": int(row["id"])},
             )
@@ -486,7 +505,9 @@ def reindex(config: Config) -> dict[str, int]:
     conn = db.connect(config, busy_timeout_ms=BUSY_TIMEOUT_MS)
     try:
         total = int(
-            conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0]
+            conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE invalid_at IS NULL AND dedupe_key LIKE 'mem0:%'"
+            ).fetchone()[0]
         )
         count = _reindex(config, conn)
         return {"facts": count, "skipped": total - count}

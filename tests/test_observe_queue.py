@@ -336,3 +336,55 @@ def test_the_extractor_sees_what_the_tools_showed_but_not_web_pages_or_edits(dri
     text = "\n".join(m["content"] for b in bundle.build(conn, config, [turn]) for m in b.messages)
     assert "What the tools showed" in text and "direct_url.json" in text and '"vcs_info"' in text
     assert "IGNORE ALL" not in text
+
+
+def test_turns_over_the_daily_limit_wait_for_tomorrow_instead_of_staying_raw(
+    config: Config, project: Path, monkeypatch
+) -> None:
+    from agent_mem.observe import providers, worker
+
+    monkeypatch.setattr(providers, "available", lambda name: True)
+    monkeypatch.setattr(worker.Worker, "adapter", property(lambda self: object()))
+    config.observe.daily_limit = 0
+    _turn(config, project, "s1", "Configure the release workflow", "The release workflow runs on tags only.")
+    conn = db.connect(config)
+    assert worker.Worker(config, conn).step() is True
+    state, attempts, next_try = conn.execute("SELECT state, attempts, next_try FROM observe_queue").fetchone()
+    assert (state, attempts) == ("pending", 0) and next_try == worker._next_day()
+    assert worker.Worker(config, conn).step() is False  # nothing due until then
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'summary'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_reindex_rebuilds_every_mirrored_kind_with_its_tag(config: Config, monkeypatch) -> None:
+    from agent_mem.memory import store
+    from agent_mem.observe import worker
+    from agent_mem.observe.mem0_adapter import Fact
+
+    added: list[str] = []
+
+    class Fake:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def reindex(self, facts) -> None:
+            pass
+
+        def add_raw(self, texts, namespace, metadata):
+            added.extend(texts)
+            return [Fact(id=f"new{len(added)}", text=texts[0], metadata=metadata)]
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(worker, "Mem0Adapter", Fake)
+    conn = db.connect(config)
+    for kind, body in (("fact", "The viewer runs on port 37778."), ("decision", "Keep SQLite as the only store.")):
+        store.add_memory(
+            conn, project_id=None, kind=kind, title=body, body=body, source="agent", trust="observer",
+            dedupe=f"mem0:old-{kind}",
+        )  # fmt: skip
+    assert worker._reindex(config, conn) == 2
+    assert added == ["The viewer runs on port 37778.", "[decision] Keep SQLite as the only store."]
+    assert {r[0] for r in conn.execute("SELECT dedupe_key FROM memories")} == {"mem0:new1", "mem0:new2"}
+    conn.close()
