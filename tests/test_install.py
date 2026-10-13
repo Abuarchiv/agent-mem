@@ -165,6 +165,9 @@ def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, mon
     assert calls[0].startswith("mcp remove --scope user agent-mem") and calls[1].startswith("mcp add --scope user")
     err = capsys.readouterr().err
     assert "MCP server not registered (boom)" in err and "claude mcp add --scope user agent-mem" in err
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    install.write("claude", PLUGINS, EXE)  # "hooks and MCP server registered" without a word that MCP was not
+    assert "MCP server not registered (`claude` not on PATH)" in capsys.readouterr().err
 
 
 def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes: Path) -> None:

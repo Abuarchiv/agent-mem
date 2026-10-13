@@ -267,6 +267,11 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
     """Claude Code keeps user-scope MCP servers in its own file; its CLI is the supported way to edit it."""
     claude = shutil.which("claude")
     if claude is None:
+        if add:  # the hooks are written anyway; without this line the summary claimed the MCP server too
+            print(
+                f"  MCP server not registered (`claude` not on PATH). Run: claude mcp add --scope user {MARK} -- {exe} mcp",
+                file=sys.stderr,
+            )
         return
 
     def run(*args: str) -> str | None:
