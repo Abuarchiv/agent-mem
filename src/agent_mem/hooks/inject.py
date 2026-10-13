@@ -10,7 +10,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import datetime
 
 from agent_mem.core import spool, timeutil
 from agent_mem.core.config import Config
@@ -553,12 +553,21 @@ _WORK = {
 }
 _GOAL = re.compile(r"- Session goal \((?P<id>[A-Z]\d+)\): (?P<text>.*)")
 _RULE = "─" * 64
-
-
-def _day_name(iso_day: str) -> str:
-    today = datetime.now(UTC).date()
-    names = {today.isoformat(): "Today", (today - timedelta(days=1)).isoformat(): "Yesterday"}
-    return names.get(iso_day) or date.fromisoformat(iso_day).strftime("%a %d %b %Y")
+# The terminal shows the newest rows per group; the rest stays one `agent-mem view` away.
+WORK_ROWS = 5
+KIND_ROWS = 3
+_KIND_ORDER = ["preference", "rule", "correction", "lesson", "dead_end", "decision", "fact", "summary", "native_note"]
+_KIND_NAME = {
+    "preference": "Preferences",
+    "rule": "Rules",
+    "correction": "Corrections",
+    "lesson": "Lessons",
+    "dead_end": "Dead ends",
+    "decision": "Decisions",
+    "fact": "Facts",
+    "summary": "Summaries",
+    "native_note": "Agent notes",
+}
 
 
 def _clip(text: str, limit: int) -> str:
@@ -637,7 +646,8 @@ def terminal(
     viewer: str | None = None,
     recent: list[tuple[str, str, str, str]] | None = None,
 ) -> str:
-    """The injected block as the user sees it in the terminal: grouped by day, one row per memory.
+    """The injected block as the user sees it in the terminal: the last session first, then recent work, then the
+    memories grouped by kind, each group cut to its newest rows.
 
     Built from the context lines themselves, so the terminal never shows something the model did not get.
     ``facts`` (project state), ``notices`` (failures to act on), ``recent`` (the work log from ``recent_work``)
@@ -647,14 +657,22 @@ def terminal(
     def paint(code: str, text: str) -> str:
         return f"\x1b[{code}m{text}\x1b[0m" if color else text
 
-    def row(ident: str, glyph: str, code: str, label: str, text: str) -> str:
+    def row(ident: str, glyph: str, code: str, text: str, label: str = "") -> str:
         kind = f"{label:<11}" if label else ""
-        return f"  {paint('2', ident.ljust(5))} {paint(code, glyph)} {paint(code, kind)}{_clip(text, 88)}"
+        return f"  {paint('2', ident.ljust(5))} {paint(code, glyph)} {paint(code, kind)}{_clip(text, 92)}"
 
-    groups: dict[str, list[str]] = {}
+    def more(hidden: int) -> list[str]:
+        return [paint("2", f"        … {hidden} more")] if hidden > 0 else []
+
     warnings: list[str] = []
     commands = files = ""
-    ids: list[str] = []
+    goal: list[str] = []
+    last: list[str] = []
+    last_heading = "Last session"
+    errors: list[str] = []
+    work: list[str] = []
+    kinds: dict[str, list[tuple[str, str]]] = {}
+    count = 0
     for line in context.splitlines():
         if line.startswith("! "):
             warnings.append(paint("31", line[2:]))
@@ -665,62 +683,69 @@ def terminal(
         elif line.startswith(("- Done: ", "- Next steps: ")):
             label, text = line[2:].split(": ", 1)
             glyph, code = ("✓", "32") if label == "Done" else ("→", "33")
-            last = next((group for group in reversed(groups) if group.startswith("Last session")), "Last session")
-            groups.setdefault(last, []).append(row("", glyph, code, label.lower(), text))
+            last.append(row("", glyph, code, text, label.lower()))
+            count += 1
         elif line.startswith("- Still failing: "):
-            groups.setdefault("Open errors", []).append(row("", "!", "31", "", line[17:]))
-        elif goal := _GOAL.match(line):
-            ids.append(goal["id"])
-            groups.setdefault("This session", []).append(row(goal["id"], "◎", "1", "goal", goal["text"]))
+            errors.append(row("", "!", "31", line[17:]))
+            count += 1
+        elif found := _GOAL.match(line):
+            goal.append(row(found["id"], "◎", "1", found["text"], "goal"))
+            count += 1
         elif match := _ENTRY.match(line):
             kind, text, ident = match["kind"], match["text"], match["id"] or ""
-            if ident:
-                ids.append(ident)
+            count += 1
             if kind.startswith("work, "):
                 glyph, code = _WORK.get(kind[6:], ("›", "2"))
-                groups.setdefault("Recent work", []).append(row(ident, glyph, code, "", text))
-                continue
-            if kind == "unresolved":
-                group = "Open errors"
+                work.append(row(ident, glyph, code, text))
+            elif kind == "unresolved":
+                errors.append(row(ident, "!", "31", text))
             elif kind.startswith("last session"):
-                group = "Last session" + (f" · {kind.split(', ', 1)[1]}" if ", " in kind else "")
-                kind = "turn"
+                if ", " in kind:
+                    last_heading = f"Last session · {kind.split(', ', 1)[1]}"
+                last.insert(0, row(ident, "›", "1", text))
             else:
-                # Only the compaction block lists memories without a day: they are from this session.
-                group = _day_name(match["day"]) if match["day"] else "This session"
-            glyph, code = _STYLE.get(kind, ("›", "2"))
-            label = "" if kind in {"turn", "unresolved"} else kind.replace("_", " ")
-            groups.setdefault(group, []).append(row(ident, glyph, code, label, text))
-    count = sum(len(rows) for rows in groups.values())
-    summary = f"· {heading} · {count} item{'s' * (count != 1)} · ~{tokens(context)} tokens"
+                kinds.setdefault(kind, []).append((ident, text))
+
     out = [
-        f"{paint('1;36', 'agent-mem')} {paint('2', summary)}",
+        f"{paint('1;36', 'agent-mem')} {paint('2', f'· {heading} · {count} item{chr(115) * (count != 1)} · ~{tokens(context)} tokens')}",
         *(paint("2", f"  {line}") for line in facts or []),
         paint("2", _RULE),
         *warnings,
         *(paint("31", f"! {line}") for line in notices or []),
     ]
-    work = groups.pop("Recent work", None)
-    if work:  # from the context: shown first, like a log
-        out += [paint("1", "Recent work"), *work]
+    if goal:
+        out += [paint("1", "This session"), *goal]
+    if last:
+        out += [paint("1", last_heading), *last]
+    if errors:
+        out += [paint("1;31", "Open errors"), *errors[:3], *more(len(errors) - 3)]
+    if work:  # from the context, newest first
+        out += [paint("1", "Recent work"), *work[:WORK_ROWS], *more(len(work) - WORK_ROWS)]
     elif recent:  # after compaction the block has no work log; the hook passes it for the terminal only
         out.append(paint("1", "Recent work"))
-        for ident, started, kind, title in recent:
+        for ident, started, kind, title in recent[:WORK_ROWS]:
             glyph, code = _WORK.get(kind, ("›", "2"))
             stamp = timeutil.parse(started)
             when = stamp.astimezone().strftime("%d.%m %H:%M") if stamp else ""
             out.append(
-                f"  {paint('2', ident.ljust(5))} {paint('2', when.ljust(11))} {paint(code, glyph)} {_clip(title, 78)}"
+                f"  {paint('2', ident.ljust(5))} {paint('2', when.ljust(11))} {paint(code, glyph)} {_clip(title, 80)}"
             )
-    for group, rows in groups.items():
-        out += [paint("1", group), *rows]
-    if not groups and not work and not recent:
+    # Memories by kind in the order an agent acts on them; inside a kind the context lists oldest first.
+    for kind in sorted(kinds, key=lambda name: _KIND_ORDER.index(name) if name in _KIND_ORDER else len(_KIND_ORDER)):
+        items = kinds[kind][::-1]
+        glyph, code = _STYLE.get(kind, ("›", "2"))
+        name = _KIND_NAME.get(kind, kind.replace("_", " ").capitalize())
+        out.append(f"{paint(code, glyph)} {paint('1', name)} {paint('2', str(len(items)))}")
+        out += [row(ident, " ", "2", text) for ident, text in items[:KIND_ROWS]]
+        out += more(len(items) - KIND_ROWS)
+    if not (goal or last or errors or work or recent or kinds):
         out.append(paint("2", "Nothing to recall here yet; this session is being recorded."))
     if commands:
         out.append(f"{paint('1', 'Commands')}  {_clip(commands, 100)}")
     if files:
         out.append(f"{paint('1', 'Files')}  {_clip(files, 100)}")
-    hint = f"agent-mem show {ids[-1]}" if ids else "agent-mem search <words>"
-    browse = f"viewer {viewer}" if viewer else "all memories: agent-mem view"
+    shown = re.findall(r"\b[MT]\d+\b", re.sub(r"\x1b\[[\d;]*m", " ", "\n".join(out[3:])))
+    hint = f"agent-mem show {shown[0]}" if shown else "agent-mem search <words>"
+    browse = f"everything: {viewer}" if viewer else "everything: agent-mem view"
     out += [paint("2", _RULE), paint("2", f"Details: {hint} · {browse}")]
     return "\n".join(out)

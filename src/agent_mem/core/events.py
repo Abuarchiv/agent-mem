@@ -7,6 +7,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from agent_mem.core.signals import classify_tool
+
 KINDS = {
     "session_start",
     "prompt",
@@ -149,6 +151,12 @@ def exit_code_of(value: Any, text: str | None, depth: int = 0) -> int | None:
         if match:
             return int(match.group(1))
     return None
+
+
+def shell_text(event: Event) -> str | None:
+    """The output text to read an exit code from: only a shell prints one. A Write echoes the file it wrote, and
+    "exit 1" inside a script must not mark the write as failed."""
+    return event.tool_output if event.tool and classify_tool(event.tool) == "shell" else None
 
 
 def parse_json_maybe(value: Any) -> Any:

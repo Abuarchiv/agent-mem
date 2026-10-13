@@ -56,29 +56,6 @@ def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver:
     assert recalls and {r["session_id"] for r in recalls} == {"claude:s2"}
     assert {r["kind"] for r in recalls} <= {"injected", "shown"}
 
-    # graph: mem0's concepts that two memories share (observe/concepts.py), never commands or plain nouns
-    from agent_mem.memory import store
-    from agent_mem.observe import concepts
-
-    project_id = snapshot["sessions"][0]["project_id"]
-    for body in ("The Viewer reads app.py.", "When the Viewer starts, the hook runs.", "When one Fehler is in app.py."):
-        store.add_memory(conn, project_id=project_id, kind="fact", title="", body=body, source="agent", trust="user")
-
-    def extract(text: str) -> list[tuple[str, str]]:
-        return [
-            (kind, word)
-            for kind, word in (("PROPER", "Viewer"), ("IDENTIFIER", "app.py"), ("PROPER", "Fehler"), ("PROPER", "When"))
-            if word in text
-        ]
-
-    concepts.link_new(conn, extract, names=lambda text: {"viewer", "when"})
-    graph = ui.build_snapshot(conn, config)["graph"]
-    labels = {node["key"]: node for node in graph["nodes"]}
-    assert set(labels) == {"Viewer", "app.py"}  # "Fehler" is a plain noun, "When" a question word
-    assert labels["Viewer"]["kind"] == "name" and labels["app.py"]["kind"] == "code"
-    [edge] = graph["edges"]  # both appear in "The Viewer reads app.py."
-    assert {edge["a"], edge["b"]} == {labels["Viewer"]["id"], labels["app.py"]["id"]} and edge["weight"] == 1.0
-    assert len(labels["Viewer"]["memory_ids"]) == 2
     assert snapshot["recipes"] and snapshot["recipes"][0]["command_key"]
     assert snapshot["learning"]["errors_fixed"] >= 1
     assert snapshot["projects"][0]["name"] == "demo"
@@ -315,12 +292,3 @@ def test_viewer_cache_stays_bounded_whatever_the_address_says(config: Config, dr
     finally:
         httpd.shutdown()
         httpd.server_close()
-
-
-def test_graph_nodes_name_a_topic():
-    named = [
-        label
-        for label in ("Codex", "hook.py", "Claude Code", "Tokens", "src", "Commit", "LongMemEval")
-        if ui._names_a_topic(label)
-    ]
-    assert named == ["Codex", "hook.py", "Claude Code", "LongMemEval"]

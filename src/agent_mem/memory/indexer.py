@@ -1,7 +1,7 @@
 """Background indexer, started detached by hooks (one instance at a time).
 
 Order of work: integrity check, spool replay, stale turns, embeddings,
-consolidation, optional summaries, retention, backups, housekeeping.
+consolidation, optional summaries, retention, housekeeping.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, An
 
 
 def recover_if_corrupt(config: Config) -> bool:
-    """Returns True if a corrupt database was replaced by the latest backup."""
+    """Returns True if a corrupt database was moved aside; the next connection starts a fresh one."""
     if not config.db_path.exists():
         return False
     # Read-only: a writable connection checkpoints and deletes the WAL when it closes, even on a damaged database.
@@ -48,8 +48,8 @@ def recover_if_corrupt(config: Config) -> bool:
     try:
         ok = probe.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     except sqlite3.OperationalError:
-        # Locked or busy (a migration, a VACUUM, a long write) is not damage. Replacing the database would throw
-        # away everything written since the last backup; look again next run.
+        # Locked or busy (a migration, a VACUUM, a long write) is not damage. Moving the database aside would
+        # throw away everything in it; look again next run.
         return False
     except sqlite3.DatabaseError:
         ok = False
@@ -62,10 +62,7 @@ def recover_if_corrupt(config: Config) -> bool:
     for suffix in ("", "-wal", "-shm"):
         with contextlib.suppress(OSError):
             os.replace(Path(f"{config.db_path}{suffix}"), Path(f"{config.db_path}.corrupt-{stamp}{suffix}"))
-    backup = db.latest_backup(config)
-    if backup is not None:
-        db.restore(config, backup)
-    logutil.write(config.log_dir, "indexer", event="recovered_corrupt_db", backup=str(backup or "none"))
+    logutil.write(config.log_dir, "indexer", event="recovered_corrupt_db", kept=f"{config.db_path}.corrupt-{stamp}")
     return True
 
 
@@ -219,20 +216,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
 
     stats["retention"] = retention(conn, config)
 
-    if db.get_meta(conn, "backups_dirty") == "1":
-        db.rebuild_backups(conn, config)
-        with db.transaction(conn):
-            db.set_meta(conn, "backups_dirty", "0")
-            db.set_meta(conn, "last_backup_at", timeutil.iso())
-    last_backup = db.get_meta(conn, "last_backup_at")
-    if last_backup is None or timeutil.hours_between(last_backup) >= config.retention.backup_every_hours:
-        db.backup(conn, config)
-        db.prune_backups(config, config.retention.backup_keep)
-        with db.transaction(conn):
-            db.set_meta(conn, "last_backup_at", timeutil.iso())
-        stats["backup"] = True
-
-    # Events spooled while this run worked (embeddings, consolidation, a backup) would wait for the next run, and
+    # Events spooled while this run worked (embeddings, consolidation) would wait for the next run, and
     # every later event of their session queues behind them (hooks.hook): replay them before leaving.
     for _ in range(5):
         if not spool.count(config.spool_dir):

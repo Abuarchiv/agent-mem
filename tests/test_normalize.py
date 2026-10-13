@@ -38,6 +38,32 @@ def test_claude_events():
     assert normalize("claude", {"hook_event_name": "Notification", "session_id": "s"}) is None
 
 
+def test_exit_code_text_counts_only_for_shell_output():
+    script = "#!/bin/sh\ncd /tmp || exit 1\n"
+    write = normalize(
+        "claude",
+        {
+            "hook_event_name": "PostToolUse",
+            "session_id": "s",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/x.sh", "content": script},
+            "tool_response": {"type": "create", "filePath": "/tmp/x.sh", "content": script},
+        },
+    )
+    assert write.exit_code is None and not write.tool_failed
+    shell = normalize(
+        "claude",
+        {
+            "hook_event_name": "PostToolUse",
+            "session_id": "s",
+            "tool_name": "Bash",
+            "tool_input": {"command": "make"},
+            "tool_response": {"stdout": "make: *** [all] Error\nexit code 2", "stderr": ""},
+        },
+    )
+    assert shell.exit_code == 2 and shell.tool_failed
+
+
 def test_codex_events_infer_failure_from_exit_code():
     event = normalize(
         "codex",

@@ -1,4 +1,4 @@
-"""SQLite access: connection setup, migrations, backups and integrity checks.
+"""SQLite access: connection setup, migrations and integrity checks.
 
 Standard library only (hook path).
 """
@@ -64,7 +64,7 @@ def connect(
     config: Config, *, busy_timeout_ms: int = BUSY_TIMEOUT_MS, migrate: bool = True, fresh_only: bool = False
 ) -> sqlite3.Connection:
     """Open the database. ``fresh_only`` (hook path) creates a new schema but refuses to migrate an
-    existing database, because the pre-migration backup of a large file would outlast the deadline."""
+    existing database, because migrating a large file would outlast the deadline."""
     ensure_private_dir(config.data_dir)
     conn = sqlite3.connect(
         config.db_path, timeout=busy_timeout_ms / 1000, isolation_level=None, check_same_thread=False
@@ -84,7 +84,7 @@ def connect(
         if fresh_only and 0 < current < SCHEMA_VERSION:
             conn.close()
             raise MigrationPendingError(f"database schema {current} needs migration to {SCHEMA_VERSION}")
-        migrate_database(conn, config)
+        migrate_database(conn)
     return conn
 
 
@@ -92,14 +92,12 @@ def user_version(conn: sqlite3.Connection) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
-def migrate_database(conn: sqlite3.Connection, config: Config) -> None:
+def migrate_database(conn: sqlite3.Connection) -> None:
     current = user_version(conn)
     if current == SCHEMA_VERSION:
         return
     if current > SCHEMA_VERSION:
         raise SchemaTooNewError(f"database schema {current} is newer than supported {SCHEMA_VERSION}")
-    if current > 0:
-        backup(conn, config, label=f"pre-migration-v{current}")
     try:
         conn.execute("BEGIN EXCLUSIVE")
     except sqlite3.OperationalError as error:
@@ -147,85 +145,11 @@ def transaction(conn: sqlite3.Connection, *, immediate: bool = True) -> Iterator
         conn.execute("COMMIT")
 
 
-def backup(conn: sqlite3.Connection, config: Config, *, label: str = "daily") -> Path:
-    ensure_private_dir(config.backup_dir)
-    stamp = timeutil.iso().replace(":", "").replace("-", "").replace(".", "")
-    target = config.backup_dir / f"memory-{stamp}-{label}.db"
-    # Write under a name the backup globs ignore, so an interrupted backup never counts as one.
-    partial = target.with_name(target.name + ".partial")
-    with contextlib.suppress(OSError):
-        partial.unlink()
-    try:
-        conn.execute("VACUUM INTO ?", (str(partial),))
-        _private_file(partial)
-        os.replace(partial, target)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            partial.unlink()
-        raise
-    return target
-
-
-def prune_backups(config: Config, keep: int) -> list[Path]:
-    if not config.backup_dir.exists():
-        return []
-    daily = sorted(config.backup_dir.glob("memory-*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
-    removed: list[Path] = []
-    for stale in daily[keep:]:
-        with contextlib.suppress(OSError):
-            stale.unlink()
-            removed.append(stale)
-    return removed
-
-
-def rebuild_backups(conn: sqlite3.Connection, config: Config) -> None:
-    """After a purge, old backups still contain deleted data. Replace them with one fresh backup."""
-    if config.backup_dir.exists():
-        for old in config.backup_dir.glob("memory-*.db"):
-            with contextlib.suppress(OSError):
-                old.unlink()
-    backup(conn, config, label="after-purge")
-
-
 def quick_check(conn: sqlite3.Connection) -> bool:
     try:
         return conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     except sqlite3.DatabaseError:
         return False
-
-
-def latest_backup(config: Config) -> Path | None:
-    if not config.backup_dir.exists():
-        return None
-    candidates = sorted(config.backup_dir.glob("memory-*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0] if candidates else None
-
-
-def restore(config: Config, source: Path) -> None:
-    """Replace the live database with ``source``. The current file is kept as ``memory.db.replaced``."""
-    # Read-only URI: a missing path must fail instead of creating an empty database that then replaces the live one.
-    probe = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
-    try:
-        if probe.execute("PRAGMA quick_check").fetchone()[0] != "ok":  # raises DatabaseError if unreadable
-            raise ValueError(f"backup {source} failed its integrity check")
-        if user_version(probe) == 0:
-            raise ValueError(f"{source} is not an agent-mem database")
-    finally:
-        probe.close()
-    for suffix in ("-wal", "-shm"):
-        side = Path(str(config.db_path) + suffix)
-        with contextlib.suppress(OSError):
-            side.unlink()
-    if config.db_path.exists():
-        os.replace(config.db_path, Path(str(config.db_path) + ".replaced"))
-    target = sqlite3.connect(config.db_path)
-    source_conn = sqlite3.connect(source)
-    try:
-        source_conn.backup(target)
-    finally:
-        source_conn.close()
-        target.close()
-    _private_file(config.db_path)
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:

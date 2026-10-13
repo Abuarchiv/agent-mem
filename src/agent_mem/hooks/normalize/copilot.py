@@ -17,6 +17,7 @@ from agent_mem.core.events import (
     output_text,
     parse_json_maybe,
     require_session,
+    shell_text,
     text_of,
 )
 
@@ -70,7 +71,7 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
         if kind == "tool":
             result = get(payload, "toolResult", "tool_result")
             event.tool_output = output_text(result)
-            event.exit_code = exit_code_of(result, event.tool_output)
+            event.exit_code = exit_code_of(result, shell_text(event))
             result_type = result.get("resultType") if isinstance(result, dict) else None
             if name == "postToolUseFailure" or result_type in {"failure", "error"}:
                 event.tool_failed = True

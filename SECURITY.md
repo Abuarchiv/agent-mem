@@ -26,9 +26,9 @@ Report vulnerabilities privately through GitHub security advisories on this repo
 
 ## Not covered
 
-- **Encryption at rest.** Anyone who can read the data directory or its backups can read the stored history and facts.
+- **Encryption at rest.** Anyone who can read the data directory can read the stored history and facts.
 - What a harness provider does with the text your CLI sends it is governed by that provider's terms, not by Agent Mem.
 
 ## Deleting data
 
-`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, queues the matching facts for removal from Qdrant, vacuums the database, deletes spooled events, and replaces all backups with a fresh one. `mem_forget` deletes one item in SQLite and in Qdrant. `agent-mem uninstall <harness>` removes hooks and MCP entries and leaves the data in place.
+`agent-mem purge --id|--project|--before|--all` deletes rows, search keys, vectors and links, queues the matching facts for removal from Qdrant, vacuums the database, deletes spooled events, and removes the backups folder older releases wrote. `mem_forget` deletes one item in SQLite and in Qdrant. `agent-mem uninstall <harness>` removes hooks and MCP entries and leaves the data in place.

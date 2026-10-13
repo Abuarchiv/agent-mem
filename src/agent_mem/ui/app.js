@@ -7,7 +7,6 @@
     timeline: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
     memory: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
     learned: '<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9z"/>',
-    graph: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="10" cy="18" r="2.5"/><path d="M8.4 6.4l7.2 1.2M6.8 8.4l2.4 7.2M16.4 10l-4.8 6"/>',
     health: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
     session: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3M13 15h4"/>',
@@ -17,9 +16,6 @@
     check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
     cross: '<path d="M7 7l10 10M17 7L7 17"/>',
     dots: '<path d="M6 12h.01M12 12h.01M18 12h.01"/>',
-    minus: '<path d="M6 12h12"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
     copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
@@ -28,25 +24,18 @@
 
   const NAV = [
     { id: "overview", label: "Overview", icon: "overview", group: "Memory", search: "Search requests, memories and files…" },
-    { id: "timeline", label: "Timeline", icon: "timeline", group: "Memory", search: "Search requests, results, files and commands…" },
+    { id: "timeline", label: "Sessions", icon: "timeline", group: "Memory", search: "Search requests, results, files and commands…" },
     { id: "memory", label: "Memories", icon: "memory", group: "Memory", search: "Search memories…" },
     { id: "learned", label: "Learned", icon: "learned", group: "Memory", search: "Search lessons, rules, fixes and preferences…" },
-    { id: "graph", label: "Connections", short: "Links", icon: "graph", group: "Memory", search: "Search concepts…" },
-    { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search running parts…" },
+    { id: "health", label: "Health", title: "Health & privacy", icon: "health", group: "System", search: "Search background jobs…" },
   ];
-  const MEMORY_KINDS = ["decision", "fact", "preference", "correction", "dead_end", "lesson", "summary", "native_note"];
+  // Order an agent acts on them: what you want, what was learned, what failed, what was decided, plain facts.
+  const MEMORY_KINDS = ["preference", "correction", "lesson", "dead_end", "decision", "fact", "summary", "native_note"];
   const PROFILE_LABEL = { "cmd:test": "Test command", "cmd:lint": "Lint command", "cmd:build": "Build command", "cmd:install": "Install command" };
-  const ENTITY_KINDS = ["name", "topic", "code", "quoted"];
-  // Error signatures are stored as "sig:<hash>"; show them as short error ids.
-  const entityLabel = (node) => node.key;
-  // mem0's concept types: names (proper nouns), topics (noun phrases), code identifiers, quoted terms.
-  const ENTITY_COLOR = { name: "--blue", topic: "--green", code: "--yellow", quoted: "--pink" };
-  const nodeColor = (node) => ENTITY_COLOR[node.kind];
 
   const root = document.getElementById("root");
   let data = null;
-  let graphController = null;
-  const state = { view: "overview", project: "all", query: "", outcome: "all", session: undefined, turn: undefined, memory: undefined, kind: "all", invalid: false, hiddenKinds: new Set() };
+  const state = { view: "overview", project: "all", query: "", outcome: "all", session: undefined, turn: undefined, memory: undefined, kind: "all", invalid: false };
 
   /* ---------------------------------------------------------------- helpers */
 
@@ -54,6 +43,10 @@
   const num = (value) => Number(value ?? 0).toLocaleString("en-US");
   const plural = (count, word, many = `${word}s`) => `${num(count)} ${count === 1 ? word : many}`;
   const readable = (code) => String(code ?? "").replace(/_/g, " ");
+  // Memory kinds as the reader names them; native notes are the agents' own memory files, read in as they are.
+  const KIND_LABEL = { dead_end: "dead end", native_note: "agent note" };
+  const kindLabel = (kind) => KIND_LABEL[kind] ?? readable(kind);
+  const ORIGIN_LABEL = { "codex-memory": "Codex memory file", "claude-auto-memory": "Claude Code memory file" };
   const firstLine = (text, limit = 160) => {
     const line = String(text ?? "").split("\n").find((part) => part.trim() !== "") ?? "";
     return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
@@ -111,11 +104,16 @@
   const inProjectOrGlobal = (id) => state.project === "all" || id === state.project || !id;
   const harnessLabel = (harness) => ({ claude: "Claude Code", codex: "Codex", copilot: "Copilot CLI", opencode: "OpenCode" })[harness] ?? harness ?? "unknown";
   const hashFor = (view, params = {}) => { const query = new URLSearchParams(params).toString(); return `#/${view}${query ? `?${query}` : ""}`; };
-  const COMPONENT_LABEL = { indexer: "Search index", semantic: "Meaning search", observer: "Fact extraction", consolidation: "Cleanup", backup: "Backup" };
-  const componentLabel = (name) => (name.startsWith("hook:") ? `${harnessLabel(name.slice(5))} hooks` : COMPONENT_LABEL[name] ?? readable(name));
-  const outcomeLabel = (outcome) => ({ ok: "done", error: "failed", open: "open", unknown: "no result" })[outcome] ?? outcome;
+  const COMPONENT_LABEL = { indexer: "Search index", semantic: "Meaning search", observer: "Fact extraction", consolidation: "Cleanup" };
+  const componentLabel = (name) => {
+    if (name.startsWith("hook:")) return `${harnessLabel(name.slice(5))} hooks`;
+    if (name.startsWith("setup:")) return `${harnessLabel(name.slice(6))} setup`;
+    return COMPONENT_LABEL[name] ?? readable(name);
+  };
+  // "error" means a command failed and nothing later fixed it; the turn itself usually still finished.
+  const outcomeLabel = (outcome) => ({ ok: "done", error: "with errors", open: "running", unknown: "no result" })[outcome] ?? outcome;
   const outcomeTag = (outcome) => tag(outcomeLabel(outcome), outcome === "ok" ? "good" : outcome === "error" ? "bad" : outcome === "open" ? "warn" : "");
-  const outcomeBadge = (outcome) => `<span class="badge ${h(outcome)}" title="${h(outcomeLabel(outcome))}">${icon(outcome === "ok" ? "check" : outcome === "error" ? "cross" : "dots", 15, 2.2)}</span>`;
+  const outcomeBadge = (outcome) => `<span class="badge ${h(outcome)}" title="${h(outcomeLabel(outcome))}">${icon(outcome === "ok" ? "check" : outcome === "error" ? "alert" : "dots", 15, 2.2)}</span>`;
   const limitReached = (list, key) => list.length >= (data.limits[key] ?? Infinity);
 
   // `agent-mem serve` builds the page fresh on every request; the page reloads itself every `refresh` seconds.
@@ -125,17 +123,24 @@
   const memories = () => data.memories.filter((memory) => inProjectOrGlobal(memory.project_id));
   // The observer's title says what was done; without one the request stands in for it.
   const headline = (turn) => turn.title || firstLine(request(turn.prompt));
+  // The observer's session title; until it has run, the first request says what the session was about.
+  const sessionTitle = (session) => {
+    if (!session) return "";
+    if (session.title) return session.title;
+    const first = data.turns.filter((turn) => turn.session_id === session.id).reduce((a, b) => (a && a.started_at <= b.started_at ? a : b), null);
+    return first ? headline(first) : "";
+  };
   const sessionSummary = (session) => {
     const summary = session.summary || {};
     const part = (label, items) => (items && items.length ? `<span class="section-label">${label}</span><ul class="summary-list">${items.map((item) => `<li>${h(item)}</li>`).join("")}</ul>` : "");
     const body = part("Done", summary.completed) + part("Learned", summary.learned) + part("Next steps", summary.next_steps);
-    return session.title || body ? `<div class="session-summary">${session.title ? `<p><b>${h(session.title)}</b></p>` : ""}${body}</div>` : "";
+    return body ? `<div class="session-summary">${body}</div>` : "";
   };
   const turnMatches = (turn) => matches([turn.title, turn.prompt, turn.answer, ...turn.files, ...turn.commands, ...turn.errors, `T${turn.id}`]);
   const filteredTurns = () => turns().filter((turn) => (state.outcome === "all" || turn.outcome === state.outcome) && turnMatches(turn));
 
   function outcomePills() {
-    const options = [["all", "All"], ["error", "Failed"], ["ok", "Done"], ["open", "Open"]];
+    const options = [["all", "All"], ["ok", "Done"], ["error", "With errors"], ["open", "Running"]];
     return `<div class="pill-group" role="group" aria-label="Filter by outcome">${options.map(([value, label]) => `<button type="button" class="pill" data-action="outcome" data-value="${value}" aria-pressed="${state.outcome === value}">${label}</button>`).join("")}</div>`;
   }
 
@@ -165,7 +170,7 @@
 
   function renderChrome() {
     const failing = attention().filter((item) => item.tone === "bad").length;
-    const counts = { timeline: turns().length, memory: memories().filter((m) => !m.invalid_at).length, learned: data.rules.length + data.recipes.length + memories().filter((m) => m.kind === "lesson" && !m.invalid_at).length };
+    const counts = { timeline: state.project === "all" ? data.counts.turns : turns().length, memory: state.project === "all" ? data.counts.memories : memories().filter((m) => !m.invalid_at).length, learned: data.rules.length + data.recipes.length + memories().filter((m) => m.kind === "lesson" && !m.invalid_at).length };
     const count = (id) => {
       if (id === "health") return failing > 0 ? `<span class="nav-count is-alert">${failing}</span>` : "";
       const value = counts[id];
@@ -225,7 +230,8 @@
     }
     return [...groups.entries()].map(([sessionId, items]) => {
       const session = data.sessions.find((item) => item.id === sessionId);
-      return `<div class="session-head">${icon("session", 17)}<b>${h(harnessLabel(session?.harness))}</b>${projectTag(items[0].project_id)}${session?.branch ? tag(session.branch, "mono") : ""}<span class="muted">${h(sessionRange(session, items))}</span></div>` +
+      const title = sessionTitle(session);
+      return `<div class="session-head">${icon("session", 17)}<b class="session-title">${h(title || harnessLabel(session?.harness))}</b><span class="session-meta">${projectTag(items[0].project_id)}<span class="muted">${h(harnessLabel(session?.harness))} · ${h(sessionRange(session, items))}</span></span></div>` +
         items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${turn.type ? tag(turn.type) : ""}${h(headline(turn) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
     }).join("");
   }
@@ -253,33 +259,31 @@
     const perDay = new Map(days.map((key) => [key, { turns: 0, errors: 0 }]));
     for (const turn of allTurns) { const entry = perDay.get(dayKey(turn.started_at)); if (entry) { entry.turns += 1; if (turn.outcome === "error") entry.errors += 1; } }
     const peak = Math.max(1, ...[...perDay.values()].map((entry) => entry.turns));
-    const bars = days.map((key) => { const entry = perDay.get(key); return `<span title="${h(dayLabel(key))}: ${plural(entry.turns, "request")}, ${num(entry.errors)} failed"><i class="${key === today() ? "today" : ""}" style="height:${entry.turns ? Math.max(6, entry.turns / peak * 100) : 3}%"></i>${entry.errors ? `<i class="errors" style="height:${entry.errors / peak * 100}%"></i>` : ""}</span>`; }).join("");
-    const activity = `<section class="block block-yellow"><i class="block-deco deco-tile"></i><h2>Activity</h2><div class="stats">${stat(num(turnCount), `${approx}requests`)}${stat(num(sessionCount), "sessions")}${stat(num(allTurns.filter((t) => t.outcome === "error").length), "failed")}</div><div class="block-foot"><div class="bars" role="img" aria-label="Requests per day over the last 14 days">${bars}</div><div class="bar-axis"><span>${h(dayLabel(days[0]))}</span><span>Today</span></div></div></section>`;
+    const bars = days.map((key) => { const entry = perDay.get(key); return `<span title="${h(dayLabel(key))}: ${plural(entry.turns, "request")}, ${num(entry.errors)} with errors"><i class="${key === today() ? "today" : ""}" style="height:${entry.turns ? Math.max(6, entry.turns / peak * 100) : 3}%"></i>${entry.errors ? `<i class="errors" style="height:${entry.errors / peak * 100}%"></i>` : ""}</span>`; }).join("");
+    const activity = `<section class="block block-yellow"><i class="block-deco deco-tile"></i><h2>Activity</h2><div class="stats">${stat(num(turnCount), `${approx}requests`)}${stat(num(sessionCount), "sessions")}${stat(num(allTurns.filter((t) => t.outcome === "error").length), "with errors")}</div><div class="block-foot"><div class="bars" role="img" aria-label="Requests per day over the last 14 days">${bars}</div><div class="bar-axis"><span>${h(dayLabel(days[0]))}</span><span>Today</span></div></div></section>`;
 
     const byKind = MEMORY_KINDS.map((kind) => [kind, valid.filter((memory) => memory.kind === kind).length]).filter(([, count]) => count > 0);
-    const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(valid.length)}</b><span>current${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} replaced by newer ones` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(readable(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, dead ends and preferences appear as agents work.</span>`}</div></section>`;
+    const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? valid.length : data.counts.memories)}</b><span>current${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} replaced by newer ones` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(kindLabel(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, dead ends and preferences appear as agents work.</span>`}</div></section>`;
 
     const learning = data.learning;
     const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learning <a href="${hashFor("learned")}" aria-label="Open learned rules and recipes">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(learning.errors_fixed)}</b><span>${learning.errors_fixed === 1 ? "error fix" : "error fixes"} remembered</span></div><div class="block-foot"><div class="stats">${stat(num(learning.known_errors_recurred), "errors came back")}${stat(num(enabled), "rules active")}</div></div></section>`;
 
-    const nodes = data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
-    const graphBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Connections <a href="${hashFor("graph")}" aria-label="Open connections">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? nodes.length : data.counts.concepts)}</b><span>concepts in your memories</span></div><div class="block-foot"><span class="caption">linked when they appear in the same memory</span></div></section>`;
 
     const list = filteredTurns().slice(0, 9);
     const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No requests match" : "Nothing captured yet", allTurns.length ? "Try another search or outcome filter." : "Connect a harness with <code>agent-mem setup claude</code> (or codex, copilot, opencode) and start a session.");
-    const latest = valid.slice(0, 5).map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><span class="tag kind-${h(memory.kind)}">${h(readable(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memoryText(memory), 110))}</b><span>M${memory.id} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></a>`).join("");
+    const latest = valid.slice(0, 5).map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><span class="tag kind-${h(memory.kind)}">${h(kindLabel(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memoryText(memory), 110))}</b><span>M${memory.id} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></a>`).join("");
     const componentRows = Object.entries(data.health.components ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(0, 6).map(([component, info]) => {
       const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
       return `<div class="row"><i class="dot ${failing ? "bad" : "good"}"></i><b>${h(componentLabel(component))}</b><span class="value">${failing ? "failing" : `ok ${h(ago(info.last_ok_at))}`}</span></div>`;
     }).join("");
     return `<div class="page-head"><div><h1>${num(turnCount)} ${turnCount === 1 ? "request" : "requests"} in ${plural(sessionCount, "session")}</h1><p class="lede">${h(lede)}</p></div></div>
 ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
-<div class="blocks">${activity}${memoryBlock}${learnBlock}${graphBlock}</div>
+<div class="blocks">${activity}${memoryBlock}${learnBlock}</div>
 <div class="columns">
-<section class="panel"><div class="panel-head"><h2>Latest requests</h2><span class="spacer"></span>${outcomePills()}</div>${feed}<div class="panel-foot"><a class="text-link" href="${hashFor("timeline")}">Open timeline ${icon("right", 16)}</a></div></section>
+<section class="panel"><div class="panel-head"><h2>Latest requests</h2><span class="spacer"></span>${outcomePills()}</div>${feed}<div class="panel-foot"><a class="text-link" href="${hashFor("timeline")}">All sessions ${icon("right", 16)}</a></div></section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Recently learned</h2><span class="spacer"></span>${valid.length ? `<a class="text-link" href="${hashFor("memory")}">All</a>` : ""}</div>${latest || empty("No memories yet", "Agents store them with <code>mem_remember</code>; hooks add decisions, corrections and dead ends.")}</section>
-<section class="panel"><div class="panel-head"><h2>Running parts</h2><span class="spacer"></span><a class="text-link" href="${hashFor("health")}">Health</a></div>${componentRows || empty("No hooks have run yet", "Run <code>agent-mem doctor</code> after your first session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Background jobs</h2><span class="spacer"></span><a class="text-link" href="${hashFor("health")}">Health</a></div>${componentRows || empty("No hooks have run yet", "Run <code>agent-mem doctor</code> after your first session.")}</section>
 </div></div>`;
   }
 
@@ -299,18 +303,18 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
       const key = dayKey(session.started_at);
       const label = key === lastDay ? "" : `<div class="list-label">${h(dayLabel(key))}</div>`;
       lastDay = key;
-      return `${label}<button type="button" class="session-card" data-action="session" data-value="${h(session.id)}" aria-pressed="${session.id === active}"><header>${icon("session", 17)}<b>${h(harnessLabel(session.harness))}</b></header><span class="meta">${projectTag(session.project_id)}${session.branch ? `<span class="mono muted">${h(session.branch)}</span>` : ""}</span><span class="meta muted"><span>${h(sessionRange(session, []))}</span><span>${plural(session.turns, "turn")}</span></span></button>`;
+      return `${label}<button type="button" class="session-card" data-action="session" data-value="${h(session.id)}" aria-pressed="${session.id === active}"><b class="session-title">${h(sessionTitle(session) || "(no request yet)")}</b><span class="meta">${projectTag(session.project_id)}<span class="muted">${h(harnessLabel(session.harness))}</span></span><span class="meta muted"><span>${h(sessionRange(session, []))}</span><span>${plural(session.turns, "request")}</span></span></button>`;
     }).join("");
     const session = data.sessions.find((item) => item.id === active);
     const feedTurns = list.filter((turn) => turn.session_id === active).slice().reverse();
-    const head = session ? `<div class="panel-head"><h2>${h(harnessLabel(session.harness))}</h2>${projectTag(session.project_id)}${session.branch ? tag(session.branch, "mono") : ""}<small>${h(sessionRange(session, []))}</small></div>${sessionSummary(session)}` : `<div class="panel-head"><h2>Turns</h2></div>`;
+    const head = session ? `<div class="panel-head session-panel-head"><h2>${h(sessionTitle(session) || harnessLabel(session.harness))}</h2><span class="session-meta">${projectTag(session.project_id)}${tag(harnessLabel(session.harness))}${session.branch ? tag(session.branch, "mono") : ""}<small>${h(sessionRange(session, []))}</small></span></div>${sessionSummary(session)}` : `<div class="panel-head"><h2>Requests</h2></div>`;
     const feed = feedTurns.length === 0
       ? empty(filtering ? "Nothing matches in this session" : "No loaded turns for this session", filtering ? "Clear the search or outcome filter." : `The page holds the latest ${num(data.limits.turns)} turns.`)
       : `<div class="feed">${feedTurns.map((turn) => {
         const actionCount = (data.actions[turn.id] ?? []).length;
-        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${outcomeTag(turn.outcome)}${turn.type ? tag(turn.type) : ""}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header>${turn.title ? `<p><b>${h(turn.title)}</b></p>` : ""}<p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
+        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${turn.type ? tag(turn.type) : ""}${turn.outcome === "ok" ? "" : outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header>${turn.title ? `<p><b>${h(turn.title)}</b></p>` : ""}<p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
       }).join("")}</div>`;
-    return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
+    return `<div class="page-head"><div><h1>Sessions</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
 <div class="timeline">
 <div class="session-list">${cards || empty("No sessions", "Sessions appear after a connected harness runs.")}${hidden ? `<p class="caption">${plural(hidden, "session")} without a request hidden.</p>` : ""}</div>
 <section class="panel">${head}${feed}</section>
@@ -336,7 +340,7 @@ ${turnDetail(selected, session)}
       const text = memory ? memoryText(memory) : other ? headline(other) : "";
       const href = isMemory ? hashFor("memory", { m: String(recall.owner_id) }) : hashFor("timeline", { turn: String(recall.owner_id) });
       const when = recall.ts < turn.started_at ? "at session start" : clock(recall.ts);
-      return `<li><header>${memory ? tag(readable(memory.kind), `kind-${memory.kind}`) : tag("request")}<a href="${href}"><b>${label}</b></a><span class="muted">${h(when)}</span></header>${text ? h(firstLine(text, 160)) : ""}</li>`;
+      return `<li><header>${memory ? tag(kindLabel(memory.kind), `kind-${memory.kind}`) : tag("request")}<a href="${href}"><b>${label}</b></a><span class="muted">${h(when)}</span></header>${text ? h(firstLine(text, 160)) : ""}</li>`;
     };
     return `<span class="section-label">Given to the agent (${items.length})</span><ul class="actions">${items.map(row).join("")}</ul>`;
   }
@@ -346,11 +350,13 @@ ${turnDetail(selected, session)}
     const actions = data.actions[turn.id] ?? [];
     const learned = data.memories.filter((memory) => memory.turn_id === turn.id);
     const closeHref = hashFor("timeline", session ? { session: session.id } : {});
-    const actionList = actions.length ? `<span class="section-label">Actions (${actions.length})</span><ul class="actions">${actions.map((action) => `<li><header><b>${h(action.tool ?? "tool")}</b>${action.category ? tag(action.category) : ""}${action.failed ? tag(action.resolved ? "failed, fixed later" : "failed", action.resolved ? "warn" : "bad") : ""}${action.external ? tag("external content", "warn") : ""}${action.exit_code !== null && action.exit_code !== undefined ? `<span class="mono">exit ${h(action.exit_code)}</span>` : ""}</header>${action.command || action.input ? `<code>${h(action.command || action.input)}</code>` : ""}${action.error_line ? `<code class="error-line">${h(action.error_line)}</code>` : ""}</li>`).join("")}</ul>` : "";
+    // One line per action: what the agent said it does, then the command or file; failures stand out, the rest stays quiet.
+    const actionList = actions.length ? `<span class="section-label">Actions (${actions.length})</span><ul class="actions">${actions.map((action) => `<li class="${action.failed && !action.resolved ? "is-failed" : ""}"><header><b>${h(action.tool ?? "tool")}</b>${action.note ? `<span class="action-note">${h(action.note)}</span>` : ""}${action.failed ? tag(action.resolved ? "failed, fixed later" : `failed${action.exit_code ? ` · exit ${action.exit_code}` : ""}`, action.resolved ? "warn" : "bad") : ""}${action.external ? tag("external content", "warn") : ""}</header>${action.input || action.command ? `<code>${h(firstLine(action.input || action.command, 200))}</code>` : ""}${action.error_line ? `<code class="error-line">${h(action.error_line)}</code>` : ""}</li>`).join("")}</ul>` : "";
     return `<aside class="detail ${h(turn.outcome)}" aria-label="Turn detail">
 <header><h2>T${turn.id} · ${h(outcomeLabel(turn.outcome))}</h2><a class="round-button" href="${closeHref}" aria-label="Close turn detail">${icon("close", 16)}</a></header>
-<div class="pill-group">${tag(projectName(turn.project_id))}${session ? tag(harnessLabel(session.harness)) : ""}${session?.branch ? tag(session.branch, "mono") : ""}${tag(`trust ${turn.trust}`)}</div>
-<dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still open")}</dd><dt>Importance</dt><dd>${h(Number(turn.importance).toFixed(2))}</dd></dl>
+${turn.title ? `<p class="detail-title">${turn.type ? tag(turn.type) : ""}<b>${h(turn.title)}</b></p>` : ""}
+<div class="pill-group">${projectTag(turn.project_id)}${session ? tag(harnessLabel(session.harness)) : ""}${session?.branch ? tag(session.branch, "mono") : ""}</div>
+<dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still running")}</dd></dl>
 <div class="copy-list">${copyable(`agent-mem show T${turn.id}`)}</div>
 <span class="section-label">Request</span><div class="text-box">${h(request(turn.prompt) || "(no request text)")}</div>
 ${actionList}
@@ -359,7 +365,7 @@ ${turn.truncated ? `<p class="notice"><span>Long text is shortened on this page.
 ${turn.files.length ? `<span class="section-label">Files</span><div class="file-list">${turn.files.map((file) => tag(file, "mono")).join("")}</div>` : ""}
 ${turn.errors.length ? `<span class="section-label">Errors</span><ul class="actions">${turn.errors.map((error) => `<li><code class="error-line">${h(error)}</code></li>`).join("")}</ul>` : ""}
 ${recallList(turn)}
-${learned.length ? `<span class="section-label">Learned from this turn</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
+${learned.length ? `<span class="section-label">Learned from this turn</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
 <span class="notice">${icon("lock", 16)}Captured text is untrusted and shown as stored. Secrets were redacted at capture.</span>
 </aside>`;
   }
@@ -371,20 +377,40 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
     const pool = all.filter((memory) => state.invalid || !memory.invalid_at);
     const counts = new Map(MEMORY_KINDS.map((kind) => [kind, pool.filter((memory) => memory.kind === kind).length]));
     const shown = pool.filter((memory) => (state.kind === "all" || memory.kind === state.kind) && matches([memory.title, memory.body, memory.kind, memory.origin, `M${memory.id}`]));
-    const pills = `<div class="pill-group" role="group" aria-label="Filter by kind"><button type="button" class="pill" data-action="kind" data-value="all" aria-pressed="${state.kind === "all"}">All ${num(pool.length)}</button>${MEMORY_KINDS.filter((kind) => counts.get(kind)).map((kind) => `<button type="button" class="pill" data-action="kind" data-value="${kind}" aria-pressed="${state.kind === kind}">${h(readable(kind))} ${num(counts.get(kind))}</button>`).join("")}<button type="button" class="pill" data-action="invalid" aria-pressed="${state.invalid}">Show replaced</button></div>`;
-    const cards = shown.map((memory) => {
-      const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} shown` : memory.used ? `used ${num(memory.used)}×` : "not used yet";
-      const text = memoryText(memory);
-      const extra = memory.body && !text.startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? memory.body : "";
-      return `<article class="memory-card${memory.invalid_at ? " invalid" : ""}${String(memory.id) === state.memory ? " is-selected" : ""}"><header>${tag(readable(memory.kind), `kind-${memory.kind}`)}<b>M${memory.id}</b><span class="muted">${h(when(memory.created_at))}</span></header><h3><a class="card-link" href="${hashFor("memory", { m: String(memory.id) })}">${inline(text)}</a></h3>${extra ? `<p>${h(extra)}</p>` : ""}
-<div class="meter" title="Rises when agents use this memory, fades when they do not"><span>relevance</span><span class="track"><i style="width:${Math.round(memory.activation * 100)}%"></i></span></div>
-<footer>${projectTag(memory.project_id)}${tag(usage)}${memory.turn_id ? `<a class="tag" href="${hashFor("timeline", { turn: String(memory.turn_id) })}">from T${memory.turn_id}</a>` : ""}${memory.invalid_at ? tag(memory.superseded_by ? `replaced by M${memory.superseded_by}` : `invalid since ${dayLabel(dayKey(memory.invalid_at))}`, "warn") : ""}</footer></article>`;
+    const pills = `<div class="pill-group" role="group" aria-label="Filter by kind"><button type="button" class="pill" data-action="kind" data-value="all" aria-pressed="${state.kind === "all"}">All ${num(pool.length)}</button>${MEMORY_KINDS.filter((kind) => counts.get(kind)).map((kind) => `<button type="button" class="pill" data-action="kind" data-value="${kind}" aria-pressed="${state.kind === kind}">${h(kindLabel(kind))} ${num(counts.get(kind))}</button>`).join("")}<button type="button" class="pill" data-action="invalid" aria-pressed="${state.invalid}">Show replaced</button></div>`;
+    // One group per session: a session's facts, decisions and lessons belong together. Notes read in from the
+    // agents' own memory files have no session; they get one group per file kind at the end.
+    const groups = new Map();
+    for (const memory of shown) {
+      const key = memory.session_id ? `s:${memory.session_id}` : memory.source === "native" ? `f:${memory.origin ?? ""}` : "other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(memory);
+    }
+    const order = (key) => (key.startsWith("s:") ? 0 : key.startsWith("f:") ? 1 : 2);
+    const keys = [...groups.keys()].sort((a, b) => order(a) - order(b));
+    const searching = state.query.trim() !== "";
+    const row = (memory) => `<a class="memory-row${memory.invalid_at ? " invalid" : ""}${String(memory.id) === state.memory ? " is-selected" : ""}" href="${hashFor("memory", { m: String(memory.id) })}">${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<span class="memory-text">${inline(memoryText(memory))}</span><span class="muted mono">M${memory.id}</span></a>`;
+    const sections = keys.map((key, index) => {
+      const items = groups.get(key).sort((a, b) => MEMORY_KINDS.indexOf(a.kind) - MEMORY_KINDS.indexOf(b.kind) || b.id - a.id);
+      const session = key.startsWith("s:") ? data.sessions.find((item) => item.id === key.slice(2)) : undefined;
+      let title = "Saved outside a session";
+      let meta = projectTag(items[0].project_id);
+      if (key.startsWith("s:")) {
+        title = sessionTitle(session) || "Earlier session";
+        meta += `<span class="muted">${session ? `${h(harnessLabel(session.harness))} · ${h(when(session.started_at))}` : h(when(items[0].created_at))}</span>`;
+      } else if (key.startsWith("f:")) {
+        title = ORIGIN_LABEL[key.slice(2)] ?? "Agent memory files";
+        meta = `<span class="muted">read in as written, newest first</span>`;
+      }
+      const open = searching || index < 3 || items.some((memory) => String(memory.id) === state.memory);
+      return `<details class="memory-group"${open ? " open" : ""}><summary><span class="group-title">${h(title)}</span><span class="group-meta">${meta}<span class="count">${plural(items.length, "memory", "memories")}</span></span></summary><div class="memory-rows">${items.map(row).join("")}</div></details>`;
     }).join("");
+    const cards = sections;
     const selected = state.memory === undefined ? undefined : data.memories.find((memory) => String(memory.id) === state.memory);
-    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents should keep in mind: decisions, facts, preferences and things that did not work. Memories that get used rank higher. Open one to see where it came from or to delete it.</p></div></div>
+    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents keep in mind, grouped by the session it came from. Click one to see where it came from or to delete it.</p></div></div>
 ${pills}
 <div class="${selected ? "with-detail" : ""}">
-<div>${cards ? `<div class="cards">${cards}</div>` : empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search or kind." : "Agents write them with the <code>mem_remember</code> MCP tool; hooks add decisions, corrections and dead ends.")}
+<div>${cards ? `<div class="memory-groups">${cards}</div>` : empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search or kind." : "Agents write them with the <code>mem_remember</code> MCP tool; hooks add decisions, corrections and dead ends.")}
 ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds the latest ${num(data.limits.memories)} memories. <code>agent-mem search</code> finds older ones.</p>` : ""}</div>
 ${selected ? memoryDetail(selected) : ""}
 </div>`;
@@ -394,19 +420,28 @@ ${selected ? memoryDetail(selected) : ""}
   const memoryText = (memory) => {
     const title = String(memory.title ?? "").trim();
     const body = String(memory.body ?? "").trim();
-    return body.length > title.length && body.startsWith(title) ? body : title;
+    const stem = title.replace(/(?:…|\.\.\.)$/, "").trimEnd();
+    return body.length > stem.length && body.startsWith(stem) ? body : title;
   };
+
+  // Where a memory came from, in words: an agent's own memory file, the background extraction, or the agent itself.
+  function memorySource(memory) {
+    if (memory.source === "native") return ORIGIN_LABEL[memory.origin] ?? "agent memory file";
+    if (memory.kind === "lesson") return "lesson from a turn";
+    if (memory.source === "agent" && memory.turn_id) return `extracted from a ${harnessLabel(memory.origin)} turn`;
+    return memory.origin ? `saved by ${harnessLabel(memory.origin)}` : "saved by an agent";
+  }
 
   function memoryDetail(memory) {
     const id = `M${memory.id}`;
     const successor = memory.superseded_by ? data.memories.find((item) => item.id === memory.superseded_by) : undefined;
-    const usage = memory.shown ? `used ${num(memory.used)} of ${num(memory.shown)} times shown` : memory.used ? `used ${num(memory.used)}×` : "not used yet";
+    const usage = memory.shown ? `shown ${plural(memory.shown, "time")}, used ${plural(memory.used, "time")}` : memory.used ? `used ${plural(memory.used, "time")}` : "not yet";
     return `<aside class="detail memory-detail kind-${h(memory.kind)}" aria-label="Memory detail">
-<header><h2>${id} · ${h(readable(memory.kind))}</h2><a class="round-button" href="${hashFor("memory")}" aria-label="Close memory detail">${icon("close", 16)}</a></header>
-<div class="pill-group">${tag(projectName(memory.project_id))}${tag(memory.source)}${memory.origin ? tag(memory.origin) : ""}${tag(`trust ${memory.trust}`)}${memory.invalid_at ? tag("replaced", "warn") : ""}</div>
+<header><h2>${id} · ${h(kindLabel(memory.kind))}</h2><a class="round-button" href="${hashFor("memory")}" aria-label="Close memory detail">${icon("close", 16)}</a></header>
+<div class="pill-group">${projectTag(memory.project_id)}${tag(memorySource(memory))}${memory.invalid_at ? tag("replaced", "warn") : ""}</div>
 <div class="text-box">${inline(memoryText(memory))}${memory.body && !memoryText(memory).startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? `\n\n${h(memory.body)}` : ""}</div>
 ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show ${id}</code> prints all of it.</span></p>` : ""}
-<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd><dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Importance</dt><dd>${h(Number(memory.importance ?? 0).toFixed(2))}</dd><dt>Activation</dt><dd>${h(Math.round(memory.activation * 100))}%</dd><dt>Recall</dt><dd>${h(usage)}</dd>${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
+<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
 <span class="section-label">Commands</span>
 <div class="copy-list">${copyable(`agent-mem show ${id}`)}${copyable(`agent-mem purge --id ${id}`)}</div>
 <p class="notice">${icon("lock", 16)}<span>Purge deletes the memory with its search keys and vectors and removes this page. An agent can do the same with the <code>mem_forget</code> tool.</span></p>
@@ -440,162 +475,6 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 </div>`;
   }
 
-  /* ---------------------------------------------------------------- graph */
-
-  function graphView() {
-    const nodes = data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
-    const count = (kind) => nodes.filter((node) => node.kind === kind).length;
-    const swatch = (kind) => `<i style="background:var(${ENTITY_COLOR[kind]})"></i>`;
-    return `<div class="page-head"><div><h1>Connections</h1><p class="lede">What your memories are about: the concepts mem0 finds in them, linked when they appear in the same memory. Bigger dots appear in more memories. Click one to read them.</p></div>
-<div class="pill-group" role="group" aria-label="Show entity kinds">${ENTITY_KINDS.filter((kind) => count(kind)).map((kind) => `<button type="button" class="pill" data-action="entity-kind" data-value="${kind}" aria-pressed="${!state.hiddenKinds.has(kind)}">${h(kind)}s ${num(count(kind))}</button>`).join("")}</div></div>
-<div class="graph-layout">
-<section class="graph-stage" aria-label="Graph canvas"><div id="graph-host" class="graph-host"></div>
-<div class="graph-controls"><button type="button" class="round-button" data-action="zoom" data-value="out" aria-label="Zoom out">${icon("minus", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="fit" aria-label="Fit graph">${icon("fit", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="in" aria-label="Zoom in">${icon("plus", 18)}</button></div>
-<span class="graph-hint">Drag to move · scroll to zoom · F to fit · Esc to clear</span></section>
-<div class="stack"><aside id="graph-inspector" class="inspector" aria-live="polite"></aside>
-<section class="panel"><div class="panel-head"><h3>Legend</h3></div><div class="legend">${ENTITY_KINDS.map((kind) => `<span>${swatch(kind)}${h(kind)}</span>`).join("")}</div>${limitReached(data.graph.nodes, "graph_nodes") ? `<p class="muted" style="margin-top:12px;font-size:13px">Showing the ${num(data.limits.graph_nodes)} most used of ${num(data.counts.concepts)} concepts.</p>` : ""}</section></div>
-</div>`;
-  }
-
-  function createGraph(host, inspector, sourceNodes, sourceEdges) {
-    const describe = (node) => {
-      if (!node) {
-        inspector.innerHTML = `<span class="kicker">Connections</span><h2>What your memories are about</h2><p>Click a concept to read the memories that mention it and what it comes up with.</p><div class="stats">${stat(num(nodes.length), "concepts")}${stat(num(edges.length), "links")}</div>`;
-        return;
-      }
-      const links = edges.filter((edge) => edge.a === node.id || edge.b === node.id).sort((x, y) => y.weight - x.weight).slice(0, 8);
-      const named = (node.memory_ids ?? []).map((id) => data.memories.find((memory) => memory.id === id)).filter(Boolean);
-      inspector.innerHTML = `<span class="kicker">${h(node.kind)}</span><h2>${h(entityLabel(node))}</h2><div class="stats">${stat(num(node.degree), "memories")}${stat(projectName(node.project_id), "project")}</div>${named.length ? `<span class="kicker">In these memories</span><ul>${named.map((memory) => `<li><span class="tag kind-${h(memory.kind)}">${h(readable(memory.kind))}</span><a href="${hashFor("memory", { m: String(memory.id) })}">${h(firstLine(memoryText(memory), 90))}</a></li>`).join("")}</ul>` : ""}${links.length ? `<span class="kicker">Comes up with</span><ul>${links.map((edge) => { const other = byId.get(edge.a === node.id ? edge.b : edge.a); return other ? `<li><i style="background:var(${nodeColor(other)})"></i><span>${h(entityLabel(other))}</span><span class="mono" style="margin-left:auto">${Number(edge.weight).toFixed(2)}</span></li>` : ""; }).join("")}</ul>` : ""}`;
-    };
-    const nodes = sourceNodes.map((node, index) => {
-      const angle = index * 2.3999632297; const radius = 40 + Math.sqrt(index) * 38;
-      return { ...node, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, vx: 0, vy: 0, r: 6 + Math.min(14, Math.sqrt(node.degree) * 2.4) };
-    });
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    // Label only the strongest nodes; the rest get a label on hover, selection, search or zoom.
-    const labelled = new Set([...nodes].sort((a, b) => b.strength - a.strength).slice(0, 40).map((node) => node.id));
-    const rank = new Map([...nodes].sort((a, b) => b.strength - a.strength).map((node, index) => [node.id, index]));
-    const shortLabel = (node) => { const label = entityLabel(node); if (label.length <= 34) return label; return node.kind === "file" ? `…${label.slice(-33)}` : `${label.slice(0, 33)}…`; };
-    const edges = sourceEdges.filter((edge) => byId.has(edge.a) && byId.has(edge.b));
-    if (nodes.length === 0) {
-      host.innerHTML = `<div class="graph-empty">No concepts yet. They appear when two memories mention the same thing.</div>`;
-      describe(undefined);
-      return { zoomBy() {}, reset() {}, setQuery() {}, setHidden() {}, destroy() {} };
-    }
-    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Connections: ${nodes.length} concepts with ${edges.length} links. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
-    const canvas = host.querySelector("canvas");
-    const context = canvas.getContext("2d");
-    const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-    const view = { x: 0, y: 0, scale: 1 };
-    let width = 0, height = 0, raf = 0, alpha = 1, query = "", hidden = new Set(), selected, hover, drag, pointer, lastX = 0, lastY = 0, moved = 0;
-    const shown = (node) => !hidden.has(node.kind);
-    const hit = (node) => { const needle = query.trim().toLocaleLowerCase(); return needle === "" || node.key.toLocaleLowerCase().includes(needle); };
-    const screen = (node) => ({ x: (node.x - view.x) * view.scale + width / 2, y: (node.y - view.y) * view.scale + height / 2 });
-    const world = (cx, cy) => { const rect = canvas.getBoundingClientRect(); return { x: (cx - rect.left - width / 2) / view.scale + view.x, y: (cy - rect.top - height / 2) / view.scale + view.y }; };
-    const at = (cx, cy) => { const p = world(cx, cy); for (let i = nodes.length - 1; i >= 0; i -= 1) { const n = nodes[i]; if (!shown(n)) continue; const reach = n.r + 6 / view.scale; if ((n.x - p.x) ** 2 + (n.y - p.y) ** 2 <= reach * reach) return n; } return undefined; };
-    const draw = () => {
-      const ink = css("--ink", "#1A1814");
-      context.clearRect(0, 0, width, height);
-      context.fillStyle = css("--graph-bg", "#F8F4EA"); context.fillRect(0, 0, width, height);
-      const step = 22; const ox = ((-view.x * view.scale + width / 2) % step + step) % step; const oy = ((-view.y * view.scale + height / 2) % step + step) % step;
-      context.fillStyle = css("--graph-dot", "rgba(26,24,20,.13)");
-      for (let x = ox; x < width; x += step) for (let y = oy; y < height; y += step) context.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
-      const focus = selected ?? hover;
-      const near = new Set(focus ? edges.flatMap((e) => (e.a === focus.id ? [e.b] : e.b === focus.id ? [e.a] : [])) : []);
-      context.lineCap = "round";
-      for (const edge of edges) {
-        const a = byId.get(edge.a), b = byId.get(edge.b);
-        if (!shown(a) || !shown(b)) continue;
-        const pa = screen(a), pb = screen(b);
-        const hot = focus && (edge.a === focus.id || edge.b === focus.id);
-        context.globalAlpha = !(hit(a) && hit(b)) ? 0.05 : focus ? (hot ? 0.9 : 0.08) : 0.12 + edge.weight * 0.5;
-        context.strokeStyle = ink; context.lineWidth = 0.6 + edge.weight * (hot ? 3.5 : 2.5);
-        context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
-      }
-      const labels = [];
-      for (const node of nodes) {
-        if (!shown(node)) continue;
-        const p = screen(node); const active = !focus || node === focus || near.has(node.id); const r = Math.max(3.5, node.r * view.scale);
-        context.globalAlpha = !hit(node) ? 0.1 : active ? 1 : 0.2;
-        context.fillStyle = css(nodeColor(node), "#AFC1F0"); context.strokeStyle = ink; context.lineWidth = 1.5;
-        context.beginPath(); context.arc(p.x, p.y, r, 0, Math.PI * 2); context.fill(); context.stroke();
-        if (node === selected) { context.globalAlpha = 0.18; context.lineWidth = 6; context.beginPath(); context.arc(p.x, p.y, r + 7, 0, Math.PI * 2); context.stroke(); }
-        const searching = query.trim() !== "";
-        const named = focus ? node === focus || near.has(node.id) : searching || nodes.length <= 40 || labelled.has(node.id) || view.scale > 1.8;
-        if (named && hit(node)) labels.push({ node, p, r, active, priority: node === focus ? -1 : rank.get(node.id) });
-      }
-      // Labels last, most important first; a label that would overlap one already drawn is skipped.
-      const placed = [];
-      for (const { node, p, r, active } of labels.sort((a, b) => a.priority - b.priority)) {
-        const text = shortLabel(node);
-        context.font = `${node === selected ? 700 : 600} 12px ${css("--sans", "sans-serif")}`;
-        const w = context.measureText(text).width; const x = p.x + r + 8;
-        const box = { x: x - 4, y: p.y - 10, w: w + 8, h: 19 };
-        if (node !== focus && placed.some((o) => box.x < o.x + o.w && o.x < box.x + box.w && box.y < o.y + o.h && o.y < box.y + box.h)) continue;
-        placed.push(box);
-        context.fillStyle = css("--graph-bg", "#F8F4EA"); context.globalAlpha = (active ? 1 : 0.3) * 0.85; context.fillRect(box.x, box.y, box.w, box.h);
-        context.globalAlpha = active ? 1 : 0.3; context.fillStyle = ink; context.fillText(text, x, p.y + 4);
-      }
-      context.globalAlpha = 1;
-    };
-    const tick = () => {
-      raf = 0;
-      if (alpha > 0.02) {
-        for (let i = 0; i < nodes.length; i += 1) {
-          const a = nodes[i];
-          for (let j = i + 1; j < nodes.length; j += 1) {
-            const b = nodes[j]; let dx = b.x - a.x, dy = b.y - a.y; const d2 = Math.max(dx * dx + dy * dy, 64); const d = Math.sqrt(d2); const f = 1800 / d2; dx /= d; dy /= d;
-            if (drag !== a) { a.vx -= dx * f * alpha; a.vy -= dy * f * alpha; }
-            if (drag !== b) { b.vx += dx * f * alpha; b.vy += dy * f * alpha; }
-          }
-          if (drag !== a) { a.vx -= a.x * 0.002 * alpha; a.vy -= a.y * 0.002 * alpha; }
-        }
-        for (const edge of edges) {
-          const a = byId.get(edge.a), b = byId.get(edge.b); const dx = b.x - a.x, dy = b.y - a.y; const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          const f = (d - (140 - edge.weight * 70)) * 0.01 * (0.4 + edge.weight) * alpha;
-          if (drag !== a) { a.vx += dx / d * f; a.vy += dy / d * f; }
-          if (drag !== b) { b.vx -= dx / d * f; b.vy -= dy / d * f; }
-        }
-        for (const node of nodes) { if (drag === node) continue; node.vx = Math.max(-10, Math.min(10, node.vx)) * 0.85; node.vy = Math.max(-10, Math.min(10, node.vy)) * 0.85; node.x += node.vx; node.y += node.vy; }
-        alpha *= 0.985;
-      }
-      draw();
-      if (alpha > 0.02) raf = requestAnimationFrame(tick);
-    };
-    const wake = () => { alpha = Math.max(alpha, 0.3); if (!raf) raf = requestAnimationFrame(tick); };
-    const select = (node) => { selected = node; describe(node); draw(); };
-    const resize = () => { width = host.clientWidth; height = host.clientHeight; const ratio = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.max(1, Math.floor(width * ratio)); canvas.height = Math.max(1, Math.floor(height * ratio)); context.setTransform(ratio, 0, 0, ratio, 0, 0); draw(); };
-    const fit = () => { const list = nodes.filter(shown); if (!list.length) return; const xs = list.map((n) => n.x), ys = list.map((n) => n.y); const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys); view.x = (minX + maxX) / 2; view.y = (minY + maxY) / 2; view.scale = Math.min(2.2, Math.max(0.18, Math.min(width / (Math.max(maxX - minX, 160) + 220), height / (Math.max(maxY - minY, 160) + 220)))); draw(); };
-    const zoom = (factor, ox = 0, oy = 0) => { const next = Math.min(3, Math.max(0.15, view.scale * factor)); view.x += ox / view.scale - ox / next; view.y += oy / view.scale - oy / next; view.scale = next; draw(); };
-    const down = (e) => { const rect = canvas.getBoundingClientRect(); pointer = e.pointerId; drag = at(e.clientX, e.clientY); moved = 0; lastX = e.clientX - rect.left; lastY = e.clientY - rect.top; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing"; };
-    const move = (e) => {
-      if (pointer === undefined) { const node = at(e.clientX, e.clientY); if (node !== hover) { hover = node; canvas.style.cursor = node ? "pointer" : "grab"; draw(); } return; }
-      const rect = canvas.getBoundingClientRect(); const dx = e.clientX - rect.left - lastX, dy = e.clientY - rect.top - lastY; moved += Math.abs(dx) + Math.abs(dy);
-      if (drag) { const p = world(e.clientX, e.clientY); drag.x = p.x; drag.y = p.y; wake(); } else { view.x -= dx / view.scale; view.y -= dy / view.scale; draw(); }
-      lastX = e.clientX - rect.left; lastY = e.clientY - rect.top;
-    };
-    const up = (e) => { if (e.pointerId !== pointer) return; if (moved < 5) select(at(e.clientX, e.clientY)); pointer = undefined; drag = undefined; canvas.style.cursor = "grab"; };
-    const leave = () => { if (pointer === undefined && hover) { hover = undefined; draw(); } };
-    const wheel = (e) => { e.preventDefault(); const rect = canvas.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - rect.left - width / 2, e.clientY - rect.top - height / 2); };
-    const key = (e) => { if (e.key === "f" || e.key === "F") fit(); else if (e.key === "+" || e.key === "=") zoom(1.15); else if (e.key === "-" || e.key === "_") zoom(1 / 1.15); else if (e.key === "Escape") select(undefined); else return; e.preventDefault(); };
-    const scheme = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
-    canvas.style.cursor = "grab";
-    canvas.addEventListener("pointerdown", down); canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up); canvas.addEventListener("pointerleave", leave); canvas.addEventListener("wheel", wheel, { passive: false }); canvas.addEventListener("keydown", key);
-    scheme?.addEventListener?.("change", draw);
-    observer?.observe(host);
-    resize(); fit(); describe(undefined); wake();
-    // Fit once more after the layout settles so the graph fills the stage.
-    setTimeout(fit, 1200);
-    return {
-      zoomBy: (factor) => zoom(factor),
-      reset: () => { select(undefined); fit(); },
-      setQuery: (next) => { query = next; draw(); },
-      setHidden: (kinds) => { hidden = new Set(kinds); if (selected && !shown(selected)) select(undefined); draw(); },
-      destroy: () => { if (raf) cancelAnimationFrame(raf); observer?.disconnect(); scheme?.removeEventListener?.("change", draw); },
-    };
-  }
-
   /* ---------------------------------------------------------------- health */
 
   function agentRow(agent) {
@@ -613,11 +492,10 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
   function healthView() {
     const health = data.health;
     const paused = Boolean(health.paused_until);
-    const backupHours = date(health.last_backup_at) ? (Date.now() - date(health.last_backup_at).getTime()) / 36e5 : Infinity;
     const components = Object.entries(health.components ?? {}).filter(([name]) => matches([name, componentLabel(name)])).sort(([a], [b]) => a.localeCompare(b));
     const rows = components.map(([name, info]) => {
       const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
-      return `<tr><td><i class="dot ${failing ? "bad" : "good"}" style="display:inline-block;margin-right:8px"></i><b>${h(componentLabel(name))}</b></td><td>${h(info.last_ok_at ? when(info.last_ok_at) : "never")}</td><td class="num">${num(info.ok_count)}</td><td class="num">${num(info.error_count)}</td><td>${info.last_error ? `<code>${h(firstLine(info.last_error, 160))}</code>` : '<span class="muted">—</span>'}</td></tr>`;
+      return `<tr><td><i class="dot ${failing ? "bad" : "good"}" style="display:inline-block;margin-right:8px"></i><b>${h(componentLabel(name))}</b></td><td>${h(info.last_ok_at ? when(info.last_ok_at) : "never")}</td><td class="num">${num(info.ok_count)}</td><td class="num">${num(info.error_count)}</td><td>${failing ? `<code>${h(firstLine(info.last_error, 160))}</code>` : info.last_error ? `<span class="muted">earlier: ${h(firstLine(info.last_error, 80))} (${h(when(info.last_error_at))})</span>` : '<span class="muted">—</span>'}</td></tr>`;
     }).join("");
     const semantic = String(health.semantic ?? "not indexed yet");
     const agentRows = (data.agents ?? []).filter((agent) => matches([agent.label, agent.stage, agent.model])).map(agentRow).join("");
@@ -625,12 +503,11 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 <div class="state-grid">
 <section class="block ${paused ? "block-yellow" : "block-green"}"><i class="block-deco deco-triangle"></i><h2>Capture</h2><div class="big-number"><b>${paused ? "Paused" : "Active"}</b></div><span class="caption">${paused ? "Resume with <code>agent-mem resume</code>" : "Pause with <code>agent-mem pause --for 1h</code>"}</span></section>
 <section class="block block-blue"><h2>Meaning search</h2><div class="big-number"><b>${semantic === "unavailable" || semantic === "not indexed yet" ? "Off" : "On"}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Word search works. For search by meaning run <code>agent-mem models install</code>." : `Finds memories with other words, too. Model: ${h(semantic.split("/").pop())}`}</span></section>
-<section class="block ${backupHours < 72 ? "block-pink" : "block-coral"}"><h2>Backup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.last_backup_at))}</b></div><span class="caption">${backupHours < 72 ? "Daily backups are kept in the data directory." : "Run <code>agent-mem backup</code>."}</span></section>
 <section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and retires outdated facts.</span></section>
 </div>
 <section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which model turns their requests into facts</small></div><div class="table-wrap"><table class="agents"><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
 <div class="columns">
-<section class="panel"><div class="panel-head"><h2>Running parts</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Part</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Hooks report here after the first captured session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Background jobs</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Hooks report here after the first captured session.")}</section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
 <div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB · schema v${h(health.schema)}</span></div>
@@ -638,7 +515,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 <div class="row"><span class="grow wrap"><b>Could not be read</b>${data.quarantine_latest ? `<span>Latest ${h(when(data.quarantine_latest.ts))}: ${h(data.quarantine_latest.reason)}</span>` : ""}</span><span class="value">${plural(health.quarantine, "file")}</span></div>
 <div class="row"><b>Data directory</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
-<div class="row"><span class="grow wrap"><b>Not encrypted at rest</b><span>Anyone who can read the data directory or its backups can read your memory.</span></span></div>
+<div class="row"><span class="grow wrap"><b>Not encrypted at rest</b><span>Anyone who can read the data directory can read your memory.</span></span></div>
 <div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer listens on 127.0.0.1 and makes no requests to the internet. Pages saved with <code>agent-mem view --output</code> hold a copy of recent data.</span></span></div>
 <div class="row"><span class="grow wrap"><b>Redaction</b><span>Secrets are redacted and private sections dropped before anything is stored.</span></span></div></section>
 </div></div>`;
@@ -662,15 +539,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
   function renderView() {
     const view = document.getElementById("view");
     if (!view) return;
-    graphController?.destroy();
-    graphController = null;
-    view.innerHTML = { overview: overviewView, timeline: timelineView, memory: memoryView, learned: learnedView, graph: graphView, health: healthView }[state.view]();
-    if (state.view === "graph") {
-      const nodes = data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
-      graphController = createGraph(document.getElementById("graph-host"), document.getElementById("graph-inspector"), nodes, data.graph.edges);
-      graphController.setHidden(state.hiddenKinds);
-      graphController.setQuery(state.query);
-    }
+    view.innerHTML = { overview: overviewView, timeline: timelineView, memory: memoryView, learned: learnedView, health: healthView }[state.view]();
     syncChrome();
   }
 
@@ -702,15 +571,6 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     }
     if (action === "session") { location.hash = hashFor("timeline", { session: value }); return; }
     if (action === "turn") { location.hash = hashFor("timeline", state.session ? { session: state.session, turn: value } : { turn: value }); return; }
-    if (action === "entity-kind") {
-      if (state.hiddenKinds.has(value)) state.hiddenKinds.delete(value); else state.hiddenKinds.add(value);
-      target.setAttribute("aria-pressed", String(!state.hiddenKinds.has(value)));
-      graphController?.setHidden(state.hiddenKinds);
-      return;
-    }
-    if (action === "zoom" && graphController) {
-      if (value === "in") graphController.zoomBy(1.2); else if (value === "out") graphController.zoomBy(1 / 1.2); else graphController.reset();
-    }
   });
   document.addEventListener("change", (event) => {
     if (event.target.id !== "project-select") return;
@@ -720,12 +580,11 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
   document.addEventListener("input", (event) => {
     if (event.target.id !== "search") return;
     state.query = event.target.value;
-    if (state.view === "graph") { graphController?.setQuery(state.query); return; }
     clearTimeout(timer);
     timer = setTimeout(renderView, 120);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.view !== "graph" && (state.memory !== undefined || state.turn !== undefined) && !event.target.closest?.("input")) {
+    if (event.key === "Escape" && (state.memory !== undefined || state.turn !== undefined) && !event.target.closest?.("input")) {
       location.hash = state.view === "memory" ? hashFor("memory") : hashFor("timeline", state.session ? { session: state.session } : {});
       return;
     }
@@ -744,16 +603,16 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     let saved;
     try { saved = JSON.parse(sessionStorage.getItem(SAVED) ?? "null"); sessionStorage.removeItem(SAVED); } catch { return 0; }
     if (!saved) return 0;
-    Object.assign(state, { query: saved.query ?? "", project: saved.project ?? state.project, outcome: saved.outcome ?? "all", kind: saved.kind ?? "all", invalid: Boolean(saved.invalid), hiddenKinds: new Set(saved.hiddenKinds ?? []) });
+    Object.assign(state, { query: saved.query ?? "", project: saved.project ?? state.project, outcome: saved.outcome ?? "all", kind: saved.kind ?? "all", invalid: Boolean(saved.invalid) });
     if (state.project !== "all" && !data.projects.some((project) => project.id === state.project)) state.project = "all";
     return Number(saved.scroll) || 0;
   };
-  // Reload to pick up the rewritten file, but never while the reader is active, typing, selecting text or in the graph.
+  // Reload to pick up the rewritten file, but never while the reader is active, typing or selecting text.
   const reloadWhenIdle = () => {
     const active = document.activeElement;
-    const busy = document.hidden || state.view === "graph" || Date.now() - lastActivity < 8000 || (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) || String(getSelection?.() ?? "") !== "";
+    const busy = document.hidden || Date.now() - lastActivity < 8000 || (active && (active.tagName === "INPUT" || active.tagName === "SELECT")) || String(getSelection?.() ?? "") !== "";
     if (busy) return;
-    try { sessionStorage.setItem(SAVED, JSON.stringify({ query: state.query, project: state.project, outcome: state.outcome, kind: state.kind, invalid: state.invalid, hiddenKinds: [...state.hiddenKinds], scroll: window.scrollY })); } catch { /* storage off: reload without state */ }
+    try { sessionStorage.setItem(SAVED, JSON.stringify({ query: state.query, project: state.project, outcome: state.outcome, kind: state.kind, invalid: state.invalid, scroll: window.scrollY })); } catch { /* storage off: reload without state */ }
     location.reload();
   };
 

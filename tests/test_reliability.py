@@ -237,37 +237,36 @@ def test_migrations_and_downgrade_protection(config: Config):
         db.connect(config)
 
 
-def test_backup_restore_and_corruption_recovery(config: Config, project: Path):
-    conn = db.connect(config)
-    hook.run("claude", None, _prompt_payload(project, "s", "important memory about billing"), config)
-    backup = db.backup(conn, config)
-    assert backup.exists()
-    conn.close()
-    config.db_path.write_bytes(b"this is not a database" * 100)
-    for suffix in ("-wal", "-shm"):
-        Path(f"{config.db_path}{suffix}").unlink(missing_ok=True)
-    assert indexer.recover_if_corrupt(config)
-    restored = db.connect(config)
-    assert restored.execute("SELECT COUNT(*) FROM turns WHERE prompt LIKE '%billing%'").fetchone()[0] == 1
-    restored.close()
-
-
 def test_purge_removes_data_everywhere(config: Config, project: Path, conn, monkeypatch: pytest.MonkeyPatch):
     from agent_mem import cli
 
     hook.run("claude", None, _prompt_payload(project, "s", "zebra-unique-marker project data"), config)
-    db.backup(conn, config)
+    config.backup_dir.mkdir()  # daily copies written by older releases hold the data as well
+    (config.backup_dir / "memory-old.db").write_bytes(b"zebra-unique-marker")
     spool.write(config.spool_dir, {"type": "event", "event": {**_event_dict(project), "prompt": "zebra spooled"}})
     monkeypatch.chdir(project)
     assert cli.main(["--data-dir", str(config.data_dir), "purge", "--project", str(project), "--yes"]) == 0
     assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM search_fts WHERE search_fts MATCH '\"zebra\"'").fetchone()[0] == 0
     assert spool.count(config.spool_dir) == 0
-    for backup in config.backup_dir.glob("*.db"):
-        assert b"zebra-unique-marker" not in backup.read_bytes()
+    assert not config.backup_dir.exists()
 
 
-def test_upgrade_migration_keeps_data_and_backs_up(config: Config, monkeypatch: pytest.MonkeyPatch):
+def test_doctor_fix_deletes_backups_left_by_older_releases(config: Config, monkeypatch: pytest.MonkeyPatch):
+    from agent_mem.cli import health
+
+    # --fix would also rewrite hooks and register the viewer login item; only the backup cleanup is under test.
+    monkeypatch.setattr(health, "_hook_checks", lambda fix: [])
+    monkeypatch.setattr(health, "_viewer_checks", lambda config, fix: [])
+    config.backup_dir.mkdir(parents=True)
+    (config.backup_dir / "memory-old.db").write_bytes(b"old copy")
+    [check] = [c for c in health.doctor(config) if c.name == "old backups"]
+    assert not check.ok and config.backup_dir.exists()
+    [check] = [c for c in health.doctor(config, fix=True) if c.name == "old backups"]
+    assert check.ok and not config.backup_dir.exists()
+
+
+def test_upgrade_migration_keeps_data(config: Config, monkeypatch: pytest.MonkeyPatch):
     conn = db.connect(config)
     db.set_meta(conn, "probe", "kept")
     conn.close()
@@ -278,7 +277,6 @@ def test_upgrade_migration_keeps_data_and_backs_up(config: Config, monkeypatch: 
     assert db.user_version(conn) == upgrade[0]
     assert db.get_meta(conn, "probe") == "kept"
     assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'upgrade_probe'").fetchone()
-    assert list(config.backup_dir.glob(f"*pre-migration-v{upgrade[0] - 1}*.db"))
     conn.close()
 
 
@@ -314,10 +312,12 @@ def test_terminal_view_groups_what_the_model_got():
     view = inject.terminal(context, "shop", color=False)
     lines = view.splitlines()
     assert lines[0] == f"agent-mem · shop · 4 items · ~{inject.tokens(context)} tokens"
-    assert "Thu 01 Oct 2026" in lines and "Open errors" in lines and "Last session · codex" in lines
-    assert "  M3    ◆ decision   use uv, not pip" in lines and "  T7    › fix parser → done, tests pass" in lines
+    # The last session leads, memories are grouped by kind (newest first, at most three per kind shown).
+    assert lines.index("Last session · codex") < lines.index("Open errors") < lines.index("◆ Decisions 1")
+    assert "  T7    › fix parser → done, tests pass" in lines and "  M3      use uv, not pip" in lines
+    assert "✗ Dead ends 1" in lines and "  M4      pip install broke the venv" in lines
     assert "claude hooks failing" in view and "Commands  test: `uv run pytest`" in view
-    assert lines[-1] == "Details: agent-mem show T7 · all memories: agent-mem view"
+    assert lines[-1] == "Details: agent-mem show T7 · everything: agent-mem view"
     assert "\x1b[" not in view and "\x1b[" in inject.terminal(context, "shop")
 
 
@@ -346,10 +346,10 @@ def test_config_values_that_would_break_silently_fall_back_and_reach_the_termina
     from agent_mem.core.config import load
     from agent_mem.hooks import hook
 
-    settings = {"hook_deadline_ms": 0, "retention": {"backup_keep": 0}, "semantic": {"duplicate_min_cosine": 0.2}}
+    settings = {"hook_deadline_ms": 0, "retention": {"payload_days": 0}, "semantic": {"duplicate_min_cosine": 0.2}}
     (tmp_path / "config.json").write_text(json.dumps(settings))
     config = load(tmp_path)
-    assert config.hook_deadline_ms == 400 and config.retention.backup_keep == 7
+    assert config.hook_deadline_ms == 400 and config.retention.payload_days == 30
     assert config.semantic.duplicate_min_cosine == 0.9
     assert config.viewer.port == 37778  # in-range values stay untouched
     monkeypatch.setenv("AGENT_MEM_NO_SPAWN", "1")

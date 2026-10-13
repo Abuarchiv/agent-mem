@@ -142,8 +142,6 @@ def build(config: Config | None = None) -> MCPServer:
             return f"{id}: invalid id"
         with db.transaction(state.conn):
             deleted = store.delete_owner(state.conn, *owner)
-            if deleted:
-                db.set_meta(state.conn, "backups_dirty", "1")
         return f"Deleted {id}." if deleted else f"{id}: not found"
 
     return server

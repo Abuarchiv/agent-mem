@@ -8,7 +8,16 @@ from __future__ import annotations
 from typing import Any
 
 from agent_mem.core import timeutil
-from agent_mem.core.events import Event, PayloadError, exit_code_of, get, output_text, require_session, text_of
+from agent_mem.core.events import (
+    Event,
+    PayloadError,
+    exit_code_of,
+    get,
+    output_text,
+    require_session,
+    shell_text,
+    text_of,
+)
 
 _KINDS = {
     "SessionStart": "session_start",
@@ -58,7 +67,7 @@ def normalize(payload: dict[str, Any], event_name: str | None = None, harness: s
         if kind == "tool":
             response = get(payload, "tool_response", "tool_output")
             event.tool_output = output_text(response)
-            event.exit_code = exit_code_of(response, event.tool_output)
+            event.exit_code = exit_code_of(response, shell_text(event))
             error = text_of(get(payload, "tool_error", "error"))
             if name == "PostToolUseFailure" or error:
                 event.tool_failed = True

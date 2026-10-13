@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -33,8 +34,6 @@ LIMITS = {
     "recipes": 200,
     "rules": 200,
     "profile": 200,
-    "graph_nodes": 160,
-    "graph_edges": 420,
     "days": 14,
     "recalls": 1500,
 }
@@ -69,6 +68,29 @@ def _json_list(value: str | None) -> list[str]:
 def _cap(text: str | None, limit: int) -> tuple[str, bool]:
     value = text or ""
     return (value, False) if len(value) <= limit else (value[:limit], True)
+
+
+# The stored tool input is JSON, cut at ``limits.tool_input_chars``; read its fields even from a cut string.
+_INPUT_FIELD = re.compile(
+    r'"(command|cmd|file_path|filePath|path|pattern|url|query|description)":\s*"((?:[^"\\]|\\.)*)'
+)
+
+
+def _action_text(raw: str) -> tuple[str, str]:
+    """What an action did, as (command or target, the agent's own description) instead of raw JSON."""
+    fields: dict[str, str] = {}
+    for key, value in _INPUT_FIELD.findall(raw):
+        with contextlib.suppress(ValueError):
+            fields.setdefault(key, json.loads(f'"{value}"'))
+    target = next(
+        (
+            fields[key]
+            for key in ("command", "cmd", "file_path", "filePath", "path", "pattern", "url", "query")
+            if key in fields
+        ),
+        raw,
+    )
+    return target, fields.get("description", "")
 
 
 def _rows(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -160,7 +182,8 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 payload = {}
             if not isinstance(payload, dict):
                 payload = {}
-            text, _ = _cap(str(payload.get("input") or ""), INPUT_CHARS)
+            target, note = _action_text(str(payload.get("input") or ""))
+            text, _ = _cap(target, INPUT_CHARS)
             items.append(
                 {
                     "ts": event["ts"],
@@ -168,6 +191,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                     "category": payload.get("category"),
                     "command": event["command_key"],
                     "input": text,
+                    "note": note[:INPUT_CHARS],
                     "failed": bool(event["error_sig"]) or bool(payload.get("failed")),
                     "resolved": bool(event["resolved"]),
                     "error_line": payload.get("error_line"),
@@ -181,7 +205,8 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
     memories: list[dict[str, Any]] = []
     for row in conn.execute(
         "SELECT id, project_id, kind, title, body, source, trust, importance, turn_id, origin, valid_from, invalid_at, "
-        f"superseded_by, created_at FROM memories {where} "
+        "superseded_by, created_at, (SELECT session_id FROM turns t WHERE t.id = memories.turn_id) AS session_id "
+        f"FROM memories {where} "
         "ORDER BY invalid_at IS NOT NULL, created_at DESC, id DESC LIMIT ?",
         (*params, LIMITS["memories"]),
     ):
@@ -224,8 +249,6 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         (since, *params),
     )
 
-    nodes, edges = _concept_graph(conn, project_id)
-
     counts = {
         "projects": len(projects),
         "sessions": _count(conn, f"SELECT COUNT(*) FROM sessions {where}", params),
@@ -245,16 +268,6 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             conn,
             f"SELECT COUNT(*) FROM rules WHERE enabled = 0 {'AND (project_id = ? OR project_id IS NULL)' if scoped else ''}",
             params,
-        ),
-        # The same concepts the graph can draw: current memories, a topic, at least two memories.
-        "concepts": sum(
-            _names_a_topic(row[0])
-            for row in conn.execute(
-                "SELECT c.label FROM concept_links l JOIN concepts c ON c.id = l.concept_id "
-                "JOIN memories m ON m.id = l.memory_id AND m.invalid_at IS NULL "
-                f"WHERE c.specific = 1 {'AND c.project_id = ?' if scoped else ''} GROUP BY c.id HAVING COUNT(*) >= 2",
-                params,
-            )
         ),
     }
     health = status(conn, config)
@@ -285,7 +298,6 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 "paused_until",
                 "spool",
                 "quarantine",
-                "last_backup_at",
                 "consolidated_at",
                 "components",
                 "config_warnings",
@@ -302,103 +314,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         "rules": rules,
         "profile": profile,
         "daily": daily,
-        "graph": {"nodes": nodes, "edges": edges},
     }
-
-
-# Single words that connect many memories without naming a topic. ponytail: a fixed list for the software terms
-# seen in real memories; a word-frequency list would replace it if other domains show up.
-GENERIC_CONCEPTS = {
-    "turn",
-    "turns",
-    "token",
-    "tokens",
-    "commit",
-    "commits",
-    "modul",
-    "module",
-    "worker",
-    "cache",
-    "tool",
-    "tools",
-    "graph",
-    "port",
-    "prompt",
-    "prompts",
-    "bugfix",
-    "pipe",
-    "pipes",
-    "test",
-    "tests",
-    "datei",
-    "file",
-    "files",
-    "fehler",
-    "error",
-    "code",
-    "repo",
-    "session",
-    "sessions",
-    "plan",
-    "schritt",
-    "step",
-    "liste",
-    "list",
-}
-
-
-def _names_a_topic(label: str) -> bool:
-    """A graph node must name something: "Codex", "hook.py", "Claude Code", not "Tokens" or a bare "src"."""
-    if " " in label or not label.isalpha():
-        return True
-    return label[:1].isupper() and label.lower() not in GENERIC_CONCEPTS
-
-
-# mem0's entity types as the viewer names them.
-CONCEPT_KIND = {"proper": "name", "topic": "topic", "identifier": "code", "quoted": "quoted"}
-
-
-def _concept_graph(
-    conn: sqlite3.Connection, project_id: str | None
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """mem0's concepts (``observe/concepts.py``) that connect at least two current memories, and how often
-    two of them occur in the same memory. A concept used by a single memory connects nothing."""
-    scope = "AND c.project_id = ?" if project_id is not None else ""
-    params: tuple[Any, ...] = (project_id,) if project_id is not None else ()
-    rows = conn.execute(
-        "SELECT c.id, c.label, c.type, c.project_id, COUNT(*) AS n, GROUP_CONCAT(l.memory_id) AS ids "
-        "FROM concepts c JOIN concept_links l ON l.concept_id = c.id "
-        f"JOIN memories m ON m.id = l.memory_id AND m.invalid_at IS NULL WHERE c.specific = 1 {scope} "
-        "GROUP BY c.id HAVING n >= 2 ORDER BY n DESC, c.id LIMIT ?",
-        (*params, LIMITS["graph_nodes"] * 2),
-    ).fetchall()
-    rows = [row for row in rows if _names_a_topic(row["label"])][: LIMITS["graph_nodes"]]
-    nodes = [
-        {
-            "id": row["id"],
-            "kind": CONCEPT_KIND.get(row["type"], "topic"),
-            "key": row["label"],
-            "project_id": row["project_id"] or None,
-            "degree": row["n"],
-            "strength": row["n"],
-            "memory_ids": sorted((int(i) for i in str(row["ids"]).split(",")), reverse=True)[:12],
-        }
-        for row in rows
-    ]
-    if not nodes:
-        return [], []
-    marks = ",".join("?" for _ in nodes)
-    ids = [node["id"] for node in nodes]
-    pairs = conn.execute(
-        "SELECT a.concept_id AS a, b.concept_id AS b, COUNT(*) AS n FROM concept_links a "
-        "JOIN concept_links b ON b.memory_id = a.memory_id AND a.concept_id < b.concept_id "
-        "JOIN memories m ON m.id = a.memory_id AND m.invalid_at IS NULL "
-        f"WHERE a.concept_id IN ({marks}) AND b.concept_id IN ({marks}) GROUP BY a.concept_id, b.concept_id "
-        "ORDER BY n DESC LIMIT ?",
-        (*ids, *ids, LIMITS["graph_edges"]),
-    ).fetchall()
-    top = max((row["n"] for row in pairs), default=1)
-    return nodes, [{"a": row["a"], "b": row["b"], "weight": round(row["n"] / top, 3)} for row in pairs]
 
 
 def _asset(name: str) -> bytes:

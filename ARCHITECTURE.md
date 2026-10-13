@@ -20,7 +20,7 @@ agent-mem observe  detached, one at a time (observe.lock), low priority, exits a
                    no stage available → raw summary (kind = summary, trust = raw)
 
 agent-mem index    detached, one at a time: spool replay → stale turns → embeddings
-                   → consolidation (daily) → retention → backups
+                   → consolidation (daily) → retention
 
 agent-mem mcp      one per agent session (stdio): mem_search, mem_timeline, mem_get, mem_remember, mem_forget
 agent-mem serve    detached, one per machine: read-only viewer on localhost:37778, page built

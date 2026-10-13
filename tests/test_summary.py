@@ -326,7 +326,7 @@ def test_the_model_gets_the_work_log_and_the_terminal_shows_it_from_there(driver
     assert f"[T{first} · " in block.text and "· work, bugfix] Parser-Absturz behoben" in block.text
     assert block.text.count("Rename the invoice module") == 1  # shown as the last session, not twice
     lines = inject.terminal(block.text, "proj", color=False).splitlines()
-    assert lines.index("Recent work") < lines.index("Last session · claude")
+    assert lines.index("Last session · claude") < lines.index("Recent work")
     assert any("● Parser-Absturz behoben" in line for line in lines)
 
 

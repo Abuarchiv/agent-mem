@@ -217,13 +217,12 @@ def test_a_model_cli_that_hangs_is_killed_with_its_helpers(tmp_path: Path, monke
         os.kill(helper, 0)  # the helper process is gone as well
 
 
-def test_a_locked_database_is_never_replaced_by_an_older_backup(config: Config):
+def test_a_locked_database_is_never_moved_aside(config: Config):
     import sqlite3
 
     from agent_mem.memory import indexer
 
     conn = db.connect(config)
-    db.backup(conn, config)
     conn.execute("INSERT INTO meta(key, value) VALUES ('after_backup', 'written')")
     conn.close()
     locker = sqlite3.connect(config.db_path, isolation_level=None, timeout=0)
@@ -240,12 +239,10 @@ def test_a_locked_database_is_never_replaced_by_an_older_backup(config: Config):
     check.close()
 
 
-def test_a_damaged_database_is_restored_and_its_wal_kept(config: Config):
+def test_a_damaged_database_is_moved_aside_with_its_wal_and_replaced_by_a_fresh_one(config: Config):
     from agent_mem.memory import indexer
 
-    conn = db.connect(config)
-    db.backup(conn, config)
-    conn.close()
+    db.connect(config).close()
     config.db_path.write_bytes(b"not a database" * 200)
     wal = config.db_path.with_name(config.db_path.name + "-wal")
     wal.write_bytes(b"committed pages")

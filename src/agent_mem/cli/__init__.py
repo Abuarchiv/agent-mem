@@ -54,7 +54,7 @@ def _explain(error: Exception) -> str:
     if isinstance(error, db.MigrationInProgressError):
         return f"{error}. Another agent-mem process is upgrading the database; try again in a minute."
     if isinstance(error, sqlite3.DatabaseError) and not isinstance(error, sqlite3.OperationalError):
-        return f"the database is damaged ({error}). Run `agent-mem doctor`, then `agent-mem restore --latest`."
+        return f"the database is damaged ({error}). `agent-mem index` keeps it as memory.db.corrupt-<time> and starts a new one."
     if isinstance(error, sqlite3.OperationalError):
         if "locked" in str(error) or "busy" in str(error):
             return f"the database is busy ({error}). Another agent-mem process holds it; try again shortly."
@@ -93,7 +93,7 @@ def _main(args: list[str]) -> int:
 
     p = sub.add_parser("status", help="counts, learning metrics and component health")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("doctor", help="check installation, database, harnesses and backups")
+    p = sub.add_parser("doctor", help="check installation, database and harnesses")
     p.add_argument("--fix", action="store_true", help="fix what is safe to fix")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("search", help="search memory")
@@ -110,17 +110,13 @@ def _main(args: list[str]) -> int:
     p = sub.add_parser("export", help="export memory as JSON")
     p.add_argument("--project", help="project directory")
     p.add_argument("--output", type=Path)
-    p = sub.add_parser("purge", help="permanently delete data (also from backups and spool)")
+    p = sub.add_parser("purge", help="permanently delete data (also from the spool)")
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--id")
     group.add_argument("--project", help="project directory")
     group.add_argument("--before", help="ISO date; delete sessions that ended before it")
     group.add_argument("--all", action="store_true")
     p.add_argument("--yes", action="store_true")
-    sub.add_parser("backup", help="create a backup now")
-    p = sub.add_parser("restore", help="restore a backup")
-    p.add_argument("file", nargs="?", type=Path)
-    p.add_argument("--latest", action="store_true")
     p = sub.add_parser("observe", help="run the background observer (extract facts from closed turns)")
     p.add_argument("--drain", action="store_true", help="process the queue, wait observe.idle_seconds for more, exit")
     p.add_argument("--once", action="store_true", help="process what is due and exit without waiting")
@@ -261,7 +257,6 @@ def _main(args: list[str]) -> int:
                     "data_dir": str(config.data_dir),
                     "database": str(config.db_path),
                     "config": str(config.config_path),
-                    "backups": str(config.backup_dir),
                     "logs": str(config.log_dir),
                     "models": str(config.model_dir),
                 },
@@ -284,29 +279,6 @@ def _main(args: list[str]) -> int:
             )
             return 0
         return server.serve(config, quiet=ns.quiet)
-    if ns.command == "restore":
-        import sqlite3
-
-        from agent_mem.core import db
-
-        if ns.file is None and not ns.latest:
-            print("No backup given: pass a file or --latest.", file=sys.stderr)
-            return 2
-        source = ns.file or db.latest_backup(config)
-        if source is None:
-            print(f"No backups in {config.backup_dir} yet; `agent-mem backup` writes one.", file=sys.stderr)
-            return 2
-        if not source.is_file():
-            print(f"Not a backup file: {source}", file=sys.stderr)
-            return 2
-        try:
-            db.restore(config, source)
-        except (ValueError, sqlite3.DatabaseError) as error:
-            print(f"Not restored, the live database is unchanged: {error}", file=sys.stderr)
-            return 1
-        print(f"Restored {source}. The previous database is kept as {config.db_path}.replaced.")
-        return 0
-
     from agent_mem.cli import commands
 
     return commands.dispatch(ns, config)

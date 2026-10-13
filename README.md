@@ -86,7 +86,7 @@ agent-mem rules [list|enable|disable|delete] [ID] | lessons
 agent-mem pause [--for 2h] | resume
 agent-mem export [--project DIR] [--output FILE]
 agent-mem purge --id ID | --project DIR | --before DATE | --all  [--yes]
-agent-mem backup | restore [FILE | --latest] | consolidate | index [--no-download]
+agent-mem consolidate | index [--no-download]
 agent-mem models [status|install]
 agent-mem eval <longmemeval.json> [--subset FILE] [--backend sqlite|mem0] | eval --fixture FILE
 ```
@@ -97,7 +97,7 @@ MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `
 
 Open **http://localhost:37778** (or run `agent-mem view`). It runs in the background, starts with every agent session, and `setup --write` also registers it as a login item (macOS LaunchAgent, systemd user service, Windows Startup folder), so it is reachable after a restart. The page is built fresh on every reload; an open tab reloads itself every ten seconds.
 
-**Connections** is the graph of what your memories are about: the concepts mem0's entity linking finds in them (names, code such as `hook.py`, compound terms), linked when two appear in the same memory. Click one to read those memories. Set `observe.entity_model` to a spaCy model in the language of your facts, for example `de_core_news_sm` (mem0's default is `en_core_web_sm`), then run `agent-mem models install`: it downloads the model from spaCy's releases into agent-mem's model directory (checksum pinned for the German and English models), so updating or reinstalling the tool keeps it. `agent-mem doctor` says when it is missing.
+**Overview** shows activity and the latest requests. **Sessions** lists every session under its title with its summary (done, learned, next steps) and its requests; a request shows each action with the agent's own description, and failed commands stand out. **Memories** groups what agents keep in mind by the session it came from, preferences and lessons first; notes from the agents' own memory files get their own groups. **Learned** holds lessons, rules, error fixes and preferences, **Health** the hooks and background jobs. mem0's entity linking (used to merge duplicates) reads facts with a spaCy model: set `observe.entity_model` to a spaCy model in the language of your facts, for example `de_core_news_sm` (mem0's default is `en_core_web_sm`), then run `agent-mem models install`: it downloads the model from spaCy's releases into agent-mem's model directory (checksum pinned for the German and English models), so updating or reinstalling the tool keeps it. `agent-mem doctor` says when it is missing.
 
 It listens on this machine only (no login; turn it off on shared machines). `agent-mem view --output FILE` writes an offline snapshot instead. Change the port with `"viewer": {"port": 37778}`, turn it off with `"viewer": {"enabled": false}`, remove the login item with `agent-mem serve --no-autostart`.
 
@@ -105,7 +105,7 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 
 | You see | Do |
 | --- | --- |
-| `agent-mem: the database is damaged` | `agent-mem doctor`, then `agent-mem restore --latest` (the old file is kept as `memory.db.replaced`) |
+| `agent-mem: the database is damaged` | `agent-mem index` moves it aside as `memory.db.corrupt-<time>` (with its WAL) and starts a new database |
 | `semantic: unavailable` in `status` | `agent-mem upgrade --extras semantic` (installs the extra and downloads the model) |
 | facts never appear | `agent-mem observe --status`; the harness CLI (`claude`, `codex`, `copilot`) must be on PATH and logged in |
 | Codex captures nothing | start `codex`, run `/hooks` and trust the agent-mem hooks once |
@@ -149,7 +149,7 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 - The extraction process runs in an empty temporary directory with `AGENT_MEM_INTERNAL=1`, so its own session is never captured.
 - Recalled text is framed as data, not instructions. Facts never become rules or preferences by themselves.
 - The database is **not encrypted at rest**. The data directory is created with owner-only permissions on macOS and Linux.
-- `purge` deletes matching data from SQLite, the vector index, the spool and all backups.
+- `purge` deletes matching data from SQLite, the vector index and the spool.
 
 See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 

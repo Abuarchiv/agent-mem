@@ -155,7 +155,6 @@ def status(conn: sqlite3.Connection, config: Config) -> dict[str, Any]:
         "paused_until": db.get_meta(conn, "paused_until"),
         "spool": spool.count(config.spool_dir),
         "quarantine": len(list(config.quarantine_dir.glob("*.json"))) if config.quarantine_dir.exists() else 0,
-        "last_backup_at": db.get_meta(conn, "last_backup_at"),
         "consolidated_at": db.get_meta(conn, "consolidated_at"),
         "components": harnesses,
         "config_warnings": config.warnings,
@@ -206,7 +205,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     )
     db.ensure_private_dir(config.data_dir)
     if fix and sys.platform != "win32":
-        for folder in (config.data_dir, config.spool_dir, config.backup_dir, config.log_dir):
+        for folder in (config.data_dir, config.spool_dir, config.log_dir):
             if folder.exists():
                 with contextlib.suppress(OSError):
                     os.chmod(folder, 0o700)
@@ -233,7 +232,14 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
         checks.append(Check("database", False, f"migration in progress: {error}", "Run `agent-mem doctor` again."))
         return checks
     except sqlite3.Error as error:
-        checks.append(Check("database", False, str(error), "Run `agent-mem restore --latest`."))
+        checks.append(
+            Check(
+                "database",
+                False,
+                str(error),
+                "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
+            )
+        )
         return checks
     try:
         ok = db.quick_check(conn)
@@ -242,7 +248,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
                 "database integrity",
                 ok,
                 f"schema v{db.user_version(conn)}, sqlite {sqlite3.sqlite_version}",
-                "Run `agent-mem restore --latest`.",
+                "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
             )
         )
         try:
@@ -299,11 +305,19 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
                 warn_only=backlog < 1000,
             )
         )
-        last_backup = db.get_meta(conn, "last_backup_at")
-        fresh = last_backup is not None and timeutil.hours_between(last_backup) < 72
-        checks.append(
-            Check("backup", fresh, f"last {last_backup or 'never'}", "Run `agent-mem backup`.", warn_only=True)
-        )
+        if config.backup_dir.exists():
+            if fix:
+                shutil.rmtree(config.backup_dir, ignore_errors=True)
+            gone = not config.backup_dir.exists()
+            checks.append(
+                Check(
+                    "old backups",
+                    gone,
+                    "deleted" if gone else f"{config.backup_dir} left by an older release",
+                    "Run `agent-mem doctor --fix` to delete it.",
+                    warn_only=True,
+                )
+            )
         indexer = conn.execute("SELECT last_ok_at, last_error FROM health WHERE component = 'indexer'").fetchone()
         checks.append(
             Check(

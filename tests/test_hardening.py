@@ -95,12 +95,6 @@ def test_hook_spools_instead_of_migrating_an_old_database(config: Config, monkey
     assert (config.data_dir / ".migration-requested").exists()
 
 
-def test_backups_are_written_atomically(conn, config: Config):
-    target = db.backup(conn, config, label="manual")
-    assert target.exists()
-    assert not list(config.backup_dir.glob("*.partial"))
-
-
 # --- injection -------------------------------------------------------------------
 
 
@@ -321,30 +315,13 @@ def test_sqlite_null_unique_assumption_holds():
     assert mem.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 2
 
 
-def test_restore_never_replaces_the_database_with_a_missing_or_foreign_file(config: Config, tmp_path: Path, capsys):
-
-    db.connect(config).close()
-    before = config.db_path.read_bytes()
-    base = ["--data-dir", str(config.data_dir), "restore"]
-    assert cli.main([*base, str(tmp_path / "missing.db")]) == 2
-    foreign = tmp_path / "foreign.db"
-    sqlite3.connect(foreign).close()
-    assert cli.main([*base, str(foreign)]) == 1
-    (tmp_path / "garbage.db").write_bytes(b"garbage" * 100)
-    assert cli.main([*base, str(tmp_path / "garbage.db")]) == 1
-    assert cli.main([*base, "--latest"]) == 2
-    assert config.db_path.read_bytes() == before and not tmp_path.joinpath("missing.db").exists()
-    err = capsys.readouterr().err
-    assert "Not a backup file" in err and "not an agent-mem database" in err and "No backups" in err
-
-
 def test_cli_errors_are_one_line_with_a_next_step(config: Config, tmp_path: Path, capsys):
 
     config.data_dir.mkdir(parents=True)
     config.db_path.write_bytes(b"not a database" * 100)
     assert cli.main(["--data-dir", str(config.data_dir), "status"]) == 1
     err = capsys.readouterr().err
-    assert err.startswith("agent-mem: the database is damaged") and "restore --latest" in err
+    assert err.startswith("agent-mem: the database is damaged") and "agent-mem index" in err
     assert "Traceback" not in err
     blocker = tmp_path / "file"
     blocker.write_text("x")

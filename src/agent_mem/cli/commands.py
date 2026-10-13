@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import time
@@ -29,7 +30,6 @@ def dispatch(ns: argparse.Namespace, config: Config) -> int:
         "resume": cmd_resume,
         "export": cmd_export,
         "purge": cmd_purge,
-        "backup": cmd_backup,
         "consolidate": cmd_consolidate,
         "rules": cmd_rules,
         "lessons": cmd_lessons,
@@ -80,7 +80,7 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         f"injected: today ~{injected['today_tokens']} tokens · last {injected['days']} days {injected['blocks']} blocks,"
         f" ~{injected['tokens']} tokens, ~{injected['tokens_per_session'] or '-'} per session"
     )
-    print(f"last backup {data['last_backup_at'] or 'never'} · last consolidation {data['consolidated_at'] or 'never'}")
+    print(f"last consolidation {data['consolidated_at'] or 'never'}")
     if data["paused_until"]:
         print(f"capture paused until {data['paused_until']}")
     for component, info in sorted(data["components"].items()):
@@ -233,8 +233,6 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
     if ns.all:
         if not _confirm(ns, "delete ALL agent-mem data"):
             return 1
-        import shutil
-
         ui.discard(config)
         for path in (
             config.db_path,
@@ -298,23 +296,10 @@ def cmd_purge(ns: argparse.Namespace, config: Config) -> int:
             removed = _purge_spooled(config, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp)
             print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
         conn.execute("VACUUM")
-        # The copy kept by ``restore`` holds the old data as well.
+        # Copies left by older releases (``restore``'s .replaced, daily backups) hold the deleted data as well.
         with contextlib.suppress(OSError):
             Path(f"{config.db_path}.replaced").unlink()
-        db.rebuild_backups(conn, config)
-        with db.transaction(conn):
-            db.set_meta(conn, "last_backup_at", timeutil.iso())
-            db.set_meta(conn, "backups_dirty", "0")
-    return 0
-
-
-def cmd_backup(ns: argparse.Namespace, config: Config) -> int:
-    with _conn(config) as conn:
-        target = db.backup(conn, config, label="manual")
-        db.prune_backups(config, max(config.retention.backup_keep, 1))
-        with db.transaction(conn):
-            db.set_meta(conn, "last_backup_at", timeutil.iso())
-    print(f"Backup written to {target}.")
+        shutil.rmtree(config.backup_dir, ignore_errors=True)
     return 0
 
 

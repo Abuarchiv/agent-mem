@@ -9,7 +9,16 @@ from __future__ import annotations
 from typing import Any
 
 from agent_mem.core import timeutil
-from agent_mem.core.events import Event, PayloadError, exit_code_of, get, output_text, require_session, text_of
+from agent_mem.core.events import (
+    Event,
+    PayloadError,
+    exit_code_of,
+    get,
+    output_text,
+    require_session,
+    shell_text,
+    text_of,
+)
 
 _KINDS = {
     "session.start": "session_start",
@@ -56,7 +65,7 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
             event.exit_code = (
                 explicit
                 if isinstance(explicit, int) and not isinstance(explicit, bool)
-                else exit_code_of(output, event.tool_output)
+                else exit_code_of(output, shell_text(event))
             )
             error = text_of(get(payload, "error"))
             if error or event.exit_code not in (None, 0):

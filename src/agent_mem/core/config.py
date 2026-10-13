@@ -65,8 +65,6 @@ class Retrieval:
 class Retention:
     payload_days: int = 30
     access_days: int = 180
-    backup_keep: int = 7
-    backup_every_hours: int = 24
     max_db_mb: int = 1024
     stale_turn_minutes: int = 30
 
@@ -179,6 +177,7 @@ class Config:
 
     @property
     def backup_dir(self) -> Path:
+        """Daily copies written by releases before backups were dropped; ``doctor --fix`` and ``purge`` delete it."""
         return self.data_dir / "backups"
 
     @property
@@ -275,8 +274,6 @@ _BOUNDS: dict[str, tuple[float, float]] = {
     "retrieval.min_vector_score": (0, 1),
     "retention.payload_days": (1, 36_500),
     "retention.access_days": (1, 36_500),
-    "retention.backup_keep": (1, 1_000),
-    "retention.backup_every_hours": (1, 8_760),
     "retention.max_db_mb": (64, 1_048_576),
     "retention.stale_turn_minutes": (1, 10_080),
     "limits.prompt_chars": (200, 1_000_000),
