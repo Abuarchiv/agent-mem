@@ -238,3 +238,23 @@ def test_copilot_stop_takes_the_answer_from_the_transcript(tmp_path):
     # Read before the final message is written: the previous turn's answer must not be taken.
     transcript.write_text("".join(json.dumps(line) + "\n" for line in [*lines, lines[0]]))
     assert normalize("copilot", payload, "agentStop").answer is None
+
+
+def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
+    """Codex 0.162 sends a shell call's output without its exit code: of 288 live Codex shell calls 2 counted as
+    failed, a Traceback and a failed uv run among the rest. Clear signs mark a failure; ordinary output does not."""
+
+    def failed(output: str) -> bool:
+        payload = {"hook_event_name": "PostToolUse", "session_id": "c", "tool_name": "Bash", "tool_call_id": "k",
+                   "tool_input": {"command": "uv run --with pytest python3 -m pytest -q"}, "tool_response": output}  # fmt: skip
+        return normalize("codex", payload).tool_failed
+
+    assert failed("error: Failed to initialize cache at `/Users/abu/.cache/uv`\n  Caused by: Operation not permitted")
+    assert failed('Traceback (most recent call last):\n  File "<string>", line 1\nZeroDivisionError: division by zero')
+    assert failed("F.\n=================== 1 failed, 1 passed in 0.03s ===================")
+    assert failed("bash: pytest: command not found")
+    assert not failed("..\n2 passed in 0.01s")
+    assert not failed(
+        "Warning: truncated output (original token count: 14267)\nTotal output lines: 314\n\nsrc/x.py:12: error handling"
+    )
+    assert not failed("tests/test_errors.py::test_assert_raises PASSED\n0 failed")
