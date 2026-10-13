@@ -21,7 +21,7 @@ from agent_mem.core import db, logutil, paths, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
-from agent_mem.memory import consolidate, notes, work
+from agent_mem.memory import consolidate, notes, store, work
 
 
 def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, Any]) -> None:
@@ -181,6 +181,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     stats["work_measured"] = work.measure(conn)
     with db.transaction(conn):
         stats["native_notes"] = notes.ingest(conn, config)
+        stats["retired_unindexed"] = store.drop_retired_keys(conn)
     _mark_guards(conn, config)
 
     embedder = None

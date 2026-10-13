@@ -184,10 +184,35 @@ def add_memory(
 
 def supersede(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None:
     now = timeutil.iso()
-    conn.execute(
+    cursor = conn.execute(
         "UPDATE memories SET invalid_at = ?, superseded_by = ? WHERE id = ? AND invalid_at IS NULL",
         (now, new_id, old_id),
     )
+    if cursor.rowcount:
+        _drop_keys(conn, old_id)
+
+
+def _drop_keys(conn: sqlite3.Connection, memory_id: int) -> None:
+    """No search returns a replaced memory (``search.load_hits``), but its keys and vector kept their ranks: on live
+    data five replaced duplicates held the first five full-text ranks for "wo läuft der viewer" and pushed the valid
+    fact under the injection threshold. The row stays for the viewer and ``agent-mem show``."""
+    remove_search_keys(conn, "m", memory_id)
+    conn.execute("DELETE FROM vectors WHERE owner_type = 'm' AND owner_id = ?", (memory_id,))
+
+
+def drop_retired_keys(conn: sqlite3.Connection) -> int:
+    """Keys and vectors of memories retired without ``supersede`` (earlier releases, direct updates)."""
+    ids = [
+        int(row[0])
+        for row in conn.execute(
+            "SELECT m.id FROM memories m WHERE m.invalid_at IS NOT NULL AND (EXISTS (SELECT 1 FROM search_keys k "
+            "WHERE k.owner_type = 'm' AND k.owner_id = m.id) OR EXISTS (SELECT 1 FROM vectors v "
+            "WHERE v.owner_type = 'm' AND v.owner_id = m.id))"
+        )
+    ]
+    for memory_id in ids:
+        _drop_keys(conn, memory_id)
+    return len(ids)
 
 
 def retire(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None:
