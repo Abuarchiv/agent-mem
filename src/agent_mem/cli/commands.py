@@ -95,9 +95,9 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         )
     injected = data["injected"]
     print(
-        f"Given to agents: today ~{injected['today_tokens']} tokens · last {injected['days']} days"
-        f" ~{injected['tokens']} tokens in {count(injected['blocks'], 'reminder')}"
-        f" (~{injected['tokens_per_session'] or '-'} per session)"
+        f"Given to agents: today ~{injected['today_tokens']:,} tokens · last {injected['days']} days"
+        f" ~{injected['tokens']:,} tokens in {count(injected['blocks'], 'reminder')}"
+        f" (~{injected['tokens_per_session'] or 0:,} per session)"
     )
     if injected["saved_percent"] is not None:
         print(f"  working that out took the agents ~{injected['work']:,} tokens")
