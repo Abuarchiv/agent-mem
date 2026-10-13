@@ -324,7 +324,7 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
         const actionCount = (data.actions[turn.id] ?? []).length;
         return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${turn.type ? tag(turn.type) : ""}${turn.outcome === "ok" ? "" : outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header>${turn.title ? `<p><b>${h(turn.title)}</b></p>` : ""}<p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
       }).join("")}</div>`;
-    return `<div class="page-head"><div><h1>Sessions</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
+    return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
 <div class="timeline">
 <div class="session-list">${cards || empty("No sessions", "Sessions appear after a connected harness runs.")}${hidden ? `<p class="caption">${plural(hidden, "session")} without a request hidden.</p>` : ""}</div>
 <section class="panel">${head}${feed}</section>
@@ -605,12 +605,19 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     const screen = (node) => ({ x: (node.x - view.x) * view.scale + width / 2, y: (node.y - view.y) * view.scale + height / 2 });
     const world = (cx, cy) => { const rect = canvas.getBoundingClientRect(); return { x: (cx - rect.left - width / 2) / view.scale + view.x, y: (cy - rect.top - height / 2) / view.scale + view.y }; };
     const at = (cx, cy) => { const p = world(cx, cy); for (let i = nodes.length - 1; i >= 0; i -= 1) { const n = nodes[i]; if (!shown(n)) continue; const reach = n.r + 5 / view.scale; if ((n.x - p.x) ** 2 + (n.y - p.y) ** 2 <= reach * reach) return n; } return undefined; };
+    // One frame: edges under nodes under labels. Everything not tied to the thing in focus fades.
     const draw = () => {
       const ink = css("--ink", "#1A1814");
       context.clearRect(0, 0, width, height);
       context.fillStyle = css("--graph-bg", "#F8F4EA"); context.fillRect(0, 0, width, height);
       const focus = selected ?? hover;
       const near = new Set(focus ? around.get(focus.id).flatMap((edge) => [edge.a, edge.b]) : []);
+      drawEdges(focus, ink);
+      const labels = drawNodes(focus, near, ink);
+      drawLabels(labels, focus, ink);
+      context.globalAlpha = 1;
+    };
+    const drawEdges = (focus, ink) => {
       const visible = edges.filter((edge) => shown(edge.source) && shown(edge.target));
       for (const edge of visible) {
         const a = screen(edge.source), b = screen(edge.target);
@@ -628,6 +635,8 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
           context.beginPath(); context.moveTo(ex, ey); context.lineTo(ex - ux * size - uy * size * 0.5, ey - uy * size + ux * size * 0.5); context.lineTo(ex - ux * size + uy * size * 0.5, ey - uy * size - ux * size * 0.5); context.closePath(); context.fill();
         }
       }
+    };
+    const drawNodes = (focus, near, ink) => {
       const labels = [];
       for (const node of nodes) {
         if (!shown(node)) continue;
@@ -637,7 +646,10 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
         context.beginPath(); context.arc(p.x, p.y, r, 0, Math.PI * 2); context.fill(); context.stroke();
         if (active && hit(node)) labels.push({ node, p, r, priority: node === focus ? -1e9 : near.has(node.id) ? -1e6 - node.degree : -node.degree });
       }
-      // Relation names on the edges of the thing in focus, then node names; overlapping labels are skipped.
+      return labels;
+    };
+    // Node names, then the relation names on the edges of the thing in focus; overlapping labels are skipped.
+    const drawLabels = (labels, focus, ink) => {
       const placed = [];
       const place = (text, x, y, weight, color) => {
         context.font = `${weight} 12px ${css("--sans", "sans-serif")}`;
@@ -655,7 +667,6 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
         const a = screen(edge.source), b = screen(edge.target);
         place(RELATION_LABEL[edge.type] ?? edge.type, (a.x + b.x) / 2 - 18, (a.y + b.y) / 2 + 4, 600, css(relationTone(edge.type), ink));
       }
-      context.globalAlpha = 1;
     };
     // d3-force: links pull related things together, many-body charge keeps them apart, collision keeps labels
     // readable, a weak pull to the centre keeps separate clusters on screen.
@@ -789,40 +800,46 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     if ((state.turn !== undefined || state.memory !== undefined) && window.matchMedia("(max-width: 1320px)").matches) document.querySelector(".detail")?.scrollIntoView({ block: "start" });
   }
 
-  document.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-action]");
-    if (!target) return;
-    const { action, value } = target.dataset;
-    if (action === "project") { state.project = value; state.session = undefined; renderChrome(); renderView(); return; }
-    if (action === "outcome") { state.outcome = value; renderView(); return; }
-    if (action === "kind") { state.kind = value; renderView(); return; }
-    if (action === "invalid") { state.invalid = !state.invalid; renderView(); return; }
-    if (action === "harness") { state.harness = value; renderView(); return; }
-    if (action === "more") { state.more[value] = (state.more[value] ?? 0) + 20; renderView(); return; }
-    if (action === "graph-kind") {
-      if (state.hiddenKinds.has(value)) state.hiddenKinds.delete(value); else state.hiddenKinds.add(value);
-      target.setAttribute("aria-pressed", String(!state.hiddenKinds.has(value)));
-      graphController?.setHidden(state.hiddenKinds);
-      return;
-    }
-    if (action === "graph-islands") { state.islands = !state.islands; renderView(); return; }
-    if (action === "graph-select") { graphController?.select(value); return; }
-    if (action === "zoom" && graphController) {
+  // execCommand needs no permission and works for file:// pages; the selection stays if both ways fail.
+  function copyToClipboard(button, value) {
+    const done = () => { button.classList.add("is-copied"); button.setAttribute("aria-label", "Copied"); setTimeout(() => { button.classList.remove("is-copied"); button.removeAttribute("aria-label"); }, 1400); };
+    const range = document.createRange(); range.selectNodeContents(button.querySelector("code"));
+    getSelection().removeAllRanges(); getSelection().addRange(range);
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch { copied = false; }
+    if (copied) { getSelection().removeAllRanges(); done(); } else navigator.clipboard?.writeText(value).then(() => { getSelection().removeAllRanges(); done(); }, () => {});
+  }
+
+  function toggleGraphKind(button, value) {
+    if (state.hiddenKinds.has(value)) state.hiddenKinds.delete(value); else state.hiddenKinds.add(value);
+    button.setAttribute("aria-pressed", String(!state.hiddenKinds.has(value)));
+    graphController?.setHidden(state.hiddenKinds);
+  }
+
+  // What each data-action button does; a filter change re-renders the view.
+  const ACTIONS = {
+    project: (value) => { state.project = value; state.session = undefined; renderChrome(); renderView(); },
+    outcome: (value) => { state.outcome = value; renderView(); },
+    kind: (value) => { state.kind = value; renderView(); },
+    invalid: () => { state.invalid = !state.invalid; renderView(); },
+    harness: (value) => { state.harness = value; renderView(); },
+    more: (value) => { state.more[value] = (state.more[value] ?? 0) + 20; renderView(); },
+    "graph-kind": (value, button) => toggleGraphKind(button, value),
+    "graph-islands": () => { state.islands = !state.islands; renderView(); },
+    "graph-select": (value) => graphController?.select(value),
+    zoom: (value) => {
+      if (!graphController) return;
       if (value === "in") graphController.zoomBy(1.2); else if (value === "out") graphController.zoomBy(1 / 1.2); else graphController.reset();
-      return;
-    }
-    if (action === "copy") {
-      const done = () => { target.classList.add("is-copied"); target.setAttribute("aria-label", "Copied"); setTimeout(() => { target.classList.remove("is-copied"); target.removeAttribute("aria-label"); }, 1400); };
-      // execCommand needs no permission and works for file:// pages; the selection stays if both ways fail.
-      const range = document.createRange(); range.selectNodeContents(target.querySelector("code"));
-      getSelection().removeAllRanges(); getSelection().addRange(range);
-      let copied = false;
-      try { copied = document.execCommand("copy"); } catch { copied = false; }
-      if (copied) { getSelection().removeAllRanges(); done(); } else navigator.clipboard?.writeText(value).then(() => { getSelection().removeAllRanges(); done(); }, () => {});
-      return;
-    }
-    if (action === "session") { location.hash = hashFor("timeline", { session: value }); return; }
-    if (action === "turn") { location.hash = hashFor("timeline", state.session ? { session: state.session, turn: value } : { turn: value }); return; }
+    },
+    copy: (value, button) => copyToClipboard(button, value),
+    session: (value) => { location.hash = hashFor("timeline", { session: value }); },
+    turn: (value) => { location.hash = hashFor("timeline", state.session ? { session: state.session, turn: value } : { turn: value }); },
+  };
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    ACTIONS[button.dataset.action]?.(button.dataset.value, button);
   });
   document.addEventListener("change", (event) => {
     if (event.target.id !== "project-select") return;
