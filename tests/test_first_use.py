@@ -24,6 +24,7 @@ JARGON = (
     "capture",
     "mem_get",
     "qdrant",
+    "extract",
 )
 
 

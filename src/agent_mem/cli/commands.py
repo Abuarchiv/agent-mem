@@ -731,8 +731,9 @@ def cmd_observe(ns: argparse.Namespace, config: Config) -> int:
         )
         for call in data["calls_today"]:
             failed = call["n"] - (call["ok"] or 0)
+            job = {"extract": "facts", "summary": "titles", "graph": "links", "review": "cleanup"}.get(call["purpose"])
             print(
-                f"  today {call['provider']} ({call['purpose']}): {call['n']} calls"
+                f"  today {call['provider']}, {job or call['purpose']}: {call['n']} calls"
                 + (f", {failed} failed" if failed else "")
             )
         for error in data["recent_errors"]:
