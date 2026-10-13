@@ -388,3 +388,21 @@ def test_reindex_rebuilds_every_mirrored_kind_with_its_tag(config: Config, monke
     assert added == ["The viewer runs on port 37778.", "[decision] Keep SQLite as the only store."]
     assert {r[0] for r in conn.execute("SELECT dedupe_key FROM memories")} == {"mem0:new1", "mem0:new2"}
     conn.close()
+
+
+def test_turns_wait_while_their_only_stage_is_paused_after_a_quota_error(
+    config: Config, project: Path, monkeypatch
+) -> None:
+    from agent_mem.observe import providers, worker
+
+    monkeypatch.setattr(providers, "available", lambda name: True)
+    _turn(config, project, "s1", "Configure the release workflow", "The release workflow runs on tags only.")
+    conn = db.connect(config)
+    error = providers.ProviderError("claude: You've hit your limit", kind="quota")
+    providers.note_failure(conn, config, "claude", error)
+    until = providers.paused_until(conn, "claude")
+    assert worker.Worker(config, conn).step() is True
+    state, next_try = conn.execute("SELECT state, next_try FROM observe_queue").fetchone()
+    assert (state, next_try) == ("pending", until)
+    assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'summary'").fetchone()[0] == 0
+    conn.close()

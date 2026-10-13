@@ -301,12 +301,9 @@ def chain(config: Any, harness: str, conn: Any) -> list[str]:
     """Stages a turn from ``harness`` may use, in order, minus missing binaries and paused stages."""
     from agent_mem.core import timeutil
 
-    names = list(config.observe.providers)
-    if "fake" in names:
+    if "fake" in config.observe.providers:
         return ["fake"]
-    if not config.observe.cross_vendor:
-        own = VENDOR_OF_HARNESS.get(harness)
-        names = [n for n in names if n in {"ollama", own}]
+    names = _names(config, harness)
     now = timeutil.iso()
     out = []
     for name in names:
@@ -321,8 +318,22 @@ def chain(config: Any, harness: str, conn: Any) -> list[str]:
 
 def any_left(config: Any, harness: str, conn: Any) -> bool:
     """True while some stage might still succeed later (paused, not missing)."""
+    return any(available(n) for n in _names(config, harness))
+
+
+def resumes_at(config: Any, harness: str, conn: Any) -> str | None:
+    """When the first paused stage for ``harness`` may run again; None when none is paused."""
+    from agent_mem.core import timeutil
+
+    now = timeutil.iso()
+    pauses = [paused_until(conn, n) for n in _names(config, harness) if available(n)]
+    return min((until for until in pauses if until and until > now), default=None)
+
+
+def _names(config: Any, harness: str) -> list[str]:
+    """The configured stages a turn from ``harness`` may use (its own vendor, unless ``cross_vendor``)."""
     names = list(config.observe.providers)
     if not config.observe.cross_vendor:
         own = VENDOR_OF_HARNESS.get(harness)
         names = [n for n in names if n in {"ollama", own}]
-    return any(available(n) for n in names)
+    return names

@@ -63,8 +63,13 @@ def _next_day() -> str:
     return timeutil.iso((timeutil.now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0))
 
 
-class LimitReached(Exception):
-    """The day's model calls are used up; the turn waits for tomorrow instead of being kept raw for good."""
+class Deferred(Exception):
+    """No model may be called now: a quota or login failure paused the harness's stages, or the day's calls are
+    used up. The turn waits until ``until``; before, it was kept raw for good and never got facts."""
+
+    def __init__(self, until: str) -> None:
+        super().__init__(until)
+        self.until = until
 
 
 def _lower_priority() -> None:
@@ -177,6 +182,8 @@ class Worker:
     # --- one bundle --------------------------------------------------------------------------
     def process(self, b: bundling.Bundle) -> str:
         chain = providers.chain(self.config, b.harness, self.conn)
+        if not chain and (until := providers.resumes_at(self.config, b.harness, self.conn)):
+            raise Deferred(until)
         if chain:
             try:
                 self.adapter  # noqa: B018  (builds mem0 once; without an embedder there is only the raw stage)
@@ -188,7 +195,7 @@ class Worker:
         if chain and _calls_today(self.conn) >= self.config.observe.daily_limit:
             chain = [name for name in chain if name == "ollama"]
             if not chain:
-                raise LimitReached
+                raise Deferred(_next_day())
         last_error = None
         for name in chain:
             llm = providers.make_llm(name, providers.model_for(self.config, name))
@@ -315,8 +322,8 @@ class Worker:
             self.stats["bundles"] += 1
             try:
                 provider = self.process(b)
-            except LimitReached:
-                queue.defer(self.conn, b.turn_ids, _next_day())
+            except Deferred as wait:
+                queue.defer(self.conn, b.turn_ids, wait.until)
                 continue
             except providers.ProviderError as error:
                 if providers.any_left(self.config, b.harness, self.conn):
