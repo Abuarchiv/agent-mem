@@ -472,9 +472,9 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     from agent_mem.observe import mem0_adapter
 
     model = config.observe.entity_model
-    from agent_mem.observe import concepts
+    from agent_mem.observe import spacy_model
 
-    present = concepts.model_path(config) is not None or mem0_adapter.spacy_model_available(model)
+    present = spacy_model.model_path(config) is not None or mem0_adapter.spacy_model_available(model)
     checks.append(
         Check(
             "entity linking",

@@ -138,9 +138,9 @@ class Mem0Adapter:
         self.config = config
         self.llm, self.llm_model, self.custom_instructions = llm, llm_model, custom_instructions
         self.mem0_dir = mem0_dir or (config.data_dir / "mem0")
-        from agent_mem.observe import concepts
+        from agent_mem.observe import spacy_model
 
-        _ensure_env(self.mem0_dir, config.observe.entity_model, concepts.model_path(config))
+        _ensure_env(self.mem0_dir, config.observe.entity_model, spacy_model.model_path(config))
         _register()
         from mem0 import Memory
         from mem0.configs.base import MemoryConfig

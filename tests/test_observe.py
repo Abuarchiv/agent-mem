@@ -119,22 +119,24 @@ def test_concept_model_downloads_into_the_model_dir_and_checks_its_checksum(conf
 
     import pytest
 
-    from agent_mem.observe import concepts
+    from agent_mem.observe import spacy_model
 
     config.observe.entity_model = "de_core_news_sm"
     wheel = tmp_path / "w.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("de_core_news_sm/de_core_news_sm-3.8.0/config.cfg", "[nlp]")
         archive.writestr("de_core_news_sm-3.8.0.dist-info/METADATA", "x")
-    monkeypatch.setattr(concepts, "_fetch", lambda url, path: path.write_bytes(wheel.read_bytes()))
-    assert concepts.model_path(config) is None
+    monkeypatch.setattr(spacy_model, "_fetch", lambda url, path: path.write_bytes(wheel.read_bytes()))
+    assert spacy_model.model_path(config) is None
     with pytest.raises(ValueError, match="checksum"):
-        concepts.download_model(config)  # the pinned hash is the real wheel's
-    monkeypatch.setitem(concepts.SPACY_SHA256, "de_core_news_sm", hashlib.sha256(wheel.read_bytes()).hexdigest())
-    path = concepts.download_model(config)
+        spacy_model.download_model(config)  # the pinned hash is the real wheel's
+    monkeypatch.setitem(spacy_model.SPACY_SHA256, "de_core_news_sm", hashlib.sha256(wheel.read_bytes()).hexdigest())
+    path = spacy_model.download_model(config)
     assert (
-        path == config.model_dir / "spacy" / "de_core_news_sm" / "de_core_news_sm-3.8.0" == concepts.model_path(config)
+        path
+        == config.model_dir / "spacy" / "de_core_news_sm" / "de_core_news_sm-3.8.0"
+        == spacy_model.model_path(config)
     )
     config.observe.entity_model = "../../etc"
     with pytest.raises(ValueError, match="not a spaCy model name"):
-        concepts.download_model(config)
+        spacy_model.download_model(config)

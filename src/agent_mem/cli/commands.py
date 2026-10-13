@@ -403,13 +403,13 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
 
     if not install.extras()["observer"]:
         return 0
-    from agent_mem.observe import concepts
+    from agent_mem.observe import spacy_model
 
     name = config.observe.entity_model
-    path = concepts.model_path(config)
+    path = spacy_model.model_path(config)
     if path is None and ns.action == "install":
         try:
-            path = concepts.download_model(config)
+            path = spacy_model.download_model(config)
         except (OSError, ValueError) as error:
             print(f"Concept model {name} not downloaded: {error}. Facts work without mem0's entity linking.")
             return 1
