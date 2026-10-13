@@ -11,6 +11,8 @@
 - agent-mem is not on PyPI: the README installed it by its bare name, which fails today and would install whatever someone registers under that name. It now installs from the repository.
 - The install script connects every harness on PATH on a fresh machine (`agent-mem uninstall all` undoes it), using the copy it just installed even before PATH knows it.
 - `doctor` and `setup claude --write` report when the Claude Code plugin and `setup --write` are both active, because both then run every hook.
+- Hooks of an older release now announce themselves even after a plain `uv tool upgrade`: the indexer the hooks start (and `doctor`) records them as `setup:<harness>` in `health`, so the session-start panel says to run `agent-mem doctor --fix`; the line goes away once they match.
+- The install scripts stop with a clear message when git is missing (uv needs it for the repository source); the README names the order for a complete removal.
 - `agent-mem --version` names the commit of a git install (`1.0.0 (9436f94)`), because the version number stays the same between releases.
 
 ### Facts in the background (new)

@@ -14,6 +14,8 @@ if ! command -v uv >/dev/null 2>&1; then
   PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
   command -v uv >/dev/null 2>&1 || fail "uv was installed but is not on PATH. Open a new terminal and run this again."
 fi
+git --version >/dev/null 2>&1 \
+  || fail "git is missing; uv needs it to fetch agent-mem. macOS: xcode-select --install. Linux: install git with your package manager."
 before=$(agent-mem --version 2>/dev/null || true)
 uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
   || fail "uv could not install agent-mem (network or git missing?). The error above names the cause."

@@ -18,6 +18,9 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Fail "uv was installed but is not on PATH. Open a new terminal and run this again."
   }
 }
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  Fail "git is missing; uv needs it to fetch agent-mem. Install Git for Windows (winget install Git.Git) and run this again."
+}
 $before = if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem --version } else { "" }
 uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
 if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem (network or git missing?). The error above names the cause." }

@@ -318,6 +318,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     finally:
         conn.close()
     checks.extend(_hook_checks(fix))
+    record_setup_health(config)
     checks.extend(_viewer_checks(config, fix))
     if fix:
         from agent_mem.memory import indexer
@@ -454,6 +455,23 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
             )
         )
     return checks
+
+
+def record_setup_health(config: Config) -> None:
+    """Hooks may not import ``cli``, so the indexer they spawn (and ``doctor``) notes hooks an older release wrote,
+    e.g. after a plain ``uv tool upgrade``; the session-start panel shows failing ``health`` rows."""
+    from agent_mem.cli import install
+
+    with contextlib.suppress(OSError, ValueError, sqlite3.Error):
+        conn = db.connect(config)
+        try:
+            for harness in install.HARNESSES:
+                if install.hook_commands(harness):
+                    stale = install.stale(harness)
+                    error = "hooks come from an older agent-mem release (`agent-mem doctor --fix` rewrites them)"
+                    db.record_health(conn, f"setup:{harness}", error if stale else None)
+        finally:
+            conn.close()
 
 
 def _hook_checks(fix: bool) -> list[Check]:

@@ -269,3 +269,34 @@ def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch,
     assert [c[-2:] for c in calls[2:]] == [["models", "install"], ["doctor", "--fix"]]
     assert all(c[0].endswith("agent-mem") for c in calls[1:])
     assert "1.0.0 (aaaaaaa) -> 1.0.0 (bbbbbbb)" in capsys.readouterr().out
+
+
+def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Path, config) -> None:
+    from agent_mem.cli import main
+    from agent_mem.core import db
+    from agent_mem.hooks.hook import problems
+
+    exe = homes / "bin" / "agent-mem"
+    exe.parent.mkdir()
+    exe.write_text("")
+    install.write("claude", PLUGINS, str(exe))
+    settings = homes / ".claude" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["hooks"]["Stop"][0]["hooks"][0]["timeout"] = 99  # written by an older release
+    settings.write_text(json.dumps(data))
+
+    data_dir = ["--data-dir", str(config.data_dir)]
+    assert main([*data_dir, "index", "--quiet", "--no-download"]) == 0  # what the hooks spawn
+    conn = db.connect(config)
+    try:
+        shown = problems(conn)
+        assert any("setup:claude" in line and "doctor --fix" in line for line in shown)
+    finally:
+        conn.close()
+
+    assert main([*data_dir, "doctor", "--fix"]) in (0, 1)
+    conn = db.connect(config)
+    try:
+        assert not any("setup:claude" in line for line in problems(conn))
+    finally:
+        conn.close()

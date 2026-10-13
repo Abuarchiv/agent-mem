@@ -221,6 +221,9 @@ def _main(args: list[str]) -> int:
         from agent_mem.memory.indexer import run
 
         stats = run(config, allow_download=not ns.no_download)
+        from agent_mem.cli.health import record_setup_health
+
+        record_setup_health(config)
         if not ns.quiet:
             print(json.dumps(stats, indent=2, default=str))
         return 0

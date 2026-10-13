@@ -28,7 +28,7 @@ Three sizes:
 
 Update with `agent-mem upgrade` (`--extras observer` adds an extra): it installs the newest commit of the source you installed from (extras kept), downloads a model the new release needs, then runs `agent-mem doctor --fix`, which migrates the database and rewrites hooks that an older release wrote (Codex asks you to trust changed hooks once more with `/hooks`). Running the install script again does the same. On a fresh machine the script also runs `agent-mem setup all --write` (every harness on PATH; `agent-mem uninstall all` undoes it). Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no binary.
 
-Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data).
+Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data). To remove everything, run `agent-mem uninstall all`, then `agent-mem purge --all`, then `uv tool uninstall agent-mem`; removing the tool first leaves hooks that call a missing binary on every event.
 
 ## What it does
 
