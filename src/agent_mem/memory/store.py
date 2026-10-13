@@ -183,13 +183,23 @@ def add_memory(
 
 
 def supersede(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None:
+    """Retire ``old_id`` (``new_id`` None: expired, nothing replaces it). A mirrored fact leaves mem0 too, whoever
+    retires it (the review, a duplicate, ``mem_remember(supersedes=…)``): otherwise the next extraction is shown it
+    as current and keeps or rewrites it."""
     now = timeutil.iso()
     cursor = conn.execute(
         "UPDATE memories SET invalid_at = ?, superseded_by = ? WHERE id = ? AND invalid_at IS NULL",
         (now, new_id, old_id),
     )
-    if cursor.rowcount:
-        _drop_keys(conn, old_id)
+    if not cursor.rowcount:
+        return
+    _drop_keys(conn, old_id)
+    key = conn.execute("SELECT dedupe_key FROM memories WHERE id = ?", (old_id,)).fetchone()
+    if key and str(key[0] or "").startswith("mem0:"):
+        conn.execute(
+            "INSERT OR IGNORE INTO observe_forget(mem0_id, ts) VALUES (?, ?)",
+            (str(key[0])[len("mem0:") :], now),
+        )
 
 
 def _drop_keys(conn: sqlite3.Connection, memory_id: int) -> None:
@@ -215,16 +225,7 @@ def drop_retired_keys(conn: sqlite3.Connection) -> int:
     return len(ids)
 
 
-def retire(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None:
-    """``supersede`` (``new_id`` None: expired, nothing replaces it), and a mirrored fact leaves mem0 too, or the next
-    extraction sees it as current."""
-    supersede(conn, old_id, new_id)
-    key = conn.execute("SELECT dedupe_key FROM memories WHERE id = ?", (old_id,)).fetchone()
-    if key and str(key[0] or "").startswith("mem0:"):
-        conn.execute(
-            "INSERT OR IGNORE INTO observe_forget(mem0_id, ts) VALUES (?, ?)",
-            (str(key[0])[len("mem0:") :], timeutil.iso()),
-        )
+retire = supersede  # the name the observer's callers use
 
 
 SCRUB_MESSAGES = "observe.scrub_messages"

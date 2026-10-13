@@ -191,7 +191,7 @@ def _supersede_duplicates(conn: sqlite3.Connection) -> int:
             continue
         key = (row["project_id"], row["kind"], normalized)
         if key in latest:
-            store.supersede(conn, latest[key], int(row["id"]))
+            store.retire(conn, latest[key], int(row["id"]))  # the mem0 copy goes too
             count += 1
         latest[key] = int(row["id"])
     return count

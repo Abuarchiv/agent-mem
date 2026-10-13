@@ -32,3 +32,13 @@ def test_the_indexer_clears_keys_of_memories_retired_elsewhere(conn) -> None:
     assert store.drop_retired_keys(conn) == 1
     assert search.fts_candidates(conn, ["tests", "pytest"]) == []
     assert store.drop_retired_keys(conn) == 0
+
+
+def test_a_fact_replaced_through_mem_remember_leaves_mem0_too(conn) -> None:
+    """``mem_remember(supersedes=…)`` and the title dedupe called ``supersede``, which kept the mem0 copy: the next
+    extraction was shown the replaced fact as current."""
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
+    old = _memory(conn, "mem0:abc")
+    new = _memory(conn, "Der Viewer läuft auf Port 37778")
+    store.supersede(conn, old, new)
+    assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["abc"]
