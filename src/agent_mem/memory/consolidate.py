@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import re
-import shlex
 import sqlite3
 from pathlib import Path
 
@@ -21,9 +20,9 @@ from agent_mem.core import db, identity, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import learn, store
 
+reusable_command = signals.reusable_command
+
 _NORMALIZE = re.compile(r"[\W_]+")  # Unicode-aware: Cyrillic, CJK etc. keep their letters
-_SEGMENTS = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
-_REDIRECT = re.compile(r"\s+(?:\d?>>?|&>)\s*(?:&\d|\S+)")
 
 
 def _norm(text: str) -> str:
@@ -56,26 +55,6 @@ def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[
     return stats
 
 
-def reusable_command(command: str, kind: str) -> str | None:
-    """The part of a shell line worth suggesting again as the project's ``kind`` command, or None.
-
-    ``cd app && npm test 2>&1 | tail`` gives ``npm test``; heredocs, shortened text and ``grep … tests/`` give None.
-    """
-    line = command.strip()
-    if "\n" in line or "[truncated]" in line:
-        return None
-    for segment in _SEGMENTS.split(line):
-        segment = _REDIRECT.sub("", segment).strip()
-        try:
-            shlex.split(segment)
-        except ValueError:
-            return None  # a quoted |, ; or && was cut apart
-        key = signals.command_key(segment)
-        if key is not None and signals.command_kind(key) == kind:
-            return segment if len(segment) <= 100 else None
-    return None
-
-
 def _clean_commands(conn: sqlite3.Connection) -> int:
     """Rewrite recorded commands to their reusable part, merging variants; drop what is not a command."""
     changed = 0
@@ -83,7 +62,7 @@ def _clean_commands(conn: sqlite3.Connection) -> int:
         "SELECT project_id, key, value, count, updated_at FROM profile WHERE key LIKE 'cmd:%'"
     ).fetchall()
     for row in rows:
-        value = reusable_command(row["value"], row["key"][4:])
+        value = signals.reusable_command(row["value"], row["key"][4:])
         if value == row["value"]:
             continue
         conn.execute(

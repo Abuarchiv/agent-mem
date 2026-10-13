@@ -349,6 +349,34 @@ def same_tool(a: str | None, b: str | None) -> bool:
     return tool(a) is not None and tool(a) == tool(b)
 
 
+_SEGMENTS = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+_REDIRECT = re.compile(r"\s+(?:\d?>>?|&>)\s*(?:&\d|\S+)")
+_ASSIGNMENTS = re.compile(r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+")  # `UV_CACHE_DIR=/tmp/x uv run …`
+_ONLY_ASKS = re.compile(r"(?:^|\s)(?:--version|--help|-V|-h)(?:\s|$)")
+
+
+def reusable_command(command: str, kind: str) -> str | None:
+    """The part of a shell line worth suggesting again as the project's ``kind`` command, or None.
+
+    ``cd app && npm test 2>&1 | tail`` gives ``npm test``; heredocs, shortened text and ``grep … tests/`` give None.
+    """
+    line = command.strip()
+    if "\n" in line or "[truncated]" in line:
+        return None
+    for segment in _SEGMENTS.split(line):
+        segment = _ASSIGNMENTS.sub("", _REDIRECT.sub("", segment)).strip()
+        try:
+            shlex.split(segment)
+        except ValueError:
+            return None  # a quoted |, ; or && was cut apart
+        if _ONLY_ASKS.search(segment):
+            return None  # `pytest --version` asks the tool, it runs nothing
+        key = command_key(segment)
+        if key is not None and command_kind(key) == kind:
+            return segment if len(segment) <= 100 else None
+    return None
+
+
 def fixable(command_key: str | None) -> bool:
     """A failure of this command can be fixed by a change (a test, a build), not just retried with other words."""
     if not command_key:

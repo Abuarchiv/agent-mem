@@ -165,6 +165,18 @@ def test_non_latin_titles_are_not_superseded(conn, config: Config, project: Path
         ('uv run pytest -k "a|b"', "test", None),  # a quoted pipe must not be cut apart
         ("uv run pytest -q\n…[truncated]…\n tail", "test", None),
         ("uv run pytest " + "x" * 120, "test", None),
+        # a real Claude Code and Codex session: a cache path in front, a version check, a status check behind
+        (
+            "UV_CACHE_DIR=/private/tmp/x uv run --with pytest python3 -m pytest -q .",
+            "test",
+            "uv run --with pytest python3 -m pytest -q .",
+        ),
+        ("python3 -m pytest --version", "test", None),
+        (
+            "uv run --with pytest python3 -m pytest -q 2>&1 | tail -30; git status --short",
+            "test",
+            "uv run --with pytest python3 -m pytest -q",
+        ),
     ],
 )
 def test_reusable_command_keeps_only_the_command_that_does_the_job(command: str, kind: str, expected: str | None):

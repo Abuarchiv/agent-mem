@@ -37,15 +37,6 @@ class Response:
     work: int = 0  # measured agent work behind the injected memories (memory/work.py)
 
 
-def _reusable(command: str, kind: str) -> bool:
-    """A command worth suggesting again: one short line whose program itself does the job.
-
-    `grep … tests/` or a heredoc script mention a test but are not the project's test command.
-    """
-    key = signals.command_key(command)
-    return "\n" not in command and len(command) <= 100 and key is not None and signals.command_kind(key) == kind
-
-
 def dedupe_key(event: Event) -> str:
     if event.native_event_id:
         suffix = event.native_event_id
@@ -595,8 +586,12 @@ def _remember_command(
     conn: sqlite3.Connection, project_id: str | None, tool_signal: signals.ToolSignal, ts: str
 ) -> None:
     """A test, build, lint or install command that passed, counted so the briefing names the usual one."""
-    command, kind = tool_signal.command, tool_signal.command_kind
-    if project_id is None or not command or kind not in PROJECT_COMMANDS or not _reusable(command, kind):
+    kind = tool_signal.command_kind
+    if project_id is None or not tool_signal.command or kind not in PROJECT_COMMANDS:
+        return
+    # The part worth running again: `UV_CACHE_DIR=/tmp/x uv run pytest -q 2>&1 | tail; git status` is `uv run pytest -q`.
+    command = signals.reusable_command(tool_signal.command, kind)
+    if command is None:
         return
     conn.execute(
         "INSERT INTO profile(project_id, key, value, count, updated_at) VALUES (?, ?, ?, 1, ?) "

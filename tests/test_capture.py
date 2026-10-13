@@ -267,3 +267,16 @@ def test_a_failure_is_fixed_by_the_same_tool_started_another_way(driver: Driver,
     driver.stop("s1", "Fixed calc.add; the tests pass.")
     assert conn.execute("SELECT outcome FROM turns").fetchone()[0] == "ok"
     assert conn.execute("SELECT COUNT(*) FROM events WHERE error_sig IS NOT NULL AND resolved = 0").fetchone()[0] == 0
+
+
+def test_the_test_command_is_stored_as_it_can_be_run_again(driver: Driver, conn):
+    """A real session stored `python3 -m pytest --version` and whole chains with a cache path in front as the
+    project's test command; the session start then offered them to the next agent."""
+    driver.prompt("s1", "Run the tests")
+    driver.bash("s1", "python3 -m pytest --version", "pytest 9.1.1")
+    driver.bash(
+        "s1", "UV_CACHE_DIR=/tmp/c uv run --with pytest python3 -m pytest -q 2>&1 | tail -30; git status", "3 passed"
+    )
+    driver.stop("s1", "Tests pass.")
+    rows = [r[0] for r in conn.execute("SELECT value FROM profile WHERE key = 'cmd:test'")]
+    assert rows == ["uv run --with pytest python3 -m pytest -q"]
