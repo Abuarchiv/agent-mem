@@ -346,7 +346,14 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
         viewer = f"http://localhost:{config.viewer.port}/" if config.viewer.enabled else None
         notices = [failure] if failure else worker.problems
         return inject.terminal(
-            context or "", heading, color, facts=worker.facts, notices=notices, viewer=viewer, recent=worker.recent
+            context or "",
+            heading,
+            color,
+            facts=worker.facts,
+            notices=notices,
+            viewer=viewer,
+            recent=worker.recent,
+            spent=worker.response.work if worker.response is not None else 0,
         )
     if event.kind == "session_end" and worker.summary:
         return worker.summary

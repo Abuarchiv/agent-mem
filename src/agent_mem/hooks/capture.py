@@ -22,7 +22,7 @@ from agent_mem.core import db, identity, privacy, signals, timeutil
 from agent_mem.core.config import Config, env_flag, load_project_settings
 from agent_mem.core.events import Event
 from agent_mem.hooks import inject
-from agent_mem.memory import learn, store
+from agent_mem.memory import learn, store, work
 
 _CITED = re.compile(r"\b([TM])(\d{1,9})\b")
 _OVERRIDE = re.compile(r"(?i)\b(trotzdem|egal|ignore (the|that) rule|anyway|do it anyway|mach es trotzdem)\b")
@@ -34,6 +34,7 @@ class Response:
     deny: str | None = None
     wants_indexer: bool = False
     stored: bool = False
+    work: int = 0  # measured agent work behind the injected memories (memory/work.py)
 
 
 def _reusable(command: str, kind: str) -> bool:
@@ -169,15 +170,16 @@ def _apply(
         response.context = None
         response.deny = None
     elif response.context:
-        _count_injection(conn, event.ts, inject.tokens(response.context))
+        response.work = work.behind(conn, response.context)
+        _count_injection(conn, event.ts, inject.tokens(response.context), response.work)
     return response
 
 
-def _count_injection(conn: sqlite3.Connection, ts: str, tokens: int) -> None:
-    """Per day: blocks and estimated tokens injected (`agent-mem status`)."""
+def _count_injection(conn: sqlite3.Connection, ts: str, tokens: int, spent: int) -> None:
+    """Per day: blocks, estimated tokens injected and the measured work behind them (`agent-mem status`)."""
     key = f"injected:{timeutil.day(ts)}"
-    blocks, total = (int(x) for x in (db.get_meta(conn, key) or "0,0").split(","))
-    db.set_meta(conn, key, f"{blocks + 1},{total + tokens}")
+    blocks, total, behind = ([*(int(x) for x in (db.get_meta(conn, key) or "0,0").split(",")), 0])[:3]
+    db.set_meta(conn, key, f"{blocks + 1},{total + tokens},{behind + spent}")
 
 
 # --- helpers -----------------------------------------------------------------

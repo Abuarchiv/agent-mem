@@ -266,6 +266,9 @@
     const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? valid.length : data.counts.memories)}</b><span>current${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} replaced by newer ones` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(kindLabel(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, dead ends and preferences appear as agents work.</span>`}</div></section>`;
 
     const learning = data.learning;
+    // claude-mem's token economics: what the injected memories cost to read against the agent's measured work behind them.
+    const injected = data.health.injected ?? {};
+    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>${injected.saved_percent != null ? `${num(injected.saved_percent)}%` : "—"}</b><span>${injected.saved_percent != null ? "less to read than to redo, last 7 days" : injected.built_from ? "no injected memory with measured work yet" : "measured once a session ends"}</span></div><div class="block-foot"><div class="stats">${stat(`~${num(injected.tokens)}`, "tokens injected")}${stat(`~${num(injected.work)}`, "tokens of work behind them")}</div><span class="caption">Memory built from ~${num(injected.built_from)} tokens in ${plural(injected.measured_turns ?? 0, "request")}. Fresh tokens from the agents' transcripts; cache reads left out.</span></div></section>`;
     const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learning <a href="${hashFor("learned")}" aria-label="Open learned rules and recipes">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(learning.errors_fixed)}</b><span>${learning.errors_fixed === 1 ? "error fix" : "error fixes"} remembered</span></div><div class="block-foot"><div class="stats">${stat(num(learning.known_errors_recurred), "errors came back")}${stat(num(enabled), "rules active")}</div></div></section>`;
 
 
@@ -278,7 +281,7 @@
     }).join("");
     return `<div class="page-head"><div><h1>${num(turnCount)} ${turnCount === 1 ? "request" : "requests"} in ${plural(sessionCount, "session")}</h1><p class="lede">${h(lede)}</p></div></div>
 ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
-<div class="blocks">${activity}${memoryBlock}${learnBlock}</div>
+<div class="blocks">${activity}${memoryBlock}${tokenBlock}${learnBlock}</div>
 <div class="columns">
 <section class="panel"><div class="panel-head"><h2>Latest requests</h2><span class="spacer"></span>${outcomePills()}</div>${feed}<div class="panel-foot"><a class="text-link" href="${hashFor("timeline")}">All sessions ${icon("right", 16)}</a></div></section>
 <div class="stack">
@@ -356,7 +359,7 @@ ${turnDetail(selected, session)}
 <header><h2>T${turn.id} · ${h(outcomeLabel(turn.outcome))}</h2><a class="round-button" href="${closeHref}" aria-label="Close turn detail">${icon("close", 16)}</a></header>
 ${turn.title ? `<p class="detail-title">${turn.type ? tag(turn.type) : ""}<b>${h(turn.title)}</b></p>` : ""}
 <div class="pill-group">${projectTag(turn.project_id)}${session ? tag(harnessLabel(session.harness)) : ""}${session?.branch ? tag(session.branch, "mono") : ""}</div>
-<dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still running")}</dd></dl>
+<dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still running")}</dd>${turn.work != null ? `<dt>Work</dt><dd>~${num(turn.work)} tokens spent by the agent</dd>` : ""}</dl>
 <div class="copy-list">${copyable(`agent-mem show T${turn.id}`)}</div>
 <span class="section-label">Request</span><div class="text-box">${h(request(turn.prompt) || "(no request text)")}</div>
 ${actionList}
@@ -441,7 +444,7 @@ ${selected ? memoryDetail(selected) : ""}
 <div class="pill-group">${projectTag(memory.project_id)}${tag(memorySource(memory))}${memory.invalid_at ? tag("replaced", "warn") : ""}</div>
 <div class="text-box">${inline(memoryText(memory))}${memory.body && !memoryText(memory).startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? `\n\n${h(memory.body)}` : ""}</div>
 ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show ${id}</code> prints all of it.</span></p>` : ""}
-<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
+<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.work ? `<dt>Work</dt><dd>~${num(memory.work)} tokens to find out, ~${num(Math.ceil((memoryText(memory).length) / 4))} to read</dd>` : ""}${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
 <span class="section-label">Commands</span>
 <div class="copy-list">${copyable(`agent-mem show ${id}`)}${copyable(`agent-mem purge --id ${id}`)}</div>
 <p class="notice">${icon("lock", 16)}<span>Purge deletes the memory with its search keys and vectors and removes this page. An agent can do the same with the <code>mem_forget</code> tool.</span></p>
@@ -511,6 +514,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
 <div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB · schema v${h(health.schema)}</span></div>
+<div class="row"><span class="grow wrap"><b>Tokens, last 7 days</b><span>~${num(health.injected?.tokens)} injected, ~${num(health.injected?.work)} tokens of agent work behind them</span></span><span class="value">${health.injected?.saved_percent != null ? `${num(health.injected.saved_percent)}% less` : "—"}</span></div>
 <div class="row"><b>Waiting to be saved</b><span class="value">${plural(health.spool, "event")}</span></div>
 <div class="row"><span class="grow wrap"><b>Could not be read</b>${data.quarantine_latest ? `<span>Latest ${h(when(data.quarantine_latest.ts))}: ${h(data.quarantine_latest.reason)}</span>` : ""}</span><span class="value">${plural(health.quarantine, "file")}</span></div>
 <div class="row"><b>Data directory</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>

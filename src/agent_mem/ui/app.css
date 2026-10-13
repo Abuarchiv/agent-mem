@@ -115,7 +115,7 @@ td .dot { display: inline-block; margin-right: 8px; }
 .alert .text-link { flex-shrink: 0; }
 
 /* pastel blocks */
-.blocks { display: grid; grid-template-columns: minmax(260px, 1.2fr) minmax(220px, 1fr) minmax(220px, 1fr); gap: 16px; }
+.blocks { display: grid; grid-template-columns: minmax(260px, 1.2fr) repeat(3, minmax(200px, 1fr)); gap: 16px; }
 .block { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; gap: 12px; min-height: 206px; padding: 20px 22px; border-radius: var(--radius-lg); color: #1A1814; }
 .block h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .block h2 a { color: inherit; }

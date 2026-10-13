@@ -143,7 +143,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
     turns: list[dict[str, Any]] = []
     for row in conn.execute(
         "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, importance, trust, title, type, "
-        f"files_json, commands_json, errors_json FROM turns {where} ORDER BY started_at DESC, id DESC LIMIT ?",
+        f"files_json, commands_json, errors_json, work_tokens FROM turns {where} ORDER BY started_at DESC, id DESC LIMIT ?",
         (*params, LIMITS["turns"]),
     ):
         prompt, prompt_cut = _cap(row["prompt"], TEXT_CHARS)
@@ -166,6 +166,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 "files": _json_list(row["files_json"])[:20],
                 "commands": _json_list(row["commands_json"])[:10],
                 "errors": _json_list(row["errors_json"])[:10],
+                "work": row["work_tokens"],
             }
         )
     actions: dict[str, list[dict[str, Any]]] = {}
@@ -205,7 +206,10 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
     memories: list[dict[str, Any]] = []
     for row in conn.execute(
         "SELECT id, project_id, kind, title, body, source, trust, importance, turn_id, origin, valid_from, invalid_at, "
-        "superseded_by, created_at, (SELECT session_id FROM turns t WHERE t.id = memories.turn_id) AS session_id "
+        "superseded_by, created_at, (SELECT session_id FROM turns t WHERE t.id = memories.turn_id) AS session_id, "
+        # its turn's measured work shared by the memories that turn produced (memory/work.py)
+        "(SELECT t.work_tokens / MAX(1, (SELECT COUNT(*) FROM memories s WHERE s.turn_id = memories.turn_id "
+        "AND s.kind != 'native_note')) FROM turns t WHERE t.id = memories.turn_id) AS work "
         f"FROM memories {where} "
         "ORDER BY invalid_at IS NOT NULL, created_at DESC, id DESC LIMIT ?",
         (*params, LIMITS["memories"]),
@@ -301,6 +305,7 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 "consolidated_at",
                 "components",
                 "config_warnings",
+                "injected",
             )
         },
         "agents": agents(conn, config),

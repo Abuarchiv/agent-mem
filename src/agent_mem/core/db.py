@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import sqlite3
 import sys
 from collections.abc import Iterator
@@ -108,12 +109,23 @@ def migrate_database(conn: sqlite3.Connection) -> None:
             if version <= current:
                 continue
             for statement in _split_sql(sql):
-                conn.execute(statement)
+                if not _adds_existing_column(conn, statement):
+                    conn.execute(statement)
             conn.execute(f"PRAGMA user_version = {version}")
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
         raise
+
+
+_ADD_COLUMN = re.compile(r"\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)", re.IGNORECASE)
+
+
+def _adds_existing_column(conn: sqlite3.Connection, statement: str) -> bool:
+    """``ADD COLUMN`` has no ``IF NOT EXISTS``: a database that already has the column (a schema number rewound by
+    hand or by a test) skips the statement instead of failing the whole migration."""
+    match = _ADD_COLUMN.match(statement)
+    return bool(match) and match[2] in {row[1] for row in conn.execute(f"PRAGMA table_info({match[1]})")}
 
 
 def _split_sql(sql: str) -> list[str]:

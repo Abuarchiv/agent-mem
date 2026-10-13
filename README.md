@@ -73,6 +73,16 @@ A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Each stage
 
 Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the turns of that time first.
 
+### Tokens: what reading costs against what finding out took
+
+Like claude-mem, Agent Mem compares what an injected memory costs to read with the work behind it. The work is measured, not estimated: after a turn ends, the indexer reads the harness's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that turn: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its turn's share (the turn's work divided by the memories it produced), so a block that names several memories of one turn counts that turn once. Copilot CLI and OpenCode turns stay unmeasured.
+
+- Terminal (session start): `Read ~1,240 tokens · built from ~86,000 tokens of agent work · 99% less to read than to redo`, shown only when measured work stands behind the block.
+- `agent-mem status`: the same for the last 7 days, plus the total work the memory was built from.
+- Viewer: a Tokens block on the overview, a line on the Health page, and `Work` in every request and memory detail.
+
+This is a comparison, not a measured saving: nobody knows how much of that work an agent would have repeated without the memory.
+
 ## Commands
 
 ```

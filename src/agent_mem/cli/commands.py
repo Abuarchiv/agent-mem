@@ -80,6 +80,16 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         f"injected: today ~{injected['today_tokens']} tokens · last {injected['days']} days {injected['blocks']} blocks,"
         f" ~{injected['tokens']} tokens, ~{injected['tokens_per_session'] or '-'} per session"
     )
+    if injected["built_from"]:
+        drew = (
+            f"those blocks stand for ~{injected['work']:,} tokens of agent work (-{injected['saved_percent']}% to read)"
+            if injected["saved_percent"] is not None
+            else "no injected memory has measured work yet"
+        )
+        print(
+            f"work: {drew} · memory built from ~{injected['built_from']:,} tokens in {injected['measured_turns']}"
+            " turns (fresh tokens from the transcripts, cache reads left out)"
+        )
     print(f"last consolidation {data['consolidated_at'] or 'never'}")
     if data["paused_until"]:
         print(f"capture paused until {data['paused_until']}")

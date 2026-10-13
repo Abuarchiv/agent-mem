@@ -645,13 +645,14 @@ def terminal(
     notices: list[str] | None = None,
     viewer: str | None = None,
     recent: list[tuple[str, str, str, str]] | None = None,
+    spent: int = 0,
 ) -> str:
     """The injected block as the user sees it in the terminal: the last session first, then recent work, then the
     memories grouped by kind, each group cut to its newest rows.
 
     Built from the context lines themselves, so the terminal never shows something the model did not get.
-    ``facts`` (project state), ``notices`` (failures to act on), ``recent`` (the work log from ``recent_work``)
-    and ``viewer`` are for the user only.
+    ``facts`` (project state), ``notices`` (failures to act on), ``recent`` (the work log from ``recent_work``),
+    ``spent`` (measured agent tokens behind the block, memory/work.py) and ``viewer`` are for the user only.
     """
 
     def paint(code: str, text: str) -> str:
@@ -747,5 +748,12 @@ def terminal(
     shown = re.findall(r"\b[MT]\d+\b", re.sub(r"\x1b\[[\d;]*m", " ", "\n".join(out[3:])))
     hint = f"agent-mem show {shown[0]}" if shown else "agent-mem search <words>"
     browse = f"everything: {viewer}" if viewer else "everything: agent-mem view"
-    out += [paint("2", _RULE), paint("2", f"Details: {hint} · {browse}")]
+    out.append(paint("2", _RULE))
+    read = tokens(context)
+    if spent > read:  # claude-mem's footer: what loading costs against what finding it out took
+        out.append(
+            paint("2", f"Read ~{read:,} tokens · built from ~{spent:,} tokens of agent work · ")
+            + paint("32", f"{round((spent - read) * 100 / spent)}% less to read than to redo")
+        )
+    out.append(paint("2", f"Details: {hint} · {browse}"))
     return "\n".join(out)

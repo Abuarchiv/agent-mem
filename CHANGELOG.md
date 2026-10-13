@@ -23,6 +23,11 @@
 - The notes Claude Code and Codex keep themselves are stored as `native_note` without a model call; each harness sees only the other one's notes, with two slots of their own in the briefing. `native_notes: false` turns it off.
 - The briefing names the current time and shows `(+N tok)` after entries whose full text is clearly longer.
 
+### Tokens: read against work
+
+- The agent's work per turn is measured from the harness transcripts (Claude Code `usage` with subagents, Codex `token_count`): fresh input, cache writes and output, cache reads left out. Schema 6 adds `turns.work_tokens` and an index on `memories.turn_id`. On the live database 120 turns were measured in 0.25 s: 10.2 million tokens in 108 Claude Code turns, 1.1 million in 12 Codex turns.
+- Every injection records the work behind it next to its tokens: a named turn counts once, a memory brings its turn's share. The session-start panel ends with `Read ~R tokens · built from ~W tokens of agent work · P% less to read than to redo`; `agent-mem status` prints the 7-day figures; the viewer shows a Tokens block, a Health row and `Work` in request and memory details. claude-mem shows the same comparison with the tokens its own observer read; here it is what the agent itself spent.
+
 ### Memory hygiene
 
 - The review that retires duplicates and outdated facts read only 150 of a project's facts and ran once in 20 hours; on 333 real facts it found 15 retirements while one rule sat there 13 times in different words. It now reads 300 (the newest 250 plus a rotating 50 older ones, about 70 s per Haiku call), and also runs after 50 new facts. On the same copy of the live database: 39 retirements, 38 of them right (outdated install advice, a wrong database path, duplicate rules, and plain facts that only recorded an event or a snapshot such as "pushed", "135 tests", "commits exist only locally").

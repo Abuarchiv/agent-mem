@@ -21,7 +21,7 @@ from agent_mem.core import db, logutil, paths, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
-from agent_mem.memory import consolidate, notes
+from agent_mem.memory import consolidate, notes, work
 
 
 def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, Any]) -> None:
@@ -178,6 +178,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     )
     stats["spool_applied"], stats["spool_quarantined"] = applied, quarantined
     stats["stale_turns_closed"] = capture.close_stale_turns(conn, config)
+    stats["work_measured"] = work.measure(conn)
     with db.transaction(conn):
         stats["native_notes"] = notes.ingest(conn, config)
     _mark_guards(conn, config)

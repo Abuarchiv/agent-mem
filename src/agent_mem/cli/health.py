@@ -163,24 +163,33 @@ def status(conn: sqlite3.Connection, config: Config) -> dict[str, Any]:
 
 
 def _injected(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
-    """Blocks and estimated tokens injected into sessions today and over the last ``days`` days."""
+    """Blocks and estimated tokens injected into sessions today and over the last ``days`` days, the measured agent
+    work behind them (memory/work.py) and all work the memory was built from."""
     today = timeutil.now()
     since = (today - timedelta(days=days - 1)).date().isoformat()
-    blocks = total = today_tokens = 0
+    blocks = total = today_tokens = spent = today_work = 0
     for row in conn.execute(
         "SELECT key, value FROM meta WHERE key >= ? AND key LIKE 'injected:%'", (f"injected:{since}",)
     ):
-        n, tokens = (int(x) for x in row["value"].split(","))
-        blocks, total = blocks + n, total + tokens
+        n, tokens, behind = [*(int(x) for x in row["value"].split(",")), 0][:3]  # older days have no work column
+        blocks, total, spent = blocks + n, total + tokens, spent + behind
         if row["key"] == f"injected:{today.date().isoformat()}":
-            today_tokens = tokens
+            today_tokens, today_work = tokens, behind
     sessions = int(conn.execute("SELECT COUNT(*) FROM sessions WHERE started_at >= ?", (since,)).fetchone()[0])
+    turns, built = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(work_tokens), 0) FROM turns WHERE work_tokens IS NOT NULL"
+    ).fetchone()
     return {
         "today_tokens": today_tokens,
+        "today_work": today_work,
         "days": days,
         "blocks": blocks,
         "tokens": total,
         "tokens_per_session": round(total / sessions) if sessions else None,
+        "work": spent,
+        "saved_percent": round((spent - total) * 100 / spent) if spent > total else None,
+        "measured_turns": int(turns),
+        "built_from": int(built),
     }
 
 
