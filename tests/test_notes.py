@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from agent_mem.core.config import Config
-from agent_mem.memory import notes
+from agent_mem.memory import notes, search
 from tests.conftest import Driver
 
 
@@ -42,7 +42,7 @@ The observer drains its queue before it exits; a restart never loses a turn.
 def test_notes_are_stored_once_and_a_change_supersedes(conn, config: Config, project: Path):
     path = _claude_note(project, "worker-drain.md", NOTE)
     _claude_note(project, "MEMORY.md", "- [Worker](worker-drain.md) — index only")
-    assert notes.ingest(conn, config) == {"stored": 1, "unchanged": 0, "skipped": 0}
+    assert notes.ingest(conn, config) == {"stored": 1, "unchanged": 0, "retired": 0, "skipped": 0}
     assert notes.ingest(conn, config)["unchanged"] == 1
     row = conn.execute("SELECT * FROM memories WHERE kind = 'native_note'").fetchone()
     assert row["title"] == "The observer drains its queue before it exits"
@@ -53,12 +53,42 @@ def test_notes_are_stored_once_and_a_change_supersedes(conn, config: Config, pro
         "SELECT invalid_at, superseded_by FROM memories WHERE kind = 'native_note' ORDER BY id"
     ).fetchall()
     assert rows[0]["invalid_at"] and rows[0]["superseded_by"] and rows[1]["invalid_at"] is None
-    path.unlink()  # a deleted note stays remembered
+    path.write_text(NOTE)  # changed back: the first version returns, searchable again
+    assert notes.ingest(conn, config)["stored"] == 0
+    first = conn.execute("SELECT invalid_at FROM memories WHERE kind = 'native_note' ORDER BY id").fetchone()
+    assert first[0] is None and _valid(conn) == ["claude-auto-memory"]
+    assert search.search(conn, config, _query(conn)) != []
+
+
+def _query(conn) -> search.Query:
+    project_id = conn.execute("SELECT project_id FROM memories LIMIT 1").fetchone()[0]
+    return search.Query(text="observer drains its queue", project_id=project_id)
+
+
+def _valid(conn) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT origin FROM memories WHERE kind = 'native_note' AND invalid_at IS NULL")]
+
+
+def test_a_deleted_claude_note_is_retired_a_pruned_codex_summary_stays(conn, config: Config, project: Path):
+    claude = _claude_note(project, "worker-drain.md", NOTE)
+    codex = _codex_note(project, "s1.md", "Codex found the pnpm lockfile is authoritative")
     notes.ingest(conn, config)
-    assert (
-        conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'native_note' AND invalid_at IS NULL").fetchone()[0]
-        == 1
-    )
+    claude.unlink()  # Claude deletes a note that turned out wrong
+    codex.unlink()  # Codex prunes old summaries by age
+    assert notes.ingest(conn, config)["retired"] == 1
+    assert _valid(conn) == ["codex-memory"]
+    assert search.search(conn, config, _query(conn)) == []
+
+
+def test_another_config_dir_does_not_retire_notes_it_never_scanned(
+    conn, config: Config, project: Path, tmp_path: Path, monkeypatch
+):
+    _claude_note(project, "worker-drain.md", NOTE)
+    notes.ingest(conn, config)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "other"))
+    _claude_note(project, "other.md", NOTE.replace("drains its queue", "flushes its log"))
+    notes.ingest(conn, config)
+    assert _valid(conn) == ["claude-auto-memory", "claude-auto-memory"]
 
 
 def test_symlinks_big_files_and_unknown_projects_are_skipped(conn, config: Config, project: Path, tmp_path: Path):

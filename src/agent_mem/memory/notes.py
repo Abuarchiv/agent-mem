@@ -5,8 +5,10 @@ summary per session under ``~/.codex/memories/rollout_summaries/``. Both are alr
 stored as they are (``kind = native_note``). Each harness loads its own notes itself, so a note is shown only
 to the other harnesses (``OWN_NOTES``): Codex learns what Claude Code noted and the other way round.
 
-A changed note replaces the stored one (the old version stays, marked superseded); a deleted note stays.
-Symlinks, hidden files and files over 64 KB are skipped; source files are never written.
+A changed note replaces the stored one (the old version stays, marked superseded). A deleted Claude Code note is
+retired: Claude deletes a note that turned out wrong, and Codex would keep reading it. A deleted Codex summary
+stays; Codex prunes those by age, not because they were wrong. Symlinks, hidden files and files over 64 KB are
+skipped; source files are never written. Files are read before the write lock is taken (hooks wait on it).
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agent_mem.core import identity, timeutil
+from agent_mem.core import db, identity, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import store
 
@@ -37,21 +39,34 @@ def own_notes(harness: str) -> set[str]:
     return {origin} if origin else set()
 
 
-def _read(path: Path) -> str | None:
-    if path.name.startswith(".") or path.is_symlink() or not path.is_file():
+def _read(path: Path) -> tuple[str, float] | None:
+    """Text and modification time; None for hidden, linked, oversized or vanished files."""
+    if path.name.startswith(".") or path.is_symlink():
         return None
     try:
-        if path.stat().st_size > MAX_BYTES:
+        stat = path.stat()
+        if not path.is_file() or stat.st_size > MAX_BYTES:
             return None
-        return path.read_text(encoding="utf-8", errors="replace")
+        return path.read_text(encoding="utf-8", errors="replace"), stat.st_mtime
     except OSError:
         return None
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _key(path: Path) -> str:
+    return hashlib.sha256(str(path).encode()).hexdigest()[:16]
 
 
 def _transcript_cwd(folder: Path) -> str | None:
     """The working directory Claude Code ran in, from a transcript next to the memory folder: the folder name
     replaces every non-alphanumeric character with '-' and cannot be turned back into a path."""
-    for transcript in sorted(folder.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]:
+    for transcript in sorted(folder.glob("*.jsonl"), key=_mtime, reverse=True)[:3]:
         try:
             with transcript.open(encoding="utf-8", errors="replace") as fh:
                 for _, line in zip(range(50), fh, strict=False):
@@ -65,26 +80,30 @@ def _transcript_cwd(folder: Path) -> str | None:
     return None
 
 
-def claude_notes(root: Path) -> Iterator[tuple[str, Path, str]]:
-    """(cwd, path, text) for Claude Code's topic files; ``MEMORY.md`` is only an index of links."""
+def claude_notes(root: Path, scanned: set[str] | None = None) -> Iterator[tuple[str, Path, str, float]]:
+    """(cwd, path, text, mtime) for Claude Code's topic files; ``MEMORY.md`` is only an index of links. ``scanned``
+    collects the folders read completely: a note missing there was deleted. A folder whose transcripts are gone
+    (Claude Code removes them after 30 days) cannot be placed in a project and does not count."""
     for folder in sorted((root / "projects").glob("*/memory")):
-        files = [p for p in sorted(folder.glob("*.md")) if p.name != "MEMORY.md"]
-        cwd = _transcript_cwd(folder.parent) if files else None
+        cwd = _transcript_cwd(folder.parent)
         if cwd is None:
             continue
+        if scanned is not None:
+            scanned.add(_key(folder))
+        files = [p for p in sorted(folder.glob("*.md")) if p.name != "MEMORY.md"]
         for path in files:
-            text = _read(path)
-            if text and text.strip():
-                yield cwd, path, text
+            read = _read(path)
+            if read and read[0].strip():
+                yield cwd, path, *read
 
 
-def codex_notes(root: Path) -> Iterator[tuple[str, Path, str]]:
-    """(cwd, path, text) for Codex's per-session summaries; the header names the session's ``cwd``."""
+def codex_notes(root: Path) -> Iterator[tuple[str, Path, str, float]]:
+    """(cwd, path, text, mtime) for Codex's per-session summaries; the header names the session's ``cwd``."""
     for path in sorted((root / "memories" / "rollout_summaries").glob("*.md")):
-        text = _read(path)
-        match = re.search(r"^cwd:\s*(.+?)\s*$", text or "", re.M)
-        if text and match:
-            yield match.group(1), path, text
+        read = _read(path)
+        match = re.search(r"^cwd:\s*(.+?)\s*$", read[0], re.M) if read else None
+        if read and match:
+            yield match.group(1), path, *read
 
 
 def _title_body(text: str, path: Path) -> tuple[str, str]:
@@ -101,29 +120,72 @@ def _home(variable: str, folder: str) -> Path:
 
 
 def ingest(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
-    """Store new and changed notes. Returns counts: stored, unchanged, skipped (no project, excluded)."""
+    """Store new and changed notes, retire deleted Claude notes. Returns counts: stored, unchanged, retired, skipped
+    (no project, excluded). Takes its own write transaction, only when something changed."""
     from agent_mem.hooks import capture
 
-    counts = {"stored": 0, "unchanged": 0, "skipped": 0}
+    counts = {"stored": 0, "unchanged": 0, "retired": 0, "skipped": 0}
     if not config.native_notes:
         return counts
-    sources = [
-        ("claude-auto-memory", claude_notes(_home("CLAUDE_CONFIG_DIR", ".claude"))),
+    # Dedupe key note:<path>:<content>:<folder>; the folder says which scan can tell that a note was deleted (another
+    # CLAUDE_CONFIG_DIR is another folder). Keys from before the folder part get it on their next scan.
+    stored = {
+        ":".join(str(key).split(":")[:3]): (int(memory_id), str(key), origin, invalid is None)
+        for memory_id, key, origin, invalid in conn.execute(
+            "SELECT id, dedupe_key, origin, invalid_at FROM memories WHERE kind = 'native_note' "
+            "AND dedupe_key LIKE 'note:%'"
+        )
+    }
+    fresh, rekeyed, revived, scanned, seen = [], [], [], set(), set()
+    for origin, found in (
+        ("claude-auto-memory", claude_notes(_home("CLAUDE_CONFIG_DIR", ".claude"), scanned)),
         ("codex-memory", codex_notes(_home("CODEX_HOME", ".codex"))),
+    ):
+        for cwd, path, text, mtime in found:
+            source, folder = _key(path), _key(path.parent)
+            seen.add(source)
+            dedupe = f"note:{source}:{hashlib.sha256(text.encode()).hexdigest()[:16]}"
+            if dedupe not in stored:
+                fresh.append((origin, cwd, path, text, mtime, f"{dedupe}:{folder}"))
+                continue
+            counts["unchanged"] += 1
+            memory_id, key, _, valid = stored[dedupe]
+            if key != f"{dedupe}:{folder}":
+                rekeyed.append((f"{dedupe}:{folder}", memory_id))
+            if not valid:  # restored after a deletion, or changed back to an earlier version
+                revived.append((memory_id, source))
+    gone = [
+        memory_id
+        for memory_id, key, origin, valid in stored.values()
+        if valid
+        and origin == "claude-auto-memory"
+        and (parts := key.split(":"))[1] not in seen
+        and len(parts) == 4
+        and parts[3] in scanned
     ]
-    for origin, notes in sources:
-        for cwd, path, text in notes:
-            project = identity.resolve(conn, cwd, register=False)
-            if project is None or not capture.capture_allowed(conn, config, project):
-                counts["skipped"] += 1
-                continue
+    # Git (project lookup) and file reads stay outside the write lock: every hook waits on it.
+    new = []
+    for origin, cwd, path, text, mtime, dedupe in fresh:
+        project = identity.resolve(conn, cwd, register=False)
+        if project is None or not capture.capture_allowed(conn, config, project):
+            counts["skipped"] += 1
+        else:
+            new.append((project, origin, cwd, path, text, mtime, dedupe))
+    if not (new or rekeyed or revived or gone):
+        return counts
+    with db.transaction(conn):
+        for key, memory_id in rekeyed:
+            conn.execute("UPDATE memories SET dedupe_key = ? WHERE id = ?", (key, memory_id))
+        for memory_id in gone:
+            store.supersede(conn, memory_id, None)
+            counts["retired"] += 1
+        for memory_id, source in revived:
+            _replace(conn, source, memory_id)
+            conn.execute("UPDATE memories SET invalid_at = NULL, superseded_by = NULL WHERE id = ?", (memory_id,))
+            title, body = conn.execute("SELECT title, body FROM memories WHERE id = ?", (memory_id,)).fetchone()
+            store.set_search_key(conn, "m", memory_id, f"native_note: {title}\n{body}")
+        for project, origin, cwd, path, text, mtime, dedupe in new:
             identity.register_project(conn, project, cwd)
-            source_key = hashlib.sha256(str(path).encode()).hexdigest()[:16]
-            content_key = hashlib.sha256(text.encode()).hexdigest()[:16]
-            dedupe = f"note:{source_key}:{content_key}"
-            if conn.execute("SELECT 1 FROM memories WHERE dedupe_key = ?", (dedupe,)).fetchone():
-                counts["unchanged"] += 1
-                continue
             title, body = _title_body(text, path)
             memory_id = store.add_memory(
                 conn,
@@ -136,15 +198,20 @@ def ingest(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
                 importance=0.4,
                 origin=origin,
                 dedupe=dedupe,
-                at=timeutil.iso(datetime.fromtimestamp(path.stat().st_mtime, UTC)),
+                at=timeutil.iso(datetime.fromtimestamp(mtime, UTC)),
             )
             if memory_id is None:
                 counts["unchanged"] += 1
                 continue
-            conn.execute(
-                "UPDATE memories SET invalid_at = ?, superseded_by = ? WHERE dedupe_key LIKE ? AND id != ? "
-                "AND invalid_at IS NULL",
-                (timeutil.iso(), memory_id, f"note:{source_key}:%", memory_id),
-            )
+            _replace(conn, dedupe.split(":")[1], memory_id)
             counts["stored"] += 1
     return counts
+
+
+def _replace(conn: sqlite3.Connection, source: str, memory_id: int) -> None:
+    """The other stored versions of the note at ``source`` give way to ``memory_id``."""
+    for (old,) in conn.execute(
+        "SELECT id FROM memories WHERE dedupe_key LIKE ? AND id != ? AND invalid_at IS NULL",
+        (f"note:{source}:%", memory_id),
+    ).fetchall():
+        store.supersede(conn, old, memory_id)
