@@ -114,6 +114,17 @@ def split_tag(text: str) -> tuple[str, str]:
     return _KINDS[match.group(1).lower()], text[match.end() :].strip()
 
 
+def said_by_user(b: bundling.Bundle, pair: tuple[str, str]) -> bool:
+    """A command rule ("use pnpm instead of npm") may come only from the developer's prompts (AGENTS.md R5): the
+    bundle also holds what tools showed, and a README that says "always use yarn" must not grow into a rule that
+    blocks npm. Both names have to appear in what the developer typed. The preference memory itself stays; it is
+    shown as data."""
+    said = " ".join(
+        m["content"] for m in b.messages if m["role"] == "user" and not m["content"].startswith("[harness notice")
+    ).lower()
+    return all(name.lower() in said for name in pair)
+
+
 def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: list[Fact]) -> list[int]:
     ids = []
     for fact in facts:
@@ -135,7 +146,7 @@ def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: 
         if memory_id:
             ids.append(memory_id)
         pair = signals.canonical_rule(text) if kind == "preference" else None
-        if pair is not None:
+        if pair is not None and said_by_user(b, pair):
             # "Use pnpm instead of npm" becomes the same rule a typed "pnpm statt npm" creates.
             store.learn_rule(conn, config, b.project_id, pair[0], pair[1], b.turn_ids[-1])
     return ids

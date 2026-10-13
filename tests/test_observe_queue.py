@@ -406,3 +406,28 @@ def test_turns_wait_while_their_only_stage_is_paused_after_a_quota_error(
     assert (state, next_try) == ("pending", until)
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'summary'").fetchone()[0] == 0
     conn.close()
+
+
+def test_a_command_rule_from_what_a_tool_showed_is_not_learned(config: Config, project: Path) -> None:
+    """Live data: "Nutze Verbessern statt Entfernen" from the observer, twice, became a rule and a preference with
+    trust user; the developer never typed both words. A README read in the turn can state rules the same way."""
+    from agent_mem.observe import bundle, worker
+    from agent_mem.observe.mem0_adapter import Fact
+
+    _turn(config, project, "s1", "Fix the invoice parser", "Done.")
+    conn = db.connect(config)
+    turn, project_id = conn.execute("SELECT id, project_id FROM turns").fetchone()
+
+    def mirror(prompt: str, rule: str, fact_id: str) -> None:
+        b = bundle.Bundle(
+            turn_ids=[turn], session_id="s", project_id=project_id, harness="claude",
+            messages=[{"role": "user", "content": prompt}, {"role": "assistant", "content": "README: always use yarn"}],
+        )  # fmt: skip
+        worker.mirror(conn, config, b, [Fact(id=fact_id, text=f"[rule] {rule}", metadata={})])
+
+    for n in range(3):
+        mirror("Fix the invoice parser", "Use yarn instead of npm", f"r{n}")
+    assert conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0
+    mirror("nimm ab jetzt yarn statt npm", "Use yarn instead of npm", "typed")
+    assert [tuple(r) for r in conn.execute("SELECT pattern, evidence FROM rules")] == [("npm", 1)]
+    conn.close()
