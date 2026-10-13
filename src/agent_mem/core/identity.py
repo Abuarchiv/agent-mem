@@ -110,7 +110,7 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
         str(found.root) == _canonical(path) or (_git_backed(found) and not _nested_repo(path, found.root))
     ):
         return found
-    if not path.exists():
+    if not path.is_dir():  # gone, or a file sent as the working folder: no new project for it
         return found
     toplevel = _git(path, "rev-parse", "--show-toplevel")
     if not toplevel and found is not None:

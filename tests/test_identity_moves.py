@@ -64,3 +64,11 @@ def test_a_worktree_is_still_the_same_project(conn, tmp_path: Path) -> None:
     project = identity.resolve(conn, main)
     _git(main, "worktree", "add", "-q", str(tmp_path / "shop-feature"))
     assert project is not None and identity.resolve(conn, tmp_path / "shop-feature").id == project.id  # type: ignore[union-attr]
+
+
+def test_a_file_given_as_working_folder_is_no_project(conn, tmp_path: Path):
+    """A hook payload with a file as `cwd` created a project named after the file."""
+    loose = tmp_path / "notes.txt"
+    loose.write_text("x")
+    assert identity.resolve(conn, loose) is None
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
