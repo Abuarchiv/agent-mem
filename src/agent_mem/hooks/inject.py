@@ -801,7 +801,9 @@ def terminal(
     read = tokens(context)
     if spent > read:  # claude-mem's footer: what loading costs against what finding it out took
         out.append(
-            paint("2", f"The agent reads ~{read:,} tokens · ") + paint("32", f"finding this out took ~{spent:,}")
+            paint(
+                "32", f"Your savings: ~{spent - read:,} tokens ({(spent - read) * 100 // spent}% reduction from reuse)"
+            )
         )
     out.append(paint("2", f"More: {hint} · {browse}"))
     return "\n".join(out)

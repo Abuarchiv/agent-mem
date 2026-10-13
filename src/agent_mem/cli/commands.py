@@ -105,7 +105,8 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         f" (~{injected['tokens_per_session'] or 0:,} per session)"
     )
     if injected["saved_percent"] is not None:
-        print(f"  finding this out took the agents ~{injected['work']:,} tokens")
+        saved = injected["work"] - injected["tokens"]
+        print(f"Your savings: ~{saved:,} tokens ({injected['saved_percent']}% reduction from reuse)")
     print(f"Last cleanup: {timeutil.local(data['consolidated_at'])}")
     if data["paused_until"]:
         print(f"Recording paused until {timeutil.local(data['paused_until'])}")
