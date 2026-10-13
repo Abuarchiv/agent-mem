@@ -140,7 +140,8 @@ def test_setup_keeps_permissions_and_a_backup(homes: Path) -> None:
     settings.write_text('{"model": "opus"}')
     settings.chmod(0o600)
     install.write("claude", PLUGINS, EXE)
-    assert stat.S_IMODE(settings.stat().st_mode) == 0o600
+    if sys.platform != "win32":  # Windows has no Unix permission bits
+        assert stat.S_IMODE(settings.stat().st_mode) == 0o600
     assert json.loads(settings.read_text())["model"] == "opus"
     backup = settings.with_name("settings.json.agent-mem-backup")
     assert json.loads(backup.read_text()) == {"model": "opus"}
@@ -152,6 +153,7 @@ def test_setup_keeps_permissions_and_a_backup(homes: Path) -> None:
     assert toml.with_name("config.toml.agent-mem-backup").read_text() == 'model = "gpt"\n'
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake claude CLI is a shell script")
 def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, monkeypatch, capsys) -> None:
     log = homes / "claude.log"
     fake = homes / "claude"
@@ -270,7 +272,7 @@ def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch,
     assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
     assert calls[0] == ["/bin/uv", "tool", "install", "x"]
     assert [c[-2:] for c in calls[2:]] == [["models", "install"], ["doctor", "--fix"]]
-    assert all(c[0].endswith("agent-mem") for c in calls[1:])
+    assert all(c[0].endswith(("agent-mem", "agent-mem.exe")) for c in calls[1:])
     assert "1.0.0 (aaaaaaa) -> 1.0.0 (bbbbbbb)" in capsys.readouterr().out
 
 

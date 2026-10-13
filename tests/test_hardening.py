@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sqlite3
 import subprocess
 from datetime import UTC, datetime
@@ -354,6 +355,6 @@ def test_purge_of_a_path_inside_a_project_deletes_nothing(driver: Driver, config
     base = ["--data-dir", str(config.data_dir)]
     for path in (project / "typo", project / "src"):
         assert cli.main([*base, "purge", "--project", str(path), "--yes"]) == 2
-        assert f"--project {project}" in capsys.readouterr().err
+        assert os.path.normcase(f"--project {project}") in os.path.normcase(capsys.readouterr().err)
     assert driver.conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 1
     assert cli.main([*base, "purge", "--project", str(project), "--yes"]) == 0

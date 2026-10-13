@@ -86,6 +86,7 @@ def test_prompt_injection_stays_out_of_the_terminal(config: Config, project: Pat
 
 
 def test_session_end_and_failures_reach_the_terminal(config: Config, project: Path, monkeypatch):
+    config.hook_deadline_ms = 10_000  # the message is what is tested, not the deadline (a slow runner misses 400 ms)
     start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"}
     hook.run("claude", None, json.dumps(start), config)
     hook.run("claude", None, _prompt_payload(project, "s", "Build the parser"), config)

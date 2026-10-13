@@ -33,6 +33,7 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "copilot-home"))
     # Viewer login items land here, never in the real home directory.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # what Windows reads instead of HOME
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home" / ".config"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "home" / "AppData"))
 

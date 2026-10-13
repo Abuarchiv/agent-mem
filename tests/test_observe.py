@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,8 @@ def test_mem0_telemetry_is_off_and_home_is_not_used(tmp_path: Path, monkeypatch:
     assert main.MEM0_TELEMETRY is False
     assert setup.mem0_dir == str(tmp_path / "data" / "mem0")
     assert main.mem0_dir == str(tmp_path / "data" / "mem0")
-    assert (tmp_path / "data" / "mem0").stat().st_mode & 0o777 == 0o700
+    if sys.platform != "win32":  # Windows has no Unix permission bits
+        assert (tmp_path / "data" / "mem0").stat().st_mode & 0o777 == 0o700
 
 
 def test_hook_path_does_not_import_observer() -> None:

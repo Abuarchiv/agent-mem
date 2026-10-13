@@ -1,4 +1,5 @@
 import json
+import zlib
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -17,7 +18,7 @@ class FakeEmbedder:
     def _vec(self, text: str) -> np.ndarray:
         vector = np.zeros(64, dtype=np.float32)
         for word in text.lower().replace(":", " ").split():
-            vector[hash(word) % 64] += 1.0
+            vector[zlib.crc32(word.encode()) % 64] += 1.0  # hash() differs per process and made the test flaky
         norm = np.linalg.norm(vector)
         return vector / norm if norm else vector
 

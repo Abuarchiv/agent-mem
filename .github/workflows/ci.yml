@@ -62,7 +62,9 @@ jobs:
           tar xzf dist/*.tar.gz -C "$RUNNER_TEMP/sdist"
           cd "$RUNNER_TEMP"/sdist/agent_mem-*
           uv venv
-          uv pip install ".[semantic]" pytest
+          # the observer tests need mem0 and the spaCy model it loads, as in the dev group
+          uv pip install ".[semantic,observer]" pytest \
+            "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
           .venv/bin/python -m pytest -p no:cacheprovider -m "not local"
 
   opencode-plugin:

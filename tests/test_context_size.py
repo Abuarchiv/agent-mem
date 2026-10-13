@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agent_mem.cli import install
 from agent_mem.core.config import Config
-from agent_mem.hooks import hook, inject
+from agent_mem.hooks import inject
 from agent_mem.memory import store
 from tests.conftest import Driver
 
@@ -42,7 +43,7 @@ def test_codex_gets_more_and_its_hooks_raise_the_limit(conn, config: Config, pro
     _many(conn, driver)
     start = driver.start("x1").context or ""
     assert len(start) > 10_000 and inject.tokens(start) <= 7_800
-    handlers = json.loads((Path(hook.__file__).parents[3] / "plugins" / "codex" / "hooks.json").read_text())
+    handlers = json.loads((install.plugins_dir() / "codex" / "hooks.json").read_text())
     limits = {e: g["hooks"][0].get("additionalContextLimit") for e, groups in handlers["hooks"].items() for g in groups}
     assert limits["SessionStart"] == limits["UserPromptSubmit"] == limits["PostToolUse"] == 8000
 
