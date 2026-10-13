@@ -251,7 +251,7 @@ class _Worker(threading.Thread):
                 spool.write(self.config.spool_dir, {"type": "event", "event": self.event.to_dict()}, tag)
                 self.spooled = True
             except OSError as error:
-                self.error = f"{self.error}; spool failed: {error}"
+                self.error = f"{self.error}; spool failed: {error}" if self.error else f"spool failed: {error}"
 
 
 def run(
@@ -289,7 +289,13 @@ def run(
         worker = _Worker(config, event)
         worker._spool()
         _spawn_for_migration(config, every=REPLAY_THROTTLE_SECONDS)  # the session waits until the replay ran
-        logutil.write(config.log_dir, "hook", harness=harness, kind=event.kind, error="queued behind spool")
+        logutil.write(
+            config.log_dir, "hook", harness=harness, kind=event.kind, error=worker.error or "queued behind spool"
+        )
+        if not worker.spooled and harness in TERMINAL:
+            text = f"agent-mem cannot save events ({worker.error}). This session is not being recorded."
+            if _notice_due(config, text):
+                return json.dumps({"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
         # A lock of a few seconds passes unnoticed. Events waiting longer mean the database is unusable: say so,
         # or a broken database would go silent after its first error.
         if harness not in TERMINAL or spool.oldest_age(config.spool_dir) < SPOOL_STUCK_SECONDS:
@@ -337,7 +343,9 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
     routine = ("MigrationPendingError", "MigrationInProgressError", "OperationalError: database is locked")
     if worker.error and not worker.error.startswith(routine):
         # Without a database nothing is recalled or recorded live; say so instead of failing silently.
-        failure = f"agent-mem cannot use its database ({worker.error[:160]}). Events wait in the spool. Run `agent-mem doctor`."
+        # The spool fails too on a full disk: then nothing waits, and saying so is the only honest notice.
+        lost = "Events wait in the spool." if worker.spooled else "This session is not being recorded."
+        failure = f"agent-mem cannot use its database ({worker.error[:200]}). {lost} Run `agent-mem doctor`."
     if event.kind == "session_start":
         heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
         if event.source == "compact":
@@ -354,6 +362,7 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
             viewer=viewer,
             recent=worker.recent,
             spent=worker.response.work if worker.response is not None else 0,
+            recording=failure is None or worker.spooled,
         )
     if event.kind == "session_end" and worker.summary:
         return worker.summary

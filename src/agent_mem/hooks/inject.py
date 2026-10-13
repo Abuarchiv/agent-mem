@@ -706,6 +706,7 @@ def terminal(
     viewer: str | None = None,
     recent: list[tuple[str, str, str, str]] | None = None,
     spent: int = 0,
+    recording: bool = True,
 ) -> str:
     """The injected block as the user sees it in the terminal: the last session first, then recent work, then the
     memories grouped by kind, each group cut to its newest rows.
@@ -762,7 +763,9 @@ def terminal(
         out += [row((ident, " ", "2", text, "")) for ident, text in items[:KIND_ROWS]]
         out += more(len(items) - KIND_ROWS)
     if not (panel.goal or panel.last or panel.errors or panel.work or recent or panel.kinds):
-        out.append(paint("2", "Nothing to recall here yet; this session is being recorded."))
+        out.append(
+            paint("2", "Nothing to recall here yet" + ("; this session is being recorded." if recording else "."))
+        )
     if panel.commands:
         out.append(f"{paint('1', 'Commands')}  {_clip(panel.commands, 100)}")
     if panel.files:
