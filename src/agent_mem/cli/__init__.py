@@ -20,6 +20,10 @@ def _rule_id(text: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    # Hosts read hook output as UTF-8; a Windows pipe defaults to cp1252, where "─" and "✓" crash the write.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")  # pyright: ignore[reportAttributeAccessIssue]
     if args[:1] == ["hook"]:
         import os
 

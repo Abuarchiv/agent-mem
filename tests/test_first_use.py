@@ -39,6 +39,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         "AGENT_MEM_DATA_DIR": str(data),
         "AGENT_MEM_NO_SPAWN": "1",
         "PATH": os.path.dirname(sys.executable),  # no harness CLI: the panel names why there are no facts
+        # A pipe on Windows: the panel's "─" and doctor's "✓" crashed every hook and command there (CI, 2026-10-13).
+        "PYTHONIOENCODING": "cp1252",
     }
     env.pop("AGENT_MEM_INTERNAL", None)
     return env
