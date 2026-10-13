@@ -145,9 +145,8 @@ def test_tags_become_kinds_and_rules(observe_config: Config, project: Path, tmp_
 def test_a_bundle_yields_facts_only_from_its_own_turns(
     observe_config: Config, project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """mem0 put the project's last 10 bundle messages into every extraction prompt; Haiku extracted from them again,
-    so a session about 'master -> main' also returned the nox, port and pnpm facts of four earlier sessions, filed
-    under its own turn (and out of reach of `purge --id` on the turn they came from)."""
+    """mem0 puts the project's last 10 bundle messages into the extraction prompt; facts of earlier sessions must not
+    come back filed under this turn (out of reach of `purge --id` on the turn they came from)."""
     from agent_mem.observe import providers
 
     prompts: list[str] = []
@@ -175,9 +174,8 @@ def test_a_bundle_yields_facts_only_from_its_own_turns(
 def test_facts_stored_in_mem0_before_a_failure_reach_sqlite_on_retry(
     observe_config: Config, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """mem0 keeps the facts before SQLite takes them. When the SQLite step failed (a write lock held over 10 s, a
-    killed worker), the retry showed Haiku its own facts as existing memories, it extracted nothing, and the facts
-    lived only in mem0: reproduced twice with Haiku (Fly.io region and app name lost)."""
+    """mem0 keeps the facts before SQLite takes them. After a failure in between (a long write lock, a killed worker)
+    the retry shows the model its own facts as existing memories and extracts nothing; the facts still reach SQLite."""
     import sqlite3 as sqlite
 
     from agent_mem.observe import worker as worker_mod

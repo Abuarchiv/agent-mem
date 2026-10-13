@@ -227,8 +227,8 @@ def test_copilot_app_worktrees_are_captured_but_its_own_chats_are_not(conn, conf
 
 
 def test_a_stated_rule_is_kept_once_as_its_decision_and_never_echoed_back(conn, config, project):
-    """Fresh install, Copilot: "… We decided to use pytest, never unittest." became a correction (the whole prompt)
-    and a decision, and Copilot's session start, which comes after the first prompt, showed both back."""
+    """A stated rule ("… We decided to use pytest, never unittest.") is stored once, as a decision. Copilot sends the
+    first prompt before the session start, which must not show it back."""
     import json as _json
 
     from agent_mem.hooks import hook
@@ -245,8 +245,7 @@ def test_a_stated_rule_is_kept_once_as_its_decision_and_never_echoed_back(conn, 
 
 
 def test_only_a_failing_project_command_makes_a_turn_an_error(driver: Driver, conn):
-    """Real session: 4 of 7 turns that ended well were `error` because a `cat` of a missing file or a wrong
-    query failed along the way."""
+    """A `cat` of a missing file or a wrong query along the way does not make a turn that ended well an `error`."""
     driver.prompt("s1", "Find where the parser lives")
     driver.bash("s1", "cat docs/parser.md", "cat: docs/parser.md: No such file or directory", failed=True)
     driver.bash("s1", "ls src", "parse.py")
@@ -258,8 +257,8 @@ def test_only_a_failing_project_command_makes_a_turn_an_error(driver: Driver, co
 
 
 def test_a_failure_is_fixed_by_the_same_tool_started_another_way(driver: Driver, conn):
-    """Real Copilot session: `python3 -m pytest` failed (no pytest), `uv run --with pytest python3 -m pytest` passed
-    after the fix; the turn still ended `error` and nothing was learned."""
+    """`python3 -m pytest` failing and `uv run --with pytest python3 -m pytest` passing after a fix are the same tool:
+    the turn is not `error` and the fix is learned."""
     driver.prompt("s1", "Run the tests and fix calc.py")
     driver.bash("s1", "python3 -m pytest -q", "/usr/bin/python3: No module named pytest", failed=True)
     driver.edit("s1", "calc.py")
@@ -270,8 +269,8 @@ def test_a_failure_is_fixed_by_the_same_tool_started_another_way(driver: Driver,
 
 
 def test_the_test_command_is_stored_as_it_can_be_run_again(driver: Driver, conn):
-    """A real session stored `python3 -m pytest --version` and whole chains with a cache path in front as the
-    project's test command; the session start then offered them to the next agent."""
+    """Neither `python3 -m pytest --version` nor a whole chain with a cache path in front: the stored test command is
+    the part that runs the tests."""
     driver.prompt("s1", "Run the tests")
     driver.bash("s1", "python3 -m pytest --version", "pytest 9.1.1")
     driver.bash(
@@ -283,8 +282,8 @@ def test_the_test_command_is_stored_as_it_can_be_run_again(driver: Driver, conn)
 
 
 def test_the_briefing_shows_an_old_recorded_command_as_it_can_be_run(driver: Driver, conn):
-    """Rows recorded before capture cleaned them ("… pytest -q 2>&1 | tail -30; git status --short") stayed in the
-    session-start briefing until a cleanup ran."""
+    """Rows recorded before capture cleaned them ("… pytest -q 2>&1 | tail -30; git status --short") are shown
+    cleaned in the session-start briefing."""
     from agent_mem.hooks import inject
 
     driver.prompt("s1", "hi")
@@ -300,8 +299,8 @@ def test_the_briefing_shows_an_old_recorded_command_as_it_can_be_run(driver: Dri
 
 
 def test_a_background_task_notice_continues_the_running_turn(driver: Driver, conn):
-    """Claude Code delivers a finished background task as a prompt `<task-notification>…` while the turn runs. It
-    closed the user's turn as `unknown` and took over its actions and answer: 30 such turns in live data."""
+    """Claude Code delivers a finished background task as a prompt `<task-notification>…` while the turn runs; it
+    must not close the user's turn or take over its actions and answer."""
     notice = "<task-notification>\n<task-id>b1</task-id>\n<summary>Background command finished</summary>\n</task-notification>"
     driver.prompt("s1", "Run the server and fix the failing test")
     driver.bash("s1", "uv run pytest -q", "1 failed", failed=True)

@@ -14,8 +14,8 @@ from datetime import datetime
 from agent_mem.core import timeutil
 
 DECAY = 0.5
-# An injection is an exposure, not a retrieval: counted as one, it raised the activation of whatever was injected,
-# which made it injected again (one stale turn reached 26 injections, 8 of 41 injected items were ever used).
+# An injection is an exposure, not a retrieval: counted as one, it would raise the activation of whatever was
+# injected and make it injected again.
 RETRIEVAL_KINDS = ("created", "get", "used", "cited")
 USE_KINDS = ("get", "used", "cited")
 TRUST_FACTOR = {"user": 1.0, "agent": 0.9, "tool_local": 0.8, "tool_external": 0.5}

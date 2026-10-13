@@ -400,8 +400,8 @@ def test_copilot_shows_the_panel_as_progress_lines(config: Config, project: Path
 
 
 def test_a_lone_surrogate_in_a_payload_is_saved_not_lost(config: Config, project: Path):
-    """JSON may carry `\\ud800` (a binary file shown by `cat`); the event raised UnicodeEncodeError in the database
-    and in the spool and was lost without a trace."""
+    """JSON may carry `\\ud800` (a binary file shown by `cat`); it is stored with U+FFFD instead of raising
+    UnicodeEncodeError in the database and the spool."""
     tool = {"hook_event_name": "PostToolUse", "session_id": "s", "cwd": str(project), "tool_name": "Bash",
             "tool_use_id": "b", "tool_input": {"command": "cat bin.dat"}, "tool_response": {"stdout": "a\ud800b", "stderr": ""}}  # fmt: skip
     hook.run("claude", None, _prompt_payload(project, "s", "show the file \udc00"), config)
@@ -413,7 +413,7 @@ def test_a_lone_surrogate_in_a_payload_is_saved_not_lost(config: Config, project
 
 
 def test_an_unexpected_error_in_a_hook_leaves_a_note_instead_of_nothing(config: Config, tmp_path: Path):
-    """A UnicodeEncodeError lost an event with only a log line; doctor and the viewer showed nothing."""
+    """An event lost to an unexpected error leaves a note that doctor and the viewer show."""
     import subprocess
     import sys
 

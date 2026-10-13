@@ -21,10 +21,9 @@ from agent_mem.core import db, timeutil
 from agent_mem.memory import store
 
 MIN_FACTS = 8
-MAX_FACTS = 300  # one Haiku call took 53 s for 150 facts, 63 s for 250, 77 s for 333 (provider limit 120 s); on
-# 333 real facts the whole set found 51 to 54 retirements, the old window of 150 found 15
+MAX_FACTS = 300  # one call stays well inside the provider's 120 s limit
 EVERY_HOURS = 20
-NEW_FACTS = 50  # a working day here adds 100 to 180 facts; duplicates of one rule piled up 13 deep in a day
+NEW_FACTS = 50  # a working day can add a hundred facts or more; duplicates pile up within a day
 KINDS = ("fact", "decision", "dead_end", "preference", "lesson")
 RULES = ("preference", "lesson")  # from the developer's corrections and the agent's own mistakes
 
@@ -90,8 +89,8 @@ def _facts(conn: sqlite3.Connection, project_id: str) -> list[sqlite3.Row]:
     return [*recent, *older]
 
 
-# How the extraction words a change ("Use pnpm instead of npm", "nicht mehr", "umgestellt"): it matched a fact of
-# each of the ten correction pairs (tests/fixtures/memory_cases.json), and 21 % of a day's real facts.
+# How the extraction words a change ("Use pnpm instead of npm", "nicht mehr", "umgestellt"); it matches every
+# correction pair in tests/fixtures/memory_cases.json.
 REPLACES = re.compile(
     r"\b(instead of|no longer|not any ?more|anymore|replaced|replaces|switched|moved from|from \S+ to|renamed|"
     r"dropped|statt|anstelle|nicht mehr|kein\w* \S+ mehr|ersetzt|umgestellt|gewechselt|umbenannt|abgelöst|"
@@ -154,8 +153,7 @@ def parse(text: str, facts: list[sqlite3.Row]) -> list[tuple[int, int | None]]:
         # First claim wins; a fact that replaces another stays, a retired fact replaces nothing.
         if old == new or old in pairs or new in pairs or old in pairs.values():
             return
-        # The model let plain facts replace the developer's rules ("never measure on the live database" for "the
-        # data dir is set with AGENT_MEM_DATA_DIR"); a rule gives way only to another rule.
+        # The model may let a plain fact replace one of the developer's rules; a rule gives way only to another rule.
         if kinds[old] in RULES and kinds[new] not in RULES:
             return
         pairs[old] = new

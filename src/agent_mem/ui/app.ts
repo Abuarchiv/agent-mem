@@ -646,8 +646,8 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>${num(
   // The graph layout, the way d3-force computes it (velocity Verlet that cools down): links pull related things
   // together, every pair pushes apart, overlapping circles separate so labels stay readable, and a weak pull to the
   // centre keeps separate clusters on screen. One tick per animation frame until it is cool.
-  // ponytail: repulsion and collision compare all pairs, O(n²) per tick; fine for the at most 1,200 things a
-  // 600-relation snapshot holds (290 today), a quadtree (Barnes-Hut) if that limit grows.
+  // Repulsion and collision compare all pairs, O(n²) per tick; fine for the at most 1,200 things a 600-relation
+  // snapshot holds. A quadtree (Barnes-Hut) if that limit grows.
   function forceLayout(nodes: SimNode[], edges: SimEdge[], onTick: () => void) {
     let alpha = 1, target = 0, frame = 0;
     const jiggle = () => (Math.random() - 0.5) * 1e-6;

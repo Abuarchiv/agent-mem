@@ -158,8 +158,7 @@ def test_review_comes_early_after_many_new_facts(conn):
 
 
 def test_a_stated_replacement_brings_the_review_forward_at_most_hourly(conn):
-    """Right after ten corrections none was resolved: the review waited 20 hours or 50 facts, and the agent saw the
-    old and the new version side by side until then."""
+    """After a stated replacement the review runs within the hour instead of waiting 20 hours or 50 facts."""
     _project(conn)
     _facts(conn, TEXTS)
     db.set_meta(conn, "reviewed_at:p1", "2026-10-20T10:00:00.000Z")
@@ -174,8 +173,8 @@ def test_a_stated_replacement_brings_the_review_forward_at_most_hourly(conn):
 
 
 def test_a_failed_review_waits_before_it_is_tried_again(conn, config, monkeypatch):
-    """A review that timed out ran again, and was paid for, on every worker run (`reviewed_at` is set before the
-    call); a usage limit there pauses the stage like in extraction."""
+    """`reviewed_at` is set before the call, so a timed-out review is not paid for again on every worker run; a usage
+    limit there pauses the stage like in extraction."""
     from agent_mem.observe import providers, worker
 
     _project(conn)

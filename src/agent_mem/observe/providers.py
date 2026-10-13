@@ -103,8 +103,8 @@ def _run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -
 
 def _error_text(stdout: str, stderr: str) -> str:
     """The part of a failed run that says why. codex echoes the prompt into stderr before its ``ERROR:``
-    line, so explicit error lines win; ``claude -p`` prints its error on stdout and only a tag on stderr
-    (measured 2026-10-13), so otherwise both tails count."""
+    line, so explicit error lines win; ``claude -p`` prints its error on stdout and only a tag on stderr, so
+    otherwise both tails count."""
     lines = _ERROR_LINE.findall(stderr) or _ERROR_LINE.findall(stdout)
     if lines:
         return "\n".join(line.strip() for line in lines[-3:])[-600:]
@@ -168,7 +168,7 @@ class ClaudeCliLLM(LLMBase):
 
 class CodexCliLLM(LLMBase):
     """Stage 2: ``codex exec`` under the CLI login. Default ``gpt-6-luna`` at low effort,
-    the cheapest model in the Codex catalog (2026-10-12)."""
+    the cheapest model in the Codex catalog."""
 
     def __init__(self, config: BaseLlmConfig | None = None) -> None:
         super().__init__(config or BaseLlmConfig(model=""))
@@ -207,11 +207,11 @@ def copilot_config() -> Path:
 
 
 class CopilotCliLLM(LLMBase):
-    """Stage 3: ``copilot -s`` with the prompt on stdin (measured 2026-10-12: ``-p`` ignores stdin and
-    drops prompts over roughly 30k characters on argv; stdin-only mode works under the GitHub login).
+    """Stage 3: ``copilot -s`` with the prompt on stdin (``-p`` ignores stdin and drops prompts over roughly 30k
+    characters on argv; stdin-only mode works under the GitHub login).
     Memory and tools are off by default in prompt mode. Default ``auto`` with the efficiency tier: a fixed
-    model is refused when it is not in the plan's picker (Free plan refuses all of them), auto resolved to
-    ``gpt-6-luna``, the cheapest catalog model (measured 2026-10-12)."""
+    model is refused when it is not in the plan's picker (Free plan refuses all of them); auto resolves to
+    ``gpt-6-luna``, the cheapest catalog model."""
 
     def __init__(self, config: BaseLlmConfig | None = None) -> None:
         super().__init__(config or BaseLlmConfig(model=""))
@@ -225,7 +225,7 @@ class CopilotCliLLM(LLMBase):
         cmd = ["copilot", "-s", "--no-custom-instructions", "--disable-builtin-mcps"]
         # A private COPILOT_HOME per call: in the user's own, every call would be a saved session (listed in the
         # Copilot app) and would run the user's hooks, plugins and MCP servers. The keychain login works from any
-        # home (measured 2026-10-13); config.json comes along for a login kept there on machines without one.
+        # home; config.json comes along for a login kept there on machines without one.
         with tempfile.TemporaryDirectory() as home:
             login = copilot_config()
             if login.is_file():

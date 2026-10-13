@@ -175,7 +175,7 @@ def test_consolidation_promotes_and_expires(tmp_path, conn, config: Config):
 
 
 def test_a_reversed_command_rule_replaces_the_old_one(driver: Driver, conn, config: Config):
-    """Saying "pnpm statt npm" twice, later "npm statt pnpm" twice: both rules stayed and, enabled, blocked both tools."""
+    """Saying "pnpm statt npm" twice, later "npm statt pnpm" twice: the newer rule replaces the older one."""
     config.rules.auto_enable = True
     for _ in range(2):
         driver.prompt("s1", "nutze pnpm statt npm")

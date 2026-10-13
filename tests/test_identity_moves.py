@@ -53,7 +53,7 @@ def test_a_remote_added_later_still_names_the_same_project(conn, tmp_path: Path)
 
 
 def test_two_repositories_with_one_root_commit_stay_two_projects(conn, tmp_path: Path) -> None:
-    """Two copies of a template without a remote share their root commit; they were one project with one memory."""
+    """Two copies of a template without a remote share their root commit and still get one memory each."""
     first = identity.resolve(conn, _repo(tmp_path / "shop"))
     second = identity.resolve(conn, _repo(tmp_path / "api"))
     assert first is not None and second is not None and first.id != second.id
@@ -67,7 +67,6 @@ def test_a_worktree_is_still_the_same_project(conn, tmp_path: Path) -> None:
 
 
 def test_a_file_given_as_working_folder_is_no_project(conn, tmp_path: Path):
-    """A hook payload with a file as `cwd` created a project named after the file."""
     loose = tmp_path / "notes.txt"
     loose.write_text("x")
     assert identity.resolve(conn, loose) is None

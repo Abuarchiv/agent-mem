@@ -230,7 +230,7 @@ def remove(harness: str) -> list[Path]:
         if hooks.exists():
             hooks.unlink()
             touched.append(hooks)
-        # The file is agent-mem's own; a second `setup --write` kept the old one next to it.
+        # The file is agent-mem's own; a second `setup --write` keeps the previous one next to it.
         hooks.with_name(hooks.name + ".agent-mem-backup").unlink(missing_ok=True)
         mcp = copilot_home() / "mcp-config.json"
         data = _load_for_update(mcp)
@@ -269,7 +269,7 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
     """Claude Code keeps user-scope MCP servers in its own file; its CLI is the supported way to edit it."""
     claude = shutil.which("claude")
     if claude is None:
-        if add:  # the hooks are written anyway; without this line the summary claimed the MCP server too
+        if add:  # the hooks are written anyway; say that the MCP server is not
             print(
                 f"  MCP server not registered (`claude` is not installed). Run: claude mcp add --scope user {MARK} -- {exe} mcp",
                 file=sys.stderr,
@@ -284,7 +284,7 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
             return f"{type(error).__name__}: {error}"
         return None if result.returncode == 0 else (result.stderr or result.stdout).strip()[-200:]
 
-    # Remove first: `mcp add` refuses an existing name, which left an entry with an old binary path in place.
+    # Remove first: `mcp add` refuses an existing name and would keep an entry with an old binary path.
     run("remove", "--scope", "user", MARK)
     if not add:
         return
@@ -373,7 +373,7 @@ def version() -> str:
 def upgrade_command(add: list[str] | tuple[str, ...] = ()) -> list[str] | None:
     """The uv call that moves this copy to the newest commit of its source, extras kept plus ``add``. None when it was not
     installed with ``uv tool``. ``uv tool install --upgrade`` swaps the environment in place; ``--reinstall``
-    deletes it first and hooks fired in those seconds find no binary (measured 2.6 s, 258 of 332 calls failed)."""
+    deletes it first and hooks fired in those seconds find no binary."""
     uv = shutil.which("uv")
     if uv is None or not (Path(sys.prefix) / "uv-receipt.toml").exists():
         return None

@@ -1,4 +1,4 @@
-"""Regression tests for edge cases found in the production-readiness review."""
+"""Regression tests for edge cases."""
 
 import asyncio
 import json
@@ -165,7 +165,7 @@ def test_non_latin_titles_are_not_superseded(conn, config: Config, project: Path
         ('uv run pytest -k "a|b"', "test", None),  # a quoted pipe must not be cut apart
         ("uv run pytest -q\n…[truncated]…\n tail", "test", None),
         ("uv run pytest " + "x" * 120, "test", None),
-        # a real Claude Code and Codex session: a cache path in front, a version check, a status check behind
+        # as Claude Code and Codex write them: a cache path in front, a version check, a status check behind
         (
             "UV_CACHE_DIR=/private/tmp/x uv run --with pytest python3 -m pytest -q .",
             "test",
@@ -362,7 +362,7 @@ def test_a_repository_without_remote_keeps_its_memory_after_a_move(tmp_path: Pat
 
 
 def test_purge_of_a_path_inside_a_project_deletes_nothing(driver: Driver, config: Config, project: Path, capsys):
-    """`purge --project ~/Lernen/gibtsnicht --yes` resolved to the project around it and deleted it whole."""
+    """A path inside a project must not resolve to the project around it; only its own folder names it."""
     driver.prompt("s1", "hello")
     base = ["--data-dir", str(config.data_dir)]
     for path in (project / "typo", project / "src"):

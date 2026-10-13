@@ -315,8 +315,8 @@ def _purge_project(ns: argparse.Namespace, config: Config, conn: sqlite3.Connect
     project = _project(conn, ns.project)
     if project is None:
         return _unknown_project(ns.project)
-    # Any path inside a project resolves to it: a typo below ~/Lernen named "Lernen", an unknown folder "/".
-    # Deleting a whole project takes its own folder.
+    # Any path inside a project resolves to that project, so a typo would name the project around it. Deleting a
+    # whole project takes its own folder.
     target = os.path.abspath(ns.project)
     if not (identity.is_within(target, project.root) and identity.is_within(str(project.root), target)):
         print(
@@ -609,7 +609,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
         embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
         print(f"search model {embedder.model} ready." if embedder else f"search model not available: {reason}")
     if found["extras"]["observer"] and not ns.no_models:
-        # Without it doctor is yellow right after setup ("topic links: spaCy model missing"), about 13 MB.
+        # The spaCy model (about 13 MB), so doctor is green right after setup.
         from agent_mem.observe import spacy_model
 
         if spacy_model.model_path(config) is None:
@@ -675,8 +675,8 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
             f"agent-mem {before} -> {after}. Hooks use it now; running sessions keep their MCP server until restart.",
             flush=True,
         )
-    # The new code finishes the job: models a new default or a new extra needs (a no-op when cached), then the
-    # database migration and hooks of an older release.
+    # Run by the new code: models a new default or extra needs (a no-op when cached), the database migration, and
+    # hooks an older release wrote.
     steps = [["models", "install"]] if install.extras()["semantic"] or "semantic" in ns.extras else []
     code = 0
     for step in [*steps, ["doctor", "--fix"]]:

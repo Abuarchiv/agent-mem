@@ -1,7 +1,6 @@
 """A new user's first day, in real processes: setup, two sessions through the hooks, every command, uninstall, purge.
 
-Each audit found bugs only its own angle showed (a fresh install, the CI, the Windows installer, the viewer's words).
-This runs the whole path the same way on every commit and every OS."""
+Runs the whole path the same way on every commit and every OS."""
 
 import json
 import os
@@ -39,7 +38,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         "AGENT_MEM_DATA_DIR": str(data),
         "AGENT_MEM_NO_SPAWN": "1",
         "PATH": os.path.dirname(sys.executable),  # no harness CLI: the panel names why there are no facts
-        # A pipe on Windows: the panel's "─" and doctor's "✓" crashed every hook and command there.
+        # A pipe on Windows defaults to cp1252: the panel's "─" and doctor's "✓" must not crash a hook or command.
         "PYTHONIOENCODING": "cp1252",
     }
     env.pop("AGENT_MEM_INTERNAL", None)

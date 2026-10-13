@@ -79,8 +79,8 @@ def test_garbage_answers_change_nothing(driver: Driver, conn):
 
 
 def test_a_one_turn_bundle_keeps_its_title_when_the_model_copies_the_example_id(driver: Driver, conn):
-    """gpt-6-luna answered a one-turn bundle with the prompt example's id 12 instead of 2 (1 of 2 real calls): the
-    title and the lesson were dropped, and the turn stayed untitled in the work log."""
+    """A model may answer with the prompt example's id (12 instead of 2); a one-turn bundle keeps its title and
+    lesson anyway."""
     session_id, (first, _second) = _session(driver, conn)
     lesson = (
         "When the default uv cache is blocked by a sandbox, set UV_CACHE_DIR to a writable folder, because uv aborts."
@@ -372,7 +372,7 @@ def test_work_log_budget_keeps_the_newest_turn(driver: Driver, conn):
 
 
 def test_the_panel_counts_in_singular_for_one(driver: Driver, conn):
-    """A new project read "1 memories · 1 sessions · 1 turns"."""
+    """One of each reads "1 memory · 1 session · 1 turn", not "1 memories"."""
     from agent_mem.memory import store
 
     driver.prompt("s1", "Der Parser stürzt bei leeren Rechnungen ab")

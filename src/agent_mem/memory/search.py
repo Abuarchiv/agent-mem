@@ -206,13 +206,12 @@ STOPWORDS = {
     "unseren",
     "unserem",
     "projekt",
-    # Day words: "was läuft heute im kino" matched a fact over "läuft" and "heute". A named time is read by the
-    # time window (semantic.time_window), not as a search word.
+    # Day words: a named time is read by the time window (semantic.time_window), not as a search word.
     "heute",
     "gestern",
     "morgen",
     "today",
-    # chat filler: a question made of these matched any long turn ("nun schaue … gesamte")
+    # chat filler: a question made of these would match any long turn
     "nun",
     "schau",
     "schaue",
@@ -319,7 +318,7 @@ class Hit:
     origin: str | None = None
     answer: str = ""
     # What a turn is about: request, answer, files, errors. Command lines are left out: their paths and
-    # flags matched almost any two words of a question ("tests" in tests/test_x.py).
+    # flags match almost any two words of a question ("tests" in tests/test_x.py).
     topic: str = ""
 
     @property
@@ -409,7 +408,7 @@ def graph_candidates_sql(
 
 LINKS_PER_ENTITY = 50
 GRAPH_CANDIDATES = 200
-# Measured on 32 real questions, fixture, coding-agent-life and LongMemEval-40.
+# Tuned on the retrieval fixture, coding-agent-life and LongMemEval.
 COVERAGE_WEIGHT = 0.5
 GRAPH_WEIGHT = 0.3
 
@@ -517,11 +516,10 @@ def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
 
 
 def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
-    """The project, every project nested inside it and the projects around it. A session started in ~/Lernen that
-    works in ~/Lernen/agent-mem has its turns and facts filed under agent-mem (``capture._narrow_turn``); searching
-    from ~/Lernen must find them. The other way round, what a session in ~/Lernen learned about agent-mem stays filed
-    under ~/Lernen (46 memories on real data), so agent-mem looks there too. The home folder is around everything
-    and no project of its own, in either direction."""
+    """The project, every project nested inside it and the projects around it. A session started in ~/work that
+    works in ~/work/app has its turns and facts filed under app (``capture._narrow_turn``); searching from ~/work
+    must find them. The other way round, what a session in ~/work learned about app stays filed under ~/work, so
+    app looks there too. The home folder is around everything and no project of its own, in either direction."""
     if project_id is None:
         return [None]
     rows = conn.execute("SELECT id, root FROM projects").fetchall()
@@ -530,7 +528,7 @@ def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
         return [project_id]
     others = [r for r in rows if r[0] != project_id]
     home = os.path.expanduser("~")
-    # A session in the home folder is in no project: it does not see every project below it (~/Company too).
+    # A session in the home folder is in no project: it does not see every project below it.
     nested = [r[0] for r in others if identity.is_within(r[1], root)] if root not in {home, os.sep} else []
     around = [r[0] for r in others if r[1] not in {home, os.sep} and identity.is_within(root, r[1])]
     return [project_id, *nested, *around]
@@ -612,9 +610,9 @@ def search(
     terms = query_terms(query.text)
     projects = scope(conn, query.project_id)
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
-    # The graph says how strongly a hit is tied to the files and commands the question names. As a list of its own in
-    # the fusion it outvoted exact matches with whatever touched such a file last; it now reorders the hits the
-    # text and the vectors found.
+    # The graph says how strongly a hit is tied to the files and commands the question names. It only reorders the
+    # hits the text and the vectors found: as a list of its own in the fusion it would outvote exact matches with
+    # whatever touched such a file last.
     tied = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, GRAPH_CANDIDATES)
     tie = {owner: 1.0 - rank / len(tied) for rank, owner in enumerate(tied)}
     if vector_source is not None:
@@ -668,8 +666,8 @@ def confident(hit: Hit, config: Config, terms: Sequence[str]) -> bool:
     """Abstention gate for automatic injection: never inject weak matches."""
     if hit.score < config.retrieval.inject_min_score:
         return False
-    # A semantic hit still has to share a third of the question's content words: unrelated questions
-    # matched one generic word of five or more, real ones at least one of three.
+    # A semantic hit still has to share a third of the question's content words: unrelated questions share one
+    # generic word of five or more, related ones at least one of three.
     if "vector" in hit.sources and hit.matched_terms >= 1 and hit.coverage >= 1 / 3:
         return True
     needed = 1 if len(terms) <= 1 else 2

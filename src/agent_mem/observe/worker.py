@@ -65,7 +65,7 @@ def _next_day() -> str:
 
 class Deferred(Exception):
     """No model may be called now: a quota or login failure paused the harness's stages, or the day's calls are
-    used up. The turn waits until ``until``; before, it was kept raw for good and never got facts."""
+    used up. The turn waits until ``until`` instead of being kept raw without facts."""
 
     def __init__(self, until: str) -> None:
         super().__init__(until)
@@ -229,14 +229,13 @@ class Worker:
                     providers.note_failure(self.conn, self.config, name, failure)
                 last_error = f"{name}: {text}"
                 continue
-            # mem0 stores the facts before SQLite takes them. After a failure in between (a write lock held over
-            # 10 s, a killed worker) the retry showed the model its own facts as existing memories, it extracted
-            # nothing, and they lived only in mem0. Take every fact mem0 holds for these turns; the dedupe key
-            # skips the ones already mirrored.
+            # mem0 stores the facts before SQLite takes them. After a failure in between (a long write lock, a killed
+            # worker) the retry shows the model its own facts as existing memories and extracts nothing, so take every
+            # fact mem0 holds for these turns; the dedupe key skips the ones already mirrored.
             facts = _with_stored(self.adapter, namespace, b.turn_ids, facts)
             _record_call(self.conn, name, "extract", time.perf_counter() - started, True, b.chars, b.turn_ids, None)
-            # Facts and `done` in one transaction, before the slow work-log call: a worker killed in between
-            # extracted the bundle again, and mem0 kept both wordings of every fact.
+            # Facts and `done` in one transaction, before the slow work-log call: a worker killed in between would
+            # extract the bundle again and leave both wordings of every fact in mem0.
             with db.transaction(self.conn):
                 added = mirror(self.conn, self.config, b, facts)
                 queue.finish(self.conn, b.turn_ids, "done", name)
@@ -251,9 +250,7 @@ class Worker:
         """Titles, session summary and lessons in one call. Facts are stored already; a failure here loses none.
 
         There is no per-bundle contradiction check: both an old and a newer fact stay, with dates, and the agent reads
-        them oldest first ("if entries disagree the newer one holds"). On LongMemEval-S every knowledge-update
-        question had both versions in the top 5 (All@5 1.0, n = 72), and mem0 2.x dropped its UPDATE/DELETE phase
-        for the same reason. The daily review (``observe/review.py``) retires duplicates and replaced facts."""
+        them oldest first ("if entries disagree the newer one holds"). The daily review (``observe/review.py``) retires duplicates and replaced facts."""
         started = time.perf_counter()
         try:
             titled, learned, chars = summary.summarize(self.conn, llm, b.session_id, b.turn_ids)
@@ -333,9 +330,8 @@ class Worker:
                     self.stats["raw"] += 1
                 continue
             except Exception as error:
-                # Storing failed (a locked database, a bad fact): back off like a provider error, then `failed`.
-                # Before, the run aborted and the same bundle came first again after its lease: a poison turn
-                # stopped all extraction.
+                # Storing failed (a locked database, a bad fact): back off like a provider error, then `failed`, so
+                # one poison turn cannot stop all extraction.
                 queue.fail(self.conn, b.turn_ids, f"{type(error).__name__}: {error}")
                 self.stats["failed"] += 1
                 continue
@@ -444,7 +440,7 @@ class Worker:
                     [],
                     f"{type(error).__name__}: {error}"[:300],
                 )
-                # A timed-out batch was sent again on every worker run, after every turn, up to 120 s each.
+                # Hold the graph for an hour: a timed-out batch would otherwise be sent again on every worker run.
                 db.set_meta(self.conn, "observe.graph_hold", timeutil.iso(timeutil.now() + timedelta(hours=1)))
                 return
             _record_call(self.conn, name, "graph", time.perf_counter() - started, True, 0, [], None)
@@ -455,7 +451,7 @@ class Worker:
             self._adapter.close()
 
 
-# A background process may wait for the write lock; the hooks' 150 ms made the worker abort on any longer write.
+# A background process may wait for the write lock; with the hooks' 150 ms the worker would abort on any longer write.
 BUSY_TIMEOUT_MS = 10_000
 
 

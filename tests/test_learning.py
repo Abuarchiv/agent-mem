@@ -252,7 +252,6 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
 
 
 def test_a_session_in_the_home_folder_does_not_see_the_projects_below_it(conn):
-    """A session in ~ searched every project below it, ~/Company with client data too."""
     home = os.path.expanduser("~")
     for project_id, root in (("home", home), ("client", os.path.join(home, "Company", "client"))):
         conn.execute(
@@ -263,8 +262,8 @@ def test_a_session_in_the_home_folder_does_not_see_the_projects_below_it(conn):
 
 
 def test_a_piped_test_run_that_failed_and_then_passed_teaches_the_fix(config, project):
-    """Claude Code ran `… pytest -q 2>&1 | tail -30` twice, failing then passing after an edit. Without an exit code
-    neither run counted, so no fix was learned and the turn looked like it had gone smoothly."""
+    """`… pytest -q 2>&1 | tail -30` hides the exit code; the output still marks the first run as failed, so the fix
+    after the edit is learned."""
     import json
 
     from agent_mem.core import db

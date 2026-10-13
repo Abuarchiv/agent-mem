@@ -261,9 +261,8 @@ def _failed_project_command(tool: str | None, payload: str) -> bool:
 
 
 def _close_turn(conn: sqlite3.Connection, config: Config, turn_id: int, outcome: str, ts: str) -> None:
-    # Only the project's own commands still failing make a turn an error. Every failure counted, 4 of 7 turns of a
-    # real session that ended well were `error` (a missing file read, a wrong query), and the work log then
-    # titled one "test errors still open" after its tests had passed.
+    # Only the project's own commands still failing make a turn an error; a missing file read or a wrong query
+    # along the way does not.
     unresolved = any(
         _failed_project_command(row[0], row[1])
         for row in conn.execute(
@@ -332,7 +331,7 @@ def _narrow_turn(conn: sqlite3.Connection, turn_id: int, project: identity.Proje
         return
     if row["root"] is None or identity.is_within(project.root, row["root"]):
         conn.execute("UPDATE turns SET project_id = ? WHERE id = ?", (project.id, turn_id))
-        # The session follows: started in ~/Lernen, it is an agent-mem session once it works there.
+        # The session follows: started in a parent folder, it belongs to the nested project once it works there.
         conn.execute(
             "UPDATE sessions SET project_id = ? WHERE id = (SELECT session_id FROM turns WHERE id = ?) "
             "AND project_id IS ?",
@@ -408,7 +407,7 @@ def _learn_from_prompt(
             if prefer is not None:
                 store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
     # With a working observer the model reads the turn and writes corrections and decisions as facts;
-    # the patterns then only raise the turn's importance (regex corrections caught complaints too).
+    # the patterns then only raise the turn's importance (they also match complaints).
     observed = _observer_active(conn, config)
     decisions = [] if observed or not typed else signals.decision_sentences(prompt)
     # A long spoken prompt is not a correction one can apply later; the turn itself stays searchable. A stated rule
@@ -627,7 +626,7 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
         store.link(conn, "t", turn_id, ids)
 
     # Error-to-fix recipes only for the project's own commands: a failed `cat` or `cd` followed by one that worked
-    # is looking around, not a fix worth repeating (17 of 17 recipes on real data were such noise).
+    # is looking around, not a fix worth repeating.
     project_command = tool_signal.command_kind in PROJECT_COMMANDS
     if event.tool_failed and error_sig and tool_signal.command_key and project_command:
         recipe = conn.execute(

@@ -312,7 +312,7 @@ def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Pa
 
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the hook command through sh")
 def test_a_binary_path_with_a_space_is_quoted_and_read_back(homes: Path) -> None:
-    """Unquoted, `/Users/a b/.local/bin/agent-mem hook claude` ran `/Users/a` (exit 127) on every event."""
+    """Unquoted, `/Users/a b/.local/bin/agent-mem hook claude` would run `/Users/a`."""
     exe = homes / "my apps" / "agent-mem"
     exe.parent.mkdir()
     exe.write_text('#!/bin/sh\necho "ran $*"\n')
@@ -328,8 +328,8 @@ def test_a_binary_path_with_a_space_is_quoted_and_read_back(homes: Path) -> None
 
 
 def test_uninstall_leaves_no_copy_of_agent_mems_own_copilot_hooks(homes: Path) -> None:
-    """A second `setup --write` keeps the previous hooks file as `agent-mem.json.agent-mem-backup`; uninstall left it
-    behind in ~/.copilot/hooks. The user's own files keep their backups."""
+    """A second `setup --write` keeps the previous hooks file as `agent-mem.json.agent-mem-backup`; uninstall removes
+    it from ~/.copilot/hooks. The user's own files keep their backups."""
     install.write("copilot", PLUGINS, EXE)
     install.write("copilot", PLUGINS, EXE)
     hooks = homes / ".copilot" / "hooks"

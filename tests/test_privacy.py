@@ -114,7 +114,6 @@ def test_quoted_passphrases_cookies_basic_auth_and_azure_keys_are_redacted():
 
 
 def test_passwords_said_in_words_are_redacted():
-    """Live data: "Passwort: …" and "mein passwort ist …" were stored in plain text three times."""
     for text, secret in [
         ("Passwort: Sommer2026!", "Sommer2026"),
         ("mein passwort ist Sommer2026", "Sommer2026"),

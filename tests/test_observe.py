@@ -64,9 +64,8 @@ def test_missing_spacy_model_disables_entity_linking_instead_of_installing(monke
 def test_the_configured_model_also_lemmatizes_so_mem0_downloads_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """With ``agent-mem models install``'s model only the entity loader was set; mem0's BM25 lemmatizer then ran
-    ``spacy download en_core_web_sm``, a pip install from the network into the tool environment, after every
-    upgrade again."""
+    """The model from ``agent-mem models install`` also serves mem0's BM25 lemmatizer; otherwise it runs
+    ``spacy download en_core_web_sm``, a pip install from the network into the tool environment."""
     import importlib.util
 
     import spacy

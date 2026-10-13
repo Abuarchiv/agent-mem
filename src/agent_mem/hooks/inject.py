@@ -262,7 +262,7 @@ def _memory_lines(
         reverse=True,
     )
     lines = []
-    # Picked by rank, shown oldest first: an update then reads as an update (LongMemEval, chronological reading).
+    # Picked by rank, shown oldest first: an update then reads as an update.
     for row in sorted(ranked[:limit], key=lambda r: r["created_at"]):
         title = first_line(row["title"], 180)
         lines.append(
@@ -319,7 +319,7 @@ def _briefing_lines(
         _memory_lines(conn, project_id, harness, limit=round(3 * scale), kinds=("lesson",), session_id=session_id)
     )
     # Another harness's notes (memory/notes.py) get their own slots: long session summaries would otherwise
-    # take every fact slot of a project the user mostly works in with that harness (measured on real data).
+    # take every fact slot of a project the user mostly works in with that harness.
     lines.extend(
         _memory_lines(conn, project_id, harness, limit=round(2 * scale), kinds=("native_note",), session_id=session_id)
     )
@@ -336,7 +336,7 @@ def _briefing_lines(
 # What each harness passes to the model per hook output, in tokens (~4 ASCII characters each); more is moved to a
 # file the model is not told to read. Claude Code: 10,000 characters per string, no setting (code.claude.com hooks).
 # Codex: about 2,500 tokens unless the handler sets ``additionalContextLimit`` (plugins/codex/hooks.json sets 8,000).
-# Copilot: postToolUse 10 KB, sessionStart 10 MiB. OpenCode: our plugin passes everything. Checked 2026-10-13.
+# Copilot: postToolUse 10 KB, sessionStart 10 MiB. OpenCode: our plugin passes everything.
 HOST_TOKENS: dict[str, dict[str, int]] = {
     "claude": {"*": 2_400},
     "codex": {"session_start": 7_800, "prompt": 7_800, "tool": 7_800, "*": 2_400},
@@ -440,8 +440,8 @@ def prompt_hints(
         limit=PROMPT_HITS + 2,
         exclude_origins=notes.own_notes(harness),
     )
-    # Only confident hits: on wording alone a weaker one cannot be told from an unrelated one ("was läuft heute im
-    # kino" against a turn about the viewer that runs), and noise is not context.
+    # Only confident hits: on wording alone a weaker one cannot be told from an unrelated one, and noise is not
+    # context.
     hits = [h for h in search.search(conn, config, query) if search.confident(h, config, terms)][:PROMPT_HITS]
     if not hits:
         return None

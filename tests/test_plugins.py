@@ -87,7 +87,7 @@ def test_installers_parse():
         subprocess.run([sh, "-n", str(ROOT / "install.sh")], check=True)
     for line in (ROOT / "install.ps1").read_text(encoding="utf-8").splitlines():
         assert line.count('"') % 2 == 0, line  # PowerShell is not available everywhere; catch broken quoting
-        # Run through `irm ... | iex`, an `exit` closed the user's window before the error could be read.
+        # Run through `irm ... | iex`, an `exit` would close the user's window before the error can be read.
         assert not line.lstrip().startswith("exit"), line
     pwsh = shutil.which("pwsh")
     if pwsh:

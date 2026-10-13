@@ -40,7 +40,7 @@ _KINDS = {
 
 
 TAIL_BYTES = 256 * 1024
-# agentStop starts 50 to 150 ms before the final message reaches the transcript (measured twice, CLI 1.0.96).
+# agentStop starts 50 to 150 ms before the final message reaches the transcript (CLI 1.0.96).
 ANSWER_TRIES = 6
 ANSWER_WAIT_S = 0.05
 

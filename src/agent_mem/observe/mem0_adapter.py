@@ -104,7 +104,7 @@ def _use_entity_model(name: str = "en_core_web_sm", path: Path | None = None) ->
     nur"). Load the configured model into mem0's loader instead. Without the model mem0 would run
     ``spacy download`` (an install into the live environment, which ends the process in a tool install), so
     mark it as failed: entity linking is skipped, facts and search are unaffected. The same
-    model lemmatizes for mem0's BM25: left unset, that loader ran ``spacy download en_core_web_sm`` itself."""
+    model lemmatizes for mem0's BM25: left unset, that loader would run ``spacy download en_core_web_sm`` itself."""
     from mem0.utils import spacy_models
 
     if path is not None:
@@ -188,9 +188,8 @@ class Mem0Adapter:
         self, messages: list[dict[str, str]], namespace: str, metadata: dict[str, Any] | None = None
     ) -> list[Fact]:
         # mem0 puts the namespace's last 10 messages into the prompt as context. The namespace is the project, so
-        # they are earlier bundles of other sessions, and Haiku extracted from them again: a bundle about one change
-        # returned the facts of four earlier sessions, filed under its own turn. The bundle carries its session's
-        # context; the facts already stored reach the prompt as "Existing Memories" for deduplication.
+        # they are earlier bundles of other sessions, and the model would extract their facts again and file them
+        # under the current turn. The bundle carries its session's context; the facts already stored reach the prompt as "Existing Memories" for deduplication.
         self.scrub(messages=True)
         result: Any = self.memory.add(messages, user_id=namespace, metadata=metadata or {})
         return [
@@ -229,8 +228,8 @@ class Mem0Adapter:
 
     def scrub(self, *, messages: bool) -> None:
         """mem0's history.db keeps the text of every deleted fact (ADD and DELETE rows) and the latest bundle
-        messages per project, which it reads into the next extraction. Forgotten or purged text stayed on disk
-        and could come back as a new fact."""
+        messages per project, which it reads into the next extraction. Without this, forgotten or purged text would
+        stay on disk and could come back as a new fact."""
         history = self.memory.db
         connection = history.connection if history is not None else None
         if history is None or connection is None:

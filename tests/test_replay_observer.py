@@ -11,8 +11,7 @@ from agent_mem.memory import indexer
 
 
 def test_a_stop_replayed_from_the_spool_starts_the_observer(config: Config, project: Path, monkeypatch) -> None:
-    """Under load 315 of 488 hook events waited in the spool; their Stops never started the observer and the
-    48 closed turns stayed 'pending' until some later live Stop."""
+    """Under load most hook events wait in the spool; a replayed Stop still starts the observer for its turn."""
     started: list[Config] = []
     monkeypatch.setattr(hook, "spawn_observer", lambda cfg: started.append(cfg) or True)
     prompt = Event(

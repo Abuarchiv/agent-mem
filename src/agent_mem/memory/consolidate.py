@@ -81,9 +81,8 @@ def _clean_commands(conn: sqlite3.Connection) -> int:
 
 
 def _drop_noise_entities(conn: sqlite3.Connection) -> int:
-    """Whole command lines, reading commands and temporary files recorded before ``store.index_turn`` kept only
-    the working part; they made the connections graph a hairball. A command line is merged into its working
-    part (links kept, the strongest edge wins), the rest is removed."""
+    """Whole command lines, reading commands and temporary files in older records: a command line is merged into
+    its working part (links kept, the strongest edge wins), the rest is removed."""
     changed = 0
     rows = conn.execute("SELECT id, project_id, kind, key FROM entities WHERE kind IN ('command', 'file')").fetchall()
     for row in rows:

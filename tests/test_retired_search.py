@@ -12,8 +12,7 @@ def _memory(conn, text: str) -> int:
 
 
 def test_retired_duplicates_leave_the_index_so_the_valid_fact_ranks_first(conn) -> None:
-    """Live data, 'wo läuft der viewer': five replaced duplicates held FTS ranks 0 to 4, the valid fact sat at 5 and
-    the prompt hook stayed silent."""
+    """Replaced duplicates must not hold the full-text ranks above the valid fact."""
     conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
     valid = _memory(conn, "Der Viewer läuft lokal unter localhost 37778 als Dienst mit eigenem Label")
     retired = [_memory(conn, f"Der Viewer läuft auf Port 37778 (Variante {n})") for n in range(5)]
@@ -35,8 +34,8 @@ def test_the_indexer_clears_keys_of_memories_retired_elsewhere(conn) -> None:
 
 
 def test_a_fact_replaced_through_mem_remember_leaves_mem0_too(conn) -> None:
-    """``mem_remember(supersedes=…)`` and the title dedupe called ``supersede``, which kept the mem0 copy: the next
-    extraction was shown the replaced fact as current."""
+    """``mem_remember(supersedes=…)`` and the title dedupe remove the mem0 copy too; otherwise the next extraction is
+    shown the replaced fact as current."""
     conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
     old = _memory(conn, "mem0:abc")
     new = _memory(conn, "Der Viewer läuft auf Port 37778")

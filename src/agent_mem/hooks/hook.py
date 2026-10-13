@@ -41,7 +41,7 @@ def _read_stdin(limit: int, preread: bytes | None = None) -> str:
 
 def _without_lone_surrogates(value: Any) -> Any:
     """JSON may carry `\\ud800` (a binary file shown by `cat`). Such a string cannot be written to the database or
-    the spool, and the event was lost; it becomes U+FFFD. Valid pairs are already joined by ``json.loads``."""
+    the spool; it becomes U+FFFD. Valid pairs are already joined by ``json.loads``."""
     if isinstance(value, str):
         return _SURROGATE.sub("\ufffd", value)
     if isinstance(value, dict):

@@ -68,7 +68,7 @@ def finish(conn: sqlite3.Connection, turn_ids: list[int], state: str, provider: 
 
 def defer(conn: sqlite3.Connection, turn_ids: list[int], until: str) -> None:
     """Back to ``pending`` until ``until`` without using up an attempt: no model may be called yet (daily limit,
-    paused stage), which says nothing about the turn. Before, such turns were kept raw for good."""
+    paused stage), which says nothing about the turn."""
     now = timeutil.iso()
     for turn_id in turn_ids:
         conn.execute(

@@ -16,8 +16,8 @@ Two data sets, two backends:
   prompt hook would inject (lexical search plus ``search.confident``, no vectors), ``mcp_*`` for what
   ``mem_search`` returns as confident (full search plus the same gate); sqlite backend only.
 
-Backends: ``sqlite`` is the existing stack (capture + FTS5 + vectors + graph), ``mem0`` is the
-observer path (:mod:`agent_mem.observe.mem0_adapter`). Each item runs in a fresh data directory.
+Backends: ``sqlite`` is the search the hooks and the MCP server use (capture + FTS5 + vectors + graph), ``mem0`` is
+the observer's index (:mod:`agent_mem.observe.mem0_adapter`). Each item runs in a fresh data directory.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class Backend(Protocol):
     def close(self) -> None: ...
 
 
-# --- sqlite backend (existing stack) ----------------------------------------------------------
+# --- sqlite backend ----------------------------------------------------------------------------
 
 
 class SqliteBackend:
@@ -142,7 +142,7 @@ class SqliteBackend:
         self.conn.close()
 
 
-# --- mem0 backend (observer path) -------------------------------------------------------------
+# --- mem0 backend ------------------------------------------------------------------------------
 
 
 class Mem0Backend:
@@ -271,7 +271,7 @@ class Runner:
             if qid.endswith("_abs"):
                 continue
             if qid in done:
-                old = done[qid]["hits"]  # files written before All@k used bare "5", "10"
+                old = done[qid]["hits"]  # older progress files use bare "5", "10"
                 per_type[item.get("question_type", "all")].append(
                     {(f"R@{key}" if key.isdigit() else key): value for key, value in old.items()}
                 )

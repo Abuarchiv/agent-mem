@@ -399,7 +399,7 @@ def test_a_worker_killed_during_the_work_log_does_not_extract_the_bundle_again(
         w.step()
     except KeyboardInterrupt:
         pass
-    else:  # Windows CI got here with no reason given; the queue row names it
+    else:  # the queue row names the reason
         pytest.fail(f"no title call: {tuple(conn.execute('SELECT state, last_error FROM observe_queue').fetchone())}")
     assert conn.execute("SELECT state FROM observe_queue").fetchone()[0] == "done"
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE dedupe_key = 'mem0:f1'").fetchone()[0] == 1
@@ -449,8 +449,8 @@ def test_with_the_observer_off_no_turn_waits_to_be_sent_later(config: Config, pr
 
 
 def test_a_usage_limit_wrapped_by_mem0_pauses_the_stage(config: Config, project: Path, monkeypatch):
-    """mem0 re-raises a provider's error as ``LLMError(...) from error``. Caught as a generic error, a usage limit
-    never paused the stage: every turn spent its attempts and ended in `failed`."""
+    """mem0 re-raises a provider's error as ``LLMError(...) from error``; a usage limit behind it still pauses the
+    stage instead of spending every turn's attempts."""
     from mem0.exceptions import LLMError
 
     from agent_mem.observe import providers, worker
@@ -481,7 +481,7 @@ def test_a_usage_limit_wrapped_by_mem0_pauses_the_stage(config: Config, project:
 
 
 def test_a_logged_out_cli_is_named_in_the_panel_and_in_doctor(config: Config, project: Path, monkeypatch):
-    """`claude` logged out kept doctor green; the panel said "1 turn waiting" without saying why."""
+    """A logged-out `claude` turns doctor yellow, and the panel says why a turn waits."""
     from agent_mem.cli import health
     from agent_mem.hooks import inject
     from agent_mem.observe import providers

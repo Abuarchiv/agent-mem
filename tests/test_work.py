@@ -155,7 +155,7 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
 
 
 def test_a_growing_transcript_is_read_from_where_the_open_turn_begins(conn) -> None:
-    """A 220 MB Claude Code session took 2.1 s to read, and the indexer read it again after every turn."""
+    """A large transcript is read on from where the open turn begins, not from the start after every turn."""
     now = "2026-10-13T11:"
     turns = _session(conn, "claude", "s3", [(f"{now}00:00.000Z", f"{now}05:00.000Z"), (f"{now}06:00.000Z", None)])
     conn.execute("UPDATE sessions SET last_event_at = ?", (db.timeutil.iso(),))

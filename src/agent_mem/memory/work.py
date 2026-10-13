@@ -128,7 +128,7 @@ def _codex_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
 
 def _copilot_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
     """Fresh tokens per model call, and where the complete lines end. ``inputTokens`` includes the cache reads and
-    writes (measured 2026-10-13, CLI 1.0.96)."""
+    writes (CLI 1.0.96)."""
     calls: list[Call] = []
     end = offset
     for position, after, line in _lines(path, offset):
@@ -152,8 +152,8 @@ def measure(conn: sqlite3.Connection) -> int:
     """Fill ``turns.work_tokens`` for closed turns of Claude Code, Codex and Copilot sessions whose transcript exists.
     A turn without a model call in its window gets 0 (measured, nothing spent). Returns the turns measured.
 
-    Each file is read from where the earliest turn still open began (``meta work.offset:<path>``): a 220 MB session
-    took 2.1 s to read, and the indexer read it again after every turn."""
+    Each file is read from where the earliest turn still open began (``meta work.offset:<path>``), so a large
+    transcript is not read again after every turn."""
     since = timeutil.iso(timeutil.now() - timedelta(days=LOOKBACK_DAYS))
     sessions = conn.execute(
         "SELECT DISTINCT s.id, s.harness, s.native_id, s.started_at FROM turns t JOIN sessions s ON s.id = t.session_id "

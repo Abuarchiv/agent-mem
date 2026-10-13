@@ -80,7 +80,7 @@ def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
             (payload_cutoff,),
         ).rowcount
         # Exposures only: created, get, used and cited feed activation and stay. "injected" adds about twenty rows per
-        # session start and was never deleted.
+        # session start.
         accesses = conn.execute(
             "DELETE FROM accesses WHERE kind IN ('shown', 'warned', 'injected') AND ts < ?", (access_cutoff,)
         ).rowcount
@@ -88,8 +88,8 @@ def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
         calls = conn.execute("DELETE FROM observe_calls WHERE ts < ?", (access_cutoff,)).rowcount
     size_mb = config.db_path.stat().st_size / 1_000_000 if config.db_path.exists() else 0
     last_vacuum = db.get_meta(conn, "vacuumed_at")
-    # Above the limit the database may stay large (real data), so VACUUM, which locks every hook out, runs once a day
-    # at most and only after trimming freed something; before, it ran on every indexer start, about once a minute.
+    # Above the limit the database may stay large, so VACUUM, which locks every hook out, runs once a day at most and
+    # only after trimming freed something.
     if size_mb > config.retention.max_db_mb and (last_vacuum is None or timeutil.hours_between(last_vacuum) >= 24):
         with db.transaction(conn):
             freed = conn.execute(
@@ -243,7 +243,7 @@ def _neighbour_linker(conn: sqlite3.Connection, embedder: Any) -> Callable[[sqli
 
 def _start_observer_if_pending(conn: sqlite3.Connection, config: Config) -> None:
     # Turns closed here (a replayed Stop, a stale turn) had no live Stop hook to start the fact worker; under load
-    # most Stops wait in the spool, and their turns stayed pending until some later session ended a turn.
+    # most Stops wait in the spool.
     from agent_mem.hooks import hook
 
     if conn.execute("SELECT 1 FROM observe_queue WHERE state = 'pending' LIMIT 1").fetchone():

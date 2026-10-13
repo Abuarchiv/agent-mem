@@ -105,7 +105,7 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
         return None
     found = _lookup(conn, path)
     # A parent must not swallow a repository nested below it: neither a plain directory nor a git repository
-    # whose folder holds other repositories (~/Lernen with ~/Lernen/agent-mem).
+    # whose folder holds other repositories (~/work with ~/work/app).
     if found is not None and (
         str(found.root) == _canonical(path) or (_git_backed(found) and not _nested_repo(path, found.root))
     ):
@@ -125,9 +125,9 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
     if remote:
         identity_source = f"remote:{remote}"
     elif toplevel and (first := _git(root, "rev-list", "--max-parents=0", "HEAD")):
-        # Without a remote the path named the project, so a moved or renamed folder started over with no memory.
-        # The first commit stays the same across moves, renames, clones and worktrees.
-        # ponytail: in a huge history the walk can pass git's 2 s timeout and the path names it, as before.
+        # Without a remote the root commit names the project: it stays the same across moves, renames, clones and
+        # worktrees, where the path would start a moved folder over with no memory. In a very large history the
+        # walk can exceed git's 2 s timeout; the path then names the project.
         identity_source = f"root:{min(first.split())}"
     else:
         identity_source = path_source

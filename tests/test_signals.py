@@ -129,7 +129,7 @@ def test_task_notification_reads_as_its_summary():
 
 
 def test_a_runner_and_its_options_do_not_hide_the_command():
-    """Copilot ran `uv run --with pytest python3 -m pytest -q`: the value of --with was taken for the command."""
+    """In `uv run --with pytest python3 -m pytest -q` the value of --with is not the command."""
     assert signals.command_key("uv run --with pytest python3 -m pytest -q") == "uv run pytest"
     assert signals.command_key("uv run --with requests python app.py") == "uv run python"
     assert signals.command_key("uv run -m pytest -x") == "uv run pytest"
@@ -140,8 +140,7 @@ def test_a_runner_and_its_options_do_not_hide_the_command():
 
 
 def test_a_chain_is_keyed_by_the_command_that_does_the_work():
-    """Claude Code chains `cat test_parser.py && uv run … pytest | tail`: the test run was keyed `cat`, so its failure,
-    its fix and the project's test command were never seen."""
+    """`cat test_parser.py && uv run … pytest | tail` is keyed by the test run, not by `cat`."""
     chained = 'cd "Mein Projekt" && cat test_parser.py && uv run --with pytest python3 -m pytest -q 2>&1 | tail -20'
     assert signals.command_key(chained) == "uv run pytest"
     assert signals.command_key("cd x && sed -i '' s/a/b/ p.py && cat p.py && uv run pytest") == "uv run pytest"
@@ -150,15 +149,15 @@ def test_a_chain_is_keyed_by_the_command_that_does_the_work():
 
 
 def test_not_x_verb_but_y_is_a_preference():
-    """The prompt "Nicht pip benutzen, sondern uv" gave ("pip", None): the hook learned no rule from it."""
+    """The verb may stand between the avoided name and the comma."""
     assert signals.preference_pairs("Nicht pip benutzen, sondern uv.") == [("pip", "uv")]
     assert signals.preference_pairs("Bitte nicht npm verwenden, sondern pnpm") == [("npm", "pnpm")]
     assert signals.preference_pairs("nicht so machen, sondern anders") == []
 
 
 def test_a_word_swap_inside_a_long_complaint_is_not_a_command_rule():
-    """A complaint about wording ("Redo anstatt Reuse zu nennen", "wirklich anstatt einfach") became two command
-    rules. "X statt Y" without a verb is a tool swap only in a short correction or with names in backticks."""
+    """A complaint about wording ("Redo anstatt Reuse zu nennen", "wirklich anstatt einfach") is no command rule.
+    "X statt Y" without a verb is a tool swap only in a short correction or with names in backticks."""
     complaint = (
         "Also es gibt viele Stellen, wo wirklich sprachlich bzw. einfach ein User verwirren. Zum Beispiel, also ich "
         "kann dir das viele Beispiele nennen, zum Beispiel Redo anstatt Reuse zu nennen oder View gibt es so viele "
@@ -171,7 +170,7 @@ def test_a_word_swap_inside_a_long_complaint_is_not_a_command_rule():
 
 
 def test_codex_apply_patch_names_its_files():
-    """Codex 0.162 sends apply_patch as {"command": "*** Begin Patch …"}: 12 of 12 live calls had no files."""
+    """Codex 0.162 sends apply_patch as {"command": "*** Begin Patch …"}."""
     patch = (
         "*** Begin Patch\n*** Update File: /repo/stats.py\n@@\n-    return 1\n+    return 0\n"
         "*** Add File: docs/new.md\n+hello\n*** End Patch\n"
@@ -181,8 +180,8 @@ def test_codex_apply_patch_names_its_files():
 
 
 def test_read_only_git_and_queries_fix_nothing():
-    """Live recipes said `git status` fixed "ugrep: warning…", `git diff` fixed a failing test and `sqlite3` fixed a
-    Codex error: they only look, and in a chain they hid the command that did the work."""
+    """`git status`, `git diff` and `sqlite3` only look: they fix no error, and in a chain they do not hide the
+    command that does the work."""
     for key in ("git status", "git diff", "git log", "git show", "git worktree", "sqlite3", "nl", "ugrep"):
         assert not signals.fixable(key), key
     assert signals.fixable("git commit") and signals.fixable("uv run pytest")
@@ -191,8 +190,8 @@ def test_read_only_git_and_queries_fix_nothing():
 
 
 def test_a_rule_sees_the_tool_each_part_of_a_command_runs():
-    """A rule "use uv instead of pip" let `cd x && python3 -m pip install` and `pip3 install` through and blocked
-    `uv pip install`, the uv way the user asked for: it looked at the first three words of the whole line."""
+    """A rule "use uv instead of pip" catches `cd x && python3 -m pip install` and `pip3 install` and lets
+    `uv pip install` through: it looks at the tool each part runs, not at the first words of the line."""
     assert "pip" in signals.tools_run("cd x && python3 -m pip install requests")
     assert "pip" in signals.tools_run("pip3 install requests") and "pip" in signals.tools_run("sudo pip install x")
     assert "pip" not in signals.tools_run("uv pip install requests")

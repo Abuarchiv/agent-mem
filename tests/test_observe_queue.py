@@ -411,8 +411,8 @@ def test_turns_wait_while_their_only_stage_is_paused_after_a_quota_error(
 
 
 def test_a_command_rule_from_what_a_tool_showed_is_not_learned(config: Config, project: Path) -> None:
-    """Live data: "Nutze Verbessern statt Entfernen" from the observer, twice, became a rule and a preference with
-    trust user; the developer never typed both words. A README read in the turn can state rules the same way."""
+    """A rule the observer extracts ("Nutze Verbessern statt Entfernen") needs both words in what the developer typed;
+    a README read in the turn can state rules the same way."""
     from agent_mem.observe import bundle, worker
     from agent_mem.observe.mem0_adapter import Fact
 
@@ -457,7 +457,7 @@ def test_copilot_observer_runs_in_a_private_home(monkeypatch) -> None:
 
 
 def test_a_failed_graph_batch_waits_an_hour(config: Config, monkeypatch) -> None:
-    """A timed-out batch was sent again on every worker run, after every turn, up to 120 s each."""
+    """A timed-out batch would otherwise be sent again on every worker run."""
     from agent_mem.observe import providers, relations, worker
 
     monkeypatch.setattr(providers, "available", lambda name: True)
@@ -478,8 +478,7 @@ def test_a_failed_graph_batch_waits_an_hour(config: Config, monkeypatch) -> None
 
 
 def test_one_statement_counts_once_although_hook_and_observer_both_read_it(config: Config, project: Path) -> None:
-    """Real Copilot session: "Use uv instead of pip" typed once became "(corrected 2x)" and a preference for every
-    session, because the prompt hook and then the observer each counted the same turn."""
+    """The prompt hook and the observer both read the same turn; "Use uv instead of pip" typed once counts once."""
     from agent_mem.observe import bundle, worker
     from agent_mem.observe.mem0_adapter import Fact
 

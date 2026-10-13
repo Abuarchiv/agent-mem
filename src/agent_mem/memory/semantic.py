@@ -45,8 +45,8 @@ class FastEmbedEmbedder:
     """Sentence embeddings via fastembed (ONNX Runtime, no PyTorch). Default: MiniLM-L12-v2."""
 
     def __init__(self, config: Config, *, allow_download: bool) -> None:
-        # The Hub's "You are sending unauthenticated requests ... set a HF_TOKEN" read as a step left to do on a
-        # fresh install; the public model needs no token. Errors still show.
+        # The Hub's "You are sending unauthenticated requests ... set a HF_TOKEN" reads like a setup step left to do;
+        # the public model needs no token. Errors still show.
         logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
         from fastembed import TextEmbedding  # lazy: optional dependency
 
@@ -427,7 +427,7 @@ def time_window(text: str, now: datetime | None = None) -> tuple[datetime, datet
                     "PREFER_DATES_FROM": "past",
                     "RETURN_AS_TIMEZONE_AWARE": True,
                     # A named day is that day in UTC like the stored timestamps; read as local time and
-                    # converted, "8 April" became 7 April 22:00 and the window missed the whole day.
+                    # converted, "8 April" would become 7 April 22:00 and the window would miss the day.
                     "TIMEZONE": "UTC",
                     "TO_TIMEZONE": "UTC",
                     "RELATIVE_BASE": current.replace(tzinfo=None),

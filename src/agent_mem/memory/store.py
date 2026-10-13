@@ -203,9 +203,8 @@ def supersede(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None
 
 
 def _drop_keys(conn: sqlite3.Connection, memory_id: int) -> None:
-    """No search returns a replaced memory (``search.load_hits``), but its keys and vector kept their ranks: on live
-    data five replaced duplicates held the first five full-text ranks for "wo läuft der viewer" and pushed the valid
-    fact under the injection threshold. The row stays for the viewer and ``agent-mem show``."""
+    """No search returns a replaced memory (``search.load_hits``), but its keys and vector would keep their ranks
+    and push valid facts under the injection threshold. The row stays for the viewer and ``agent-mem show``."""
     remove_search_keys(conn, "m", memory_id)
     conn.execute("DELETE FROM vectors WHERE owner_type = 'm' AND owner_id = ?", (memory_id,))
 
@@ -262,7 +261,7 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
     else:
         linked = [r[0] for r in conn.execute("SELECT concept_id FROM concept_links WHERE memory_id = ?", (owner_id,))]
         cursor = conn.execute("DELETE FROM memories WHERE id = ?", (owner_id,))
-        # A concept is a word from the memory ("Müllerbau"); once no memory names it, it goes with them.
+        # A concept is a word from the memory ("Qdrant"); once no memory names it, it goes with them.
         for concept_id in linked:
             conn.execute(
                 "DELETE FROM concepts WHERE id = ? AND NOT EXISTS (SELECT 1 FROM concept_links WHERE concept_id = ?)",
@@ -298,7 +297,7 @@ def learn_rule(
     ``rules.min_corrections`` statements. Called by the prompt hook and by the observer."""
     message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
     # One turn is one statement: the prompt hook and later the observer read the same prompt, and the observer
-    # retries a bundle after an error. Counted each time, "use uv instead of pip" typed once became a preference.
+    # retries a bundle after an error. Counted each time, a statement typed once would become a preference.
     counted = conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)",
         (f"rule.turn|{project_id}|{avoid}|{prefer or ''}|{turn_id}", timeutil.iso()),
@@ -307,8 +306,8 @@ def learn_rule(
         return
     guards_exist(config)
     if prefer:
-        # "Use npm instead of pnpm" after "use pnpm instead of npm": the newer statement wins. Before, both rules
-        # stayed, and once enabled they blocked npm and pnpm alike.
+        # "Use npm instead of pnpm" after "use pnpm instead of npm": the newer statement wins; with both rules
+        # enabled, npm and pnpm would be blocked alike.
         conn.execute(
             "UPDATE rules SET enabled = 0, evidence = 0 WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
             (project_id, prefer),

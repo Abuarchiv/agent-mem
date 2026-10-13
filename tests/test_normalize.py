@@ -213,8 +213,7 @@ def test_copilot_snake_case_payloads():
 
 
 def test_copilot_stop_takes_the_answer_from_the_transcript(tmp_path):
-    """agentStop carries only transcriptPath (CLI 1.0.96); without it every Copilot turn had no answer, in the
-    panel and for the observer."""
+    """agentStop carries only transcriptPath (CLI 1.0.96); the answer is read from the transcript."""
     transcript = tmp_path / "events.jsonl"
     lines = [
         {"type": "user.message", "data": {"content": "What does parse do?"}},
@@ -241,8 +240,8 @@ def test_copilot_stop_takes_the_answer_from_the_transcript(tmp_path):
 
 
 def test_copilot_stop_waits_for_the_final_answer_after_a_commentary(tmp_path, monkeypatch):
-    """A real Copilot turn wrote "Ich prüfe jetzt die Dateien …" next to its tool calls; agentStop read the transcript
-    before the final answer was written and stored that commentary as the turn's answer (sandbox session, CLI 1.0.96)."""
+    """A message next to tool calls ("Ich prüfe jetzt die Dateien …") is commentary; agentStop waits for the final
+    answer written after it (CLI 1.0.96)."""
     from agent_mem.hooks.normalize import copilot
 
     transcript = tmp_path / "events.jsonl"
@@ -269,8 +268,8 @@ def test_copilot_stop_waits_for_the_final_answer_after_a_commentary(tmp_path, mo
 
 
 def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
-    """Codex 0.162 sends a shell call's output without its exit code: of 288 live Codex shell calls 2 counted as
-    failed, a Traceback and a failed uv run among the rest. Clear signs mark a failure; ordinary output does not."""
+    """Codex 0.162 sends a shell call's output without its exit code. Clear signs mark a failure; ordinary output does
+    not."""
 
     def failed(output: str) -> bool:
         payload = {"hook_event_name": "PostToolUse", "session_id": "c", "tool_name": "Bash", "tool_call_id": "k",
@@ -287,12 +286,11 @@ def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
     )
     assert not failed("tests/test_errors.py::test_assert_raises PASSED\n0 failed")
     assert failed("npm ERR! code ELIFECYCLE") and failed("error[E0308]: mismatched types")
-    assert not failed("kind  | n  | note\nerror | 39 | from a sqlite3 table")  # a table row, live data
+    assert not failed("kind  | n  | note\nerror | 39 | from a sqlite3 table")  # a table row
 
 
 def test_claude_piped_test_run_without_exit_code_counts_as_failed():
-    """Claude Code ran `uv run … pytest -q 2>&1 | tail -30`: `tail` hid the exit code, the output said "1 failed",
-    and the failure, its fix and the lesson were never recorded."""
+    """In `uv run … pytest -q 2>&1 | tail -30` `tail` hides the exit code; "1 failed" in the output marks the failure."""
 
     def failed(stdout: str) -> bool:
         payload = {"hook_event_name": "PostToolUse", "session_id": "s", "tool_name": "Bash", "tool_use_id": "t",

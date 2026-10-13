@@ -57,7 +57,7 @@ class Retrieval:
     rrf_k: int = 60
     current_project_boost: float = 1.2
     # Cosine similarity floor for vector candidates, calibrated per embedder:
-    # MiniLM-L12-v2 0.3 (fixture abstention 0.6, LongMemEval R@5 0.925); multilingual-e5-small needs 0.78.
+    # MiniLM-L12-v2 0.3, multilingual-e5-small 0.78.
     min_vector_score: float = 0.3
 
 
@@ -107,7 +107,7 @@ class Observe:
     # Default: a turn only goes to the vendor that already saw it, then raw.
     cross_vendor: bool = False
     claude_model: str = "haiku"
-    # Cheapest per CLI (2026-10-12); a plan without the model falls back to the CLI's default.
+    # Cheapest per CLI; a plan without the model falls back to the CLI's default.
     codex_model: str = "gpt-6-luna"
     copilot_model: str = "auto"
     ollama_model: str = "qwen3.5:4b-mlx"
