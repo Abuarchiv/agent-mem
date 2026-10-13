@@ -248,12 +248,18 @@ INSPECTION = {
 
 
 def command_key(command: str) -> str | None:
+    """The command that does the work: agents chain `cat test.py && uv run pytest | tail`, and that runs the tests.
+    A chain that only looks around is keyed by its first look."""
     first_line = command.strip().splitlines()[0] if command.strip() else ""
+    looked: str | None = None
     for segment in re.split(r"\s*(?:&&|\|\||;)\s*", first_line):
         key = _segment_key(segment.split("|", 1)[0])
-        if key is not None:
+        if key is None:
+            continue
+        if key.split()[0] not in INSPECTION:
             return key
-    return None
+        looked = looked or key
+    return looked
 
 
 def _segment_key(segment: str) -> str | None:
@@ -522,7 +528,11 @@ _INSTEAD = [
         r"(?i)\b(?:nutze|verwende|benutze|nimm|use)\s+`?([\w.@/+-]+)`?\s+(?:statt|anstatt|anstelle von|instead of|not)\s+`?([\w.@/+-]+)`?"
     ),
     re.compile(r"(?i)`?([\w.@/+-]+)`?\s+(?:statt|anstatt)\s+`?([\w.@/+-]+)`?"),
-    re.compile(r"(?i)\b(?:nicht|kein|not|no)\s+`?([\w.@/+-]+)`?\s*,\s*(?:sondern|but|use)\s+`?([\w.@/+-]+)`?"),
+    # "nicht pip benutzen, sondern uv": the verb may stand between the name and the comma.
+    re.compile(
+        r"(?i)\b(?:nicht|kein|not|no)\s+`?([\w.@/+-]+)`?(?:\s+(?:benutzen|verwenden|nutzen|nehmen|using))?\s*,\s*"
+        r"(?:sondern|but|use)\s+`?([\w.@/+-]+)`?"
+    ),
 ]
 _AVOID = re.compile(
     r"(?i)\b(?:never use|don't use|do not use|nie|niemals|kein|keine|nicht)\s+`?([\w.@/+-]{2,40})`?\s+(?:benutzen|verwenden|nutzen|nehmen|use)?"

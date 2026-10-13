@@ -137,3 +137,20 @@ def test_a_runner_and_its_options_do_not_hide_the_command():
     # the same tool, however it is started: a failure of one is fixed by a pass of the other
     assert signals.same_tool("python -m pytest", "uv run pytest") and signals.same_tool("pytest", "uv run pytest")
     assert not signals.same_tool("uv run ruff", "uv run pytest") and not signals.same_tool("npm test", "pytest")
+
+
+def test_a_chain_is_keyed_by_the_command_that_does_the_work():
+    """Claude Code chains `cat test_parser.py && uv run … pytest | tail`: the test run was keyed `cat`, so its failure,
+    its fix and the project's test command were never seen."""
+    chained = 'cd "Mein Projekt" && cat test_parser.py && uv run --with pytest python3 -m pytest -q 2>&1 | tail -20'
+    assert signals.command_key(chained) == "uv run pytest"
+    assert signals.command_key("cd x && sed -i '' s/a/b/ p.py && cat p.py && uv run pytest") == "uv run pytest"
+    assert signals.command_key("cd x && ls -la && cat README") == "ls"  # only looking around: the first look
+    assert signals.command_key("git status && git diff") == "git status"
+
+
+def test_not_x_verb_but_y_is_a_preference():
+    """The prompt "Nicht pip benutzen, sondern uv" gave ("pip", None): the hook learned no rule from it."""
+    assert signals.preference_pairs("Nicht pip benutzen, sondern uv.") == [("pip", "uv")]
+    assert signals.preference_pairs("Bitte nicht npm verwenden, sondern pnpm") == [("npm", "pnpm")]
+    assert signals.preference_pairs("nicht so machen, sondern anders") == []
