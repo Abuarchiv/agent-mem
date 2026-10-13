@@ -614,7 +614,8 @@ def overview(conn: sqlite3.Connection, session_id: str, config: Config | None = 
             lines.append(line)
     paused = conn.execute("SELECT value FROM meta WHERE key = 'paused_until'").fetchone()
     if paused:
-        lines.append(f"Recording paused until {paused[0]}. `agent-mem resume` turns it back on.")
+        until = timeutil.local(paused[0]) if paused[0] != "forever" else "further notice"
+        lines.append(f"Recording paused until {until}. `agent-mem resume` turns it back on.")
     return lines
 
 
@@ -800,7 +801,7 @@ def terminal(
     read = tokens(context)
     if spent > read:  # claude-mem's footer: what loading costs against what finding it out took
         out.append(
-            paint("2", f"Reading this: ~{read:,} tokens · ") + paint("32", f"working it out again: ~{spent:,} tokens")
+            paint("2", f"The agent reads ~{read:,} tokens · ") + paint("32", f"finding this out took ~{spent:,}")
         )
     out.append(paint("2", f"More: {hint} · {browse}"))
     return "\n".join(out)

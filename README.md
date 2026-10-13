@@ -77,7 +77,7 @@ Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusi
 
 Like claude-mem, Agent Mem compares what a memory costs the agent to read with the work it took to find it out. The work is measured, not estimated: after a request ends, the indexer reads the agent's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that request: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its request's share (the request's work divided by the memories it produced), so several memories of one request count that request once. Copilot requests are measured from `~/.copilot/session-state/<id>/events.jsonl`; OpenCode requests stay unmeasured.
 
-- Terminal (session start): `Reading this: ~1,240 tokens · working it out again: ~86,000 tokens`, shown only when measured work stands behind it.
+- Terminal (session start): `The agent reads ~1,240 tokens · finding this out took ~86,000`, shown only when measured work stands behind it.
 - `agent-mem status`: the same for the last 7 days, plus the total work the memory was built from.
 - Viewer: a Tokens block on the overview, a line on the Health page, and `Work` in every request and memory detail.
 

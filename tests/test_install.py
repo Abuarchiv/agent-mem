@@ -171,7 +171,7 @@ def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, mon
 
 
 def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes: Path) -> None:
-    from agent_mem.cli.health import _hook_checks
+    from agent_mem.cli.health import LABELS, _hook_checks
 
     exe = homes / "bin" / "agent-mem"
     exe.parent.mkdir()
@@ -196,11 +196,11 @@ def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes:
     assert all(install.stale(harness) for harness in install.HARNESSES)
 
     shown = {c.name: c for c in _hook_checks(fix=False)}
-    assert not shown["claude hooks up to date"].ok and "older" in shown["claude hooks up to date"].detail
+    assert not shown["Claude Code hooks up to date"].ok and "older" in shown["Claude Code hooks up to date"].detail
 
     fixed = {c.name: c for c in _hook_checks(fix=True)}
-    assert all(fixed[f"{h} hooks up to date"].ok for h in install.HARNESSES)
-    assert "/hooks" in fixed["codex hooks up to date"].detail
+    assert all(fixed[f"{LABELS[h]} hooks up to date"].ok for h in install.HARNESSES)
+    assert "/hooks" in fixed["Codex hooks up to date"].detail
     assert not any(install.stale(harness) for harness in install.HARNESSES)
     assert install.hook_commands("claude") == [f"{exe} hook claude"]  # the path they used, not this test's binary
     assert "other-tool notify" in _hooks_commands(json.loads(settings.read_text())["hooks"])
@@ -251,7 +251,7 @@ def test_plugin_and_setup_write_together_are_reported(homes: Path) -> None:
     data["enabledPlugins"] = {"agent-mem@agent-mem": True, "other@x": True}
     settings.write_text(json.dumps(data))
     assert install.claude_plugin_enabled()
-    assert not {c.name: c for c in _hook_checks(fix=False)}["claude connected once"].ok
+    assert not {c.name: c for c in _hook_checks(fix=False)}["Claude Code connected once"].ok
 
 
 def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch, capsys) -> None:

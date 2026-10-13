@@ -52,3 +52,9 @@ def hours_between(earlier: str, later: datetime | None = None) -> float:
 
 def day(value: str) -> str:
     return value[:10]
+
+
+def local(value: str | None) -> str:
+    """A stored timestamp as a person reads it: local time, to the minute ("2026-10-13 17:47")."""
+    parsed = parse(value)
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M") if parsed else (value or "never")

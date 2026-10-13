@@ -65,6 +65,10 @@ def _unknown_project(directory: str) -> int:
     return 2
 
 
+def _times(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
 def cmd_status(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.cli.health import status
 
@@ -88,7 +92,8 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         f"Learned: {count(data['recipes'], 'error fix', 'error fixes')} · rules: {data['rules_enabled']} on,"
         f" {data['rules_proposed']} suggested · fixed errors that came back: {learning['known_errors_recurred']}"
     )
-    print(f"Search by meaning: {data['semantic']} ({count(data['vectors'], 'entry', 'entries')} indexed)")
+    meaning = data["semantic"] if data["semantic"] in {"unavailable", "not indexed yet"} else "on"
+    print(f"Search by meaning: {meaning} ({count(data['vectors'], 'entry', 'entries')})")
     if data["spool"] or data["quarantine"]:
         print(
             f"Not saved yet: {count(data['spool'], 'event')} · could not be read: {count(data['quarantine'], 'file')}"
@@ -100,14 +105,14 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         f" (~{injected['tokens_per_session'] or 0:,} per session)"
     )
     if injected["saved_percent"] is not None:
-        print(f"  working that out took the agents ~{injected['work']:,} tokens")
-    print(f"Last cleanup: {data['consolidated_at'] or 'never'}")
+        print(f"  finding this out took the agents ~{injected['work']:,} tokens")
+    print(f"Last cleanup: {timeutil.local(data['consolidated_at'])}")
     if data["paused_until"]:
-        print(f"Recording paused until {data['paused_until']}")
+        print(f"Recording paused until {timeutil.local(data['paused_until'])}")
     print("Background jobs:")
     for component, info in sorted(data["components"].items()):
         print(
-            f"  {job_name(component)}: ok {info['ok_count']} (last {info['last_ok_at'] or '-'}), errors {info['error_count']}"
+            f"  {job_name(component)}: ok {info['ok_count']} (last {timeutil.local(info['last_ok_at'])}), errors {info['error_count']}"
             + (f" (last: {info['last_error']})" if info["error_count"] else "")
         )
     for warning in data["config_warnings"]:
@@ -174,7 +179,7 @@ def cmd_pause(ns: argparse.Namespace, config: Config) -> int:
     until = timeutil.iso(timeutil.now() + _duration(ns.duration)) if ns.duration else "forever"
     with _conn(config) as conn, db.transaction(conn):
         db.set_meta(conn, "paused_until", until)
-    print(f"Recording paused until {until}.")
+    print(f"Recording paused until {timeutil.local(until) if until != 'forever' else 'you run `agent-mem resume`'}.")
     return 0
 
 
@@ -370,8 +375,9 @@ def cmd_rules(ns: argparse.Namespace, config: Config) -> int:
             for row in rows:
                 state = "on: can block" if row["enabled"] else "suggested: only warns"
                 print(
-                    f"R{row['id']} [{state}] {row['message']} · from {row['evidence']} correction(s) · used {row['hits']}x"
-                    f" · ignored {row['overrides']}x · project {row['project'] or 'all'}"
+                    f"R{row['id']} [{state}] {row['message']} · from {_times(row['evidence'], 'correction')}"
+                    f" · used {_times(row['hits'], 'time')} · ignored {_times(row['overrides'], 'time')}"
+                    f" · project {row['project'] or 'all'}"
                 )
             return 0
         if ns.rule_id is None:

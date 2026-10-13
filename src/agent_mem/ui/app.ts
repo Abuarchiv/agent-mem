@@ -270,7 +270,7 @@ interface GraphController {
 <aside class="sidebar" aria-label="Viewer navigation">
 <a class="brand" href="${hashFor("overview")}">agent-mem<span class="brand-badge">v${h(String(data.agent_mem).split(".")[0])}</span></a>
 <nav aria-label="Sections">${groups}</nav>
-<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Recording paused" : "Recording"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.<br>Always at this address.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}<br>Run <code>agent-mem view</code> for the live viewer</span>`}</div>
+<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Recording paused" : "Recording"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}<br>Run <code>agent-mem view</code> for the live viewer</span>`}</div>
 </aside>
 <div class="main">
 <header class="topbar">
@@ -352,7 +352,7 @@ interface GraphController {
     const learning = data.learning;
     // claude-mem's token economics: what the injected memories cost to read against the agent's measured work behind them.
     const injected: Partial<Injected> = data.health.injected ?? {};
-    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>${injected.saved_percent != null ? `${num(injected.saved_percent)}%` : "—"}</b><span>${injected.saved_percent != null ? "fewer tokens than working it out again (last 7 days)" : injected.built_from ? "no numbers yet" : "counted when a session ends"}</span></div><div class="block-foot"><div class="stats">${stat(`~${num(injected.tokens)}`, "tokens given to agents")}${stat(`~${num(injected.work)}`, "tokens it took to work out")}</div><span class="caption">Counted from the agents' own logs over ${plural(injected.measured_turns ?? 0, "request")}, without cached tokens.</span></div></section>`;
+    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>${injected.saved_percent != null ? `${num(injected.saved_percent)}%` : "—"}</b><span>${injected.saved_percent != null ? "fewer tokens than finding it out again" : injected.built_from ? "no numbers yet" : "counted when a session ends"}</span></div><div class="block-foot"><div class="stats">${stat(`~${num(injected.tokens)}`, "tokens read by agents")}${stat(`~${num(injected.work)}`, "tokens to find it out")}</div><span class="caption">Last 7 days, from the agents' own logs.</span></div></section>`;
     const lessonCount = valid.filter((memory) => memory.kind === "lesson").length;
     const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learned <a href="${hashFor("learned")}" aria-label="Open what was learned">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(lessonCount)}</b><span>${lessonCount === 1 ? "lesson" : "lessons"} from mistakes and fixes</span></div><div class="block-foot"><div class="stats">${stat(num(learning.errors_fixed), learning.errors_fixed === 1 ? "error fix" : "error fixes")}${stat(num(enabled), enabled === 1 ? "rule on" : "rules on")}</div><span class="caption">Given to the next agent so it does not repeat them.</span></div></section>`;
 
@@ -434,7 +434,7 @@ ${turnDetail(selected, session)}
   }
 
   function turnDetail(turn: Turn | undefined, session: Session | undefined) {
-    if (!turn) return `<aside class="detail empty-detail" aria-label="Request detail"><header><h2>Request</h2></header><p>Pick a request to see what was asked, every step, the result and what was learned from it.</p><span class="notice">${icon("lock", 16)}Shown exactly as recorded. This page loads nothing from the internet.</span></aside>`;
+    if (!turn) return `<aside class="detail empty-detail" aria-label="Request detail"><header><h2>Request</h2></header><p>Pick a request to see the details.</p></aside>`;
     const actions = data.actions[turn.id] ?? [];
     const learned = data.memories.filter((memory) => memory.turn_id === turn.id);
     const closeHref = hashFor("timeline", session ? { session: session.id } : {});
@@ -454,7 +454,7 @@ ${turn.files.length ? `<span class="section-label">Files</span><div class="file-
 ${turn.errors.length ? `<span class="section-label">Errors</span><ul class="actions">${turn.errors.map((error) => `<li><code class="error-line">${h(error)}</code></li>`).join("")}</ul>` : ""}
 ${recallList(turn)}
 ${learned.length ? `<span class="section-label">Learned from this request</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
-<span class="notice">${icon("lock", 16)}Shown exactly as recorded. Passwords and keys were removed before saving.</span>
+<span class="notice">${icon("lock", 16)}Shown as recorded. Passwords and keys are removed before saving.</span>
 </aside>`;
   }
 
@@ -508,16 +508,16 @@ ${learned.length ? `<span class="section-label">Learned from this request</span>
       }).join("");
       const hidden = order.length - Math.min(order.length, limit);
       const more = hidden ? `<button type="button" class="more-button" data-action="more" data-value="${h(name)}">Show ${num(Math.min(20, hidden))} older ${hidden === 1 ? "session" : "sessions"} (${num(hidden)} more)</button>` : "";
-      const noteGroup = notes.length ? group(`${harnessLabel(name)}'s own memory file`, `<span class="muted">notes the agent wrote itself, read in as written</span>`, notes, searching) : "";
-      const looseGroup = loose.length ? group("Saved outside a session", `<span class="muted">stored with the <code>mem_remember</code> tool or by hand</span>`, loose, searching) : "";
+      const noteGroup = notes.length ? group(`${harnessLabel(name)}'s own memory file`, `<span class="muted">notes the agent wrote itself</span>`, notes, searching) : "";
+      const looseGroup = loose.length ? group("Saved outside a session", `<span class="muted">saved by an agent or by hand</span>`, loose, searching) : "";
       return `<section class="harness-block"><header class="harness-head">${icon("session", 20)}<h2>${h(harnessLabel(name))}</h2><span class="muted">${plural(order.length, "session")} · ${plural(items.length, "memory", "memories")}</span></header><div class="memory-groups">${sessionGroups}${more}${noteGroup}${looseGroup}</div></section>`;
     }).join("");
     const selected = memoryById(state.memory);
-    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents keep in mind, sorted by agent, then by the session it came from. A closed session shows what is inside; open it to read the memories, click one to see its source or to delete it.</p></div></div>
+    return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents remember, by agent and session. Click one to see where it came from.</p></div></div>
 <div class="filter-rows">${harnessPills}${kindPills}</div>
 <div class="${selected ? "with-detail" : ""}">
 <div>${blocks || empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search, agent or kind." : "They appear while your agents work: decisions, corrections, failed attempts.")}
-${limitReached(data.memories, "memories") ? `<p class="muted">This page holds the latest ${num(data.limits.memories)} memories. <code>agent-mem search</code> finds older ones.</p>` : ""}</div>
+${limitReached(data.memories, "memories") ? `<p class="muted">This page shows the latest ${num(data.limits.memories)} memories. <code>agent-mem search</code> finds older ones.</p>` : ""}</div>
 ${selected ? memoryDetail(selected) : ""}
 </div>`;
   }
@@ -550,7 +550,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
 <dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Outdated since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.work ? `<dt>Work</dt><dd>~${num(memory.work)} tokens to find out, ~${num(Math.ceil((memoryText(memory).length) / 4))} to read</dd>` : ""}${memory.turn_id ? `<dt>From request</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
 <span class="section-label">Commands</span>
 <div class="copy-list">${copyable(`agent-mem show ${id}`)}${copyable(`agent-mem purge --id ${id}`)}</div>
-<p class="notice">${icon("lock", 16)}<span>The purge command deletes the memory for good, also from search. Agents can do the same with the <code>mem_forget</code> tool.</span></p>
+<p class="notice"><span><code>agent-mem purge</code> deletes it for good.</span></p>
 </aside>`;
   }
 
@@ -569,10 +569,10 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     const recipes = data.recipes.filter((recipe) => inProject(recipe.project_id) && matches([recipe.error_text, recipe.command_key, ...recipe.files]));
     const profile = data.profile.filter((item) => inProject(item.project_id) && matches([item.key, item.value]));
     const sections: [string, string, number, string][] = [
-      ["lessons", "Lessons", lessons.length, "Advice written after a request where something went wrong and was fixed, or where you corrected the agent. The best ones are given to every new session."],
-      ["fixes", "Error fixes", recipes.length, "A command failed, files were changed, and the same command passed. When the error comes back, the agent is told what fixed it last time."],
-      ["rules", "Rules", rules.length, "When you correct the same thing several times (for example “pnpm, not npm”), agent-mem suggests a rule. A suggested rule only warns; a rule you switch on can block the command."],
-      ["commands", "Commands", new Set(profile.map((item) => item.key)).size, "The test, lint, build and install commands that worked in a project. Agents get them at session start, so they do not have to guess."],
+      ["lessons", "Lessons", lessons.length, "Tips from requests where something went wrong and was fixed, or where you corrected the agent."],
+      ["fixes", "Error fixes", recipes.length, "A command failed, then passed after a change. If the error comes back, the agent is told what helped."],
+      ["rules", "Rules", rules.length, "Correct the same thing a few times (for example “pnpm, not npm”) and agent-mem suggests a rule. It only warns until you switch it on; then it blocks the command."],
+      ["commands", "Commands", new Set(profile.map((item) => item.key)).size, "Test, lint, build and install commands that worked. Agents get them at the start of a session."],
     ];
     const guide = `<div class="learn-guide">${sections.map(([id, title, count, text]) => `<a class="learn-card" href="#learn-${id}"><b>${num(count)}</b><span class="learn-title">${h(title)}</span><span class="learn-text">${h(text)}</span></a>`).join("")}</div>`;
 
@@ -591,7 +591,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
       return `<div class="pref-group"><span class="section-label">${h(PROFILE_LABEL[key] ?? readable(key))}</span>${rows}${more}</div>`;
     }).join("");
     const panel = (id: string, title: string, intro: string, body: string, emptyTitle: string, emptyText: string) => `<section class="panel" id="learn-${id}"><div class="panel-head"><h2>${h(title)}</h2></div><p class="panel-intro">${intro}</p>${body || empty(emptyTitle, emptyText)}</section>`;
-    return `<div class="page-head"><div><h1>Learned</h1><p class="lede">What agent-mem worked out by watching your sessions, so the next agent does not repeat a mistake. You do not need to do anything here; only rules can be switched on.</p></div></div>
+    return `<div class="page-head"><div><h1>Learned</h1><p class="lede">What agent-mem learned from your sessions, so the next agent does not repeat a mistake. Nothing to do here, except switching rules on.</p></div></div>
 ${guide}
 ${panel("lessons", "Lessons", sections[0][3], lessonRows, "No lessons yet", "They appear after a request where something went wrong and was fixed, or where you corrected the agent.")}
 ${panel("fixes", "Error fixes", sections[1][3], recipeRows, "No fixes learned yet", "They appear after a failing command passes again in the same session.")}
@@ -621,16 +621,16 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
     const groups = GROUPS.filter((group) => nodes.some((node) => ENTITY_GROUP[node.type] === group));
     const islands = smallIslands(nodes, edges).size;
     const progress = data.graph.total ? Math.min(100, Math.round(data.graph.read / data.graph.total * 100)) : 100;
-    return `<div class="page-head"><div><h1>Graph</h1><p class="lede">How the things your agents work with relate: files, tools, libraries, settings and errors, connected by what the memories say about them (“semantic.py uses fastembed”, “the patch fixes the lock error”). Click a thing to read every relation and the memory it comes from.</p></div>
+    return `<div class="page-head"><div><h1>Graph</h1><p class="lede">How your files, tools, libraries, settings and errors are linked, as your memories describe them (“semantic.py uses fastembed”). Click one to see its links.</p></div>
 <div class="pill-group" role="group" aria-label="Show kinds of things">${groups.map((group) => `<button type="button" class="pill" data-action="graph-kind" data-value="${group}" aria-pressed="${!state.hiddenKinds.has(group)}"><i class="swatch" style="background:var(${GROUP_COLOR[group]})"></i>${h(GROUP_LABEL[group])} ${num(nodes.filter((node) => ENTITY_GROUP[node.type] === group).length)}</button>`).join("")}${islands ? `<button type="button" class="pill" data-action="graph-islands" aria-pressed="${state.islands}">Single pairs ${num(islands)}</button>` : ""}</div></div>
-${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The background model has read ${num(data.graph.read)} of ${num(data.graph.total)} memories (${progress}%); the graph grows as it reads the rest.</span></p>` : ""}
+${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>${num(data.graph.read)} of ${num(data.graph.total)} memories read so far (${progress}%). The graph grows as the rest are read.</span></p>` : ""}
 <div class="graph-layout">
 <section class="graph-stage" aria-label="Graph canvas"><div id="graph-host" class="graph-host"></div>
 <div class="graph-controls"><button type="button" class="round-button" data-action="zoom" data-value="out" aria-label="Zoom out">${icon("minus", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="fit" aria-label="Fit graph">${icon("fit", 18)}</button><button type="button" class="round-button" data-action="zoom" data-value="in" aria-label="Zoom in">${icon("plus", 18)}</button></div>
 <span class="graph-hint">Drag to move · scroll to zoom · F to fit · Esc to clear</span></section>
 <aside id="graph-inspector" class="inspector" aria-live="polite"></aside>
 </div>
-<p class="caption">${plural(nodes.length, "thing")} and ${plural(edges.length, "relation")}, read from your memories by the background model.</p>`;
+<p class="caption">${plural(nodes.length, "thing")}, ${plural(edges.length, "link")}.</p>`;
   }
 
   // Things in a cluster of fewer than three: a lone "A uses B" says little next to the connected picture.
@@ -723,20 +723,20 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     const describe = (node: SimNode | undefined) => {
       if (!node) {
         const top = [...nodes].sort((a, b) => b.degree - a.degree).slice(0, 8);
-        inspector.innerHTML = `<span class="kicker">Graph</span><h2>Most connected</h2><p>The things with the most relations. Click one, here or in the graph.</p><ul class="node-list">${top.map((n) => `<li><button type="button" class="link-button" data-action="graph-select" data-value="${h(n.id)}"><i style="background:var(${ENTITY_COLOR[n.type] ?? "--lilac"})"></i><span class="wrap">${h(n.label)}</span><span class="muted">${plural(n.degree, "relation")}</span></button></li>`).join("")}</ul>`;
+        inspector.innerHTML = `<span class="kicker">Graph</span><h2>Most links</h2><p>Click one here or in the graph.</p><ul class="node-list">${top.map((n) => `<li><button type="button" class="link-button" data-action="graph-select" data-value="${h(n.id)}"><i style="background:var(${ENTITY_COLOR[n.type] ?? "--lilac"})"></i><span class="wrap">${h(n.label)}</span><span class="muted">${plural(n.degree, "link")}</span></button></li>`).join("")}</ul>`;
         return;
       }
       const list = around.get(node.id)!;
       const out = list.filter((edge) => edge.source === node), into = list.filter((edge) => edge.target === node);
       const block = (title: string, items: SimEdge[]) => (items.length ? `<span class="kicker">${title}</span><ul class="relation-list">${items.map((edge) => `<li><p>${sentence(edge)}</p>${evidence(edge)}</li>`).join("")}</ul>` : "");
-      inspector.innerHTML = `<span class="kicker"><i class="swatch" style="background:var(${ENTITY_COLOR[node.type] ?? "--lilac"})"></i>${h(ENTITY_LABEL[node.type] ?? node.type)}</span><h2 class="mono-title">${h(node.label)}</h2><p>${plural(list.length, "relation")}, named in ${plural(node.memories, "memory", "memories")}${node.project_id ? ` of ${h(projectName(node.project_id))}` : ""}.</p>${block("What it does", out)}${block("What acts on it", into)}`;
+      inspector.innerHTML = `<span class="kicker"><i class="swatch" style="background:var(${ENTITY_COLOR[node.type] ?? "--lilac"})"></i>${h(ENTITY_LABEL[node.type] ?? node.type)}</span><h2 class="mono-title">${h(node.label)}</h2><p>${plural(list.length, "link")}, named in ${plural(node.memories, "memory", "memories")}${node.project_id ? ` of ${h(projectName(node.project_id))}` : ""}.</p>${block("What it does", out)}${block("What acts on it", into)}`;
     };
     if (nodes.length === 0) {
-      host.innerHTML = `<div class="graph-empty">No relations yet. The background model reads new memories after a session and adds what they say about your files and tools.</div>`;
+      host.innerHTML = `<div class="graph-empty">No links yet. They appear after your next sessions.</div>`;
       inspector.innerHTML = "";
       return { zoomBy() {}, reset() {}, setQuery() {}, setHidden() {}, select() {}, destroy() {} };
     }
-    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Graph: ${nodes.length} things with ${edges.length} relations. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
+    host.innerHTML = `<canvas tabindex="0" role="img" aria-label="Graph: ${nodes.length} things with ${edges.length} links. Drag to pan, scroll to zoom, press F to fit."></canvas>`;
     const canvas = host.querySelector("canvas")!;
     const context = canvas.getContext("2d")!;
     const css = (name: string, fallback: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -852,7 +852,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
   function agentRow(agent: Agent) {
     const recording = agent.connected ? '<i class="dot good"></i> Connected' : agent.cli ? '<i class="dot warn"></i> Not connected' : '<span class="muted">Not installed</span>';
     let facts = '<span class="muted">saved word for word (no AI model)</span>';
-    if (!agent.enabled) facts = '<span class="muted">off in config</span>';
+    if (!agent.enabled) facts = '<span class="muted">turned off</span>';
     else if (agent.stage) facts = `<code>${h(agent.model)}</code> <span class="muted">via ${h(agent.stage)}</span>${agent.paused_until ? ` ${tag(`paused until ${clock(agent.paused_until)}`, "warn")}` : ""}`;
     const today = agent.facts_ok_today || agent.facts_failed_today ? `${num(agent.facts_ok_today)} runs${agent.facts_failed_today ? ` · ${num(agent.facts_failed_today)} failed` : ""}` : '<span class="muted">—</span>';
     let next = '<span class="muted">—</span>';
@@ -871,26 +871,26 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     }).join("");
     const semantic = String(health.semantic ?? "not indexed yet");
     const agentRows = (data.agents ?? []).filter((agent) => matches([agent.label, agent.stage, agent.model])).map(agentRow).join("");
-    return `<div class="page-head"><div><h1>Health &amp; privacy</h1><p class="lede">Is everything working? Green means yes. This is the state when the page was written; <code>agent-mem doctor</code> checks it right now.</p></div></div>
+    return `<div class="page-head"><div><h1>Health &amp; privacy</h1><p class="lede">Is everything working? Green means yes. <code>agent-mem doctor</code> checks it right now.</p></div></div>
 <div class="state-grid">
 <section class="block ${paused ? "block-yellow" : "block-green"}"><i class="block-deco deco-triangle"></i><h2>Recording</h2><div class="big-number"><b>${paused ? "Paused" : "On"}</b></div><span class="caption">${paused ? "Resume with <code>agent-mem resume</code>" : "Pause with <code>agent-mem pause --for 1h</code>"}</span></section>
 <section class="block block-blue"><h2>Search by meaning</h2><div class="big-number"><b>${semantic === "unavailable" || semantic === "not indexed yet" ? "Off" : "On"}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Search by words works. To also search by meaning, run <code>agent-mem models install</code>." : `Finds memories with other words, too. Model: ${h(semantic.split("/").pop())}`}</span></section>
 <section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and removes outdated facts.</span></section>
 </div>
-<section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which AI model writes facts from their requests</small></div><div class="table-wrap"><table class="agents"><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
+<section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which AI model writes their facts</small></div><div class="table-wrap"><table class="agents"><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
 <div class="columns">
 <section class="panel"><div class="panel-head"><h2>Background jobs</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Shows up after your first recorded session.")}</section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
 <div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB</span></div>
-<div class="row"><span class="grow wrap"><b>Tokens, last 7 days</b><span>~${num(health.injected?.tokens)} given to agents, ~${num(health.injected?.work)} it took to work them out</span></span><span class="value">${health.injected?.saved_percent != null ? `${num(health.injected.saved_percent)}% fewer` : "—"}</span></div>
+<div class="row"><span class="grow wrap"><b>Tokens, last 7 days</b><span>~${num(health.injected?.tokens)} read by agents, ~${num(health.injected?.work)} to find it out</span></span><span class="value">${health.injected?.saved_percent != null ? `${num(health.injected.saved_percent)}% fewer` : "—"}</span></div>
 <div class="row"><b>Waiting to be saved</b><span class="value">${plural(health.spool, "event")}</span></div>
 <div class="row"><span class="grow wrap"><b>Could not be read</b>${data.quarantine_latest ? `<span>Latest ${h(when(data.quarantine_latest.ts))}: ${h(data.quarantine_latest.reason)}</span>` : ""}</span><span class="value">${plural(health.quarantine, "file")}</span></div>
 <div class="row"><b>Data folder</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
 <div class="row"><span class="grow wrap"><b>Not encrypted</b><span>Anyone who can open the data folder can read your memory.</span></span></div>
-<div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer opens only on this computer and loads nothing from the internet. Pages saved with <code>agent-mem view --output</code> hold a copy of recent data.</span></span></div>
-<div class="row"><span class="grow wrap"><b>Passwords and keys removed</b><span>Secrets and &lt;private&gt; sections are removed before anything is saved.</span></span></div></section>
+<div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer opens only on this computer and loads nothing from the internet.</span></span></div>
+<div class="row"><span class="grow wrap"><b>Passwords and keys removed</b><span>They are removed before anything is saved.</span></span></div></section>
 </div></div>`;
   }
 
@@ -1034,6 +1034,6 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     // A sleeping tab catches up on its own; the server builds a fresh page on every reload.
     if (data.refresh) setInterval(reloadWhenIdle, data.refresh * 1000);
   } catch (error) {
-    root.innerHTML = `<div class="app"><div class="main"><div class="empty"><b>The page could not read its snapshot.</b><span class="mono">${h(error instanceof Error && error.message ? error.message : "unknown error")}</span></div></div></div>`;
+    root.innerHTML = `<div class="app"><div class="main"><div class="empty"><b>The page could not load its data.</b><span class="mono">${h(error instanceof Error && error.message ? error.message : "unknown error")}</span></div></div></div>`;
   }
 })();
