@@ -10,6 +10,12 @@
 - The notes Claude Code and Codex keep themselves are stored as `native_note` without a model call; each harness sees only the other one's notes, with two slots of their own in the briefing. `native_notes: false` turns it off.
 - The briefing names the current time and shows `(+N tok)` after entries whose full text is clearly longer.
 
+### Memory hygiene
+
+- The review that retires duplicates and outdated facts read only 150 of a project's facts and ran once in 20 hours; on 333 real facts it found 15 retirements while one rule sat there 13 times in different words. It now reads 300 (the newest 250 plus a rotating 50 older ones, about 70 s per Haiku call), and also runs after 50 new facts. On the same copy of the live database: 39 retirements, 38 of them right (outdated install advice, a wrong database path, duplicate rules, and plain facts that only recorded an event or a snapshot such as "pushed", "135 tests", "commits exist only locally").
+- A rule or lesson gives way only to another rule or lesson: the model had dropped "never measure on the live database" for a fact about `AGENT_MEM_DATA_DIR`. The prompt keeps the statement that still holds and helps next time, and drops a fact only when the kept one names every command, flag, path and reason it names.
+- Expired facts are retired without a successor; decisions, rules, lessons and dead ends never expire. Retired facts keep their row and show in the viewer as invalid.
+
 ### Install and upgrade
 
 - `agent-mem upgrade` installs the newest commit of the source this copy came from (extras and a branch or tag kept, a pinned commit dropped), then runs `doctor --fix` with the new code. It uses `uv tool install --upgrade`, which swaps the environment in place; `--reinstall` deletes it first, and in a measured run 258 of 332 hook calls during those 2.6 s found no binary.

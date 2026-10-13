@@ -182,7 +182,7 @@ def add_memory(
     return memory_id
 
 
-def supersede(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
+def supersede(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None:
     now = timeutil.iso()
     conn.execute(
         "UPDATE memories SET invalid_at = ?, superseded_by = ? WHERE id = ? AND invalid_at IS NULL",
@@ -190,8 +190,9 @@ def supersede(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
     )
 
 
-def retire(conn: sqlite3.Connection, old_id: int, new_id: int) -> None:
-    """``supersede``, and a mirrored fact leaves mem0 too, or the next extraction sees it as current."""
+def retire(conn: sqlite3.Connection, old_id: int, new_id: int | None) -> None:
+    """``supersede`` (``new_id`` None: expired, nothing replaces it), and a mirrored fact leaves mem0 too, or the next
+    extraction sees it as current."""
     supersede(conn, old_id, new_id)
     key = conn.execute("SELECT dedupe_key FROM memories WHERE id = ?", (old_id,)).fetchone()
     if key and str(key[0] or "").startswith("mem0:"):
