@@ -298,6 +298,19 @@ def learn_rule(
     ``rules.min_corrections`` statements. Called by the prompt hook and by the observer."""
     message = f"Use `{prefer}` instead of `{avoid}`" if prefer else f"Avoid `{avoid}`"
     guards_exist(config)
+    if prefer:
+        # "Use npm instead of pnpm" after "use pnpm instead of npm": the newer statement wins. Before, both rules
+        # stayed, and once enabled they blocked npm and pnpm alike.
+        conn.execute(
+            "UPDATE rules SET enabled = 0, evidence = 0 WHERE project_id IS ? AND kind = 'avoid_command' AND pattern = ?",
+            (project_id, prefer),
+        )
+        for old in conn.execute(
+            "SELECT id FROM memories WHERE kind = 'preference' AND project_id IS ? AND invalid_at IS NULL "
+            "AND substr(dedupe_key, 1, ?) = ?",
+            (project_id, len(f"pref|{project_id}|{prefer}|"), f"pref|{project_id}|{prefer}|"),
+        ).fetchall():
+            supersede(conn, int(old["id"]), None)
     # UPDATE first with ``IS``: a UNIQUE constraint never matches NULL project ids, so an upsert would
     # insert a new row for every correction made outside a project.
     updated = conn.execute(

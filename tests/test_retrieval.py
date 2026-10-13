@@ -166,6 +166,24 @@ def test_consolidation_promotes_and_expires(tmp_path, conn, config: Config):
         conn.execute("SELECT COUNT(*) FROM memories WHERE project_id IS NULL AND kind = 'preference'").fetchone()[0]
         == 1
     )
+    for _ in range(2):  # project a takes it back: the global copy follows
+        D(conn, config, tmp_path / "a").prompt("sa", "nein, nutze npm statt pnpm")
+    consolidate.run(conn, config, None)
+    globals_ = "SELECT body FROM memories WHERE project_id IS NULL AND kind = 'preference' AND invalid_at IS NULL"
+    assert [r[0] for r in conn.execute(globals_)] == []
+
+
+def test_a_reversed_command_rule_replaces_the_old_one(driver: Driver, conn, config: Config):
+    """Saying "pnpm statt npm" twice, later "npm statt pnpm" twice: both rules stayed and, enabled, blocked both tools."""
+    config.rules.auto_enable = True
+    for _ in range(2):
+        driver.prompt("s1", "nutze pnpm statt npm")
+    for _ in range(2):
+        driver.prompt("s1", "nutze npm statt pnpm")
+    rules = [tuple(r) for r in conn.execute("SELECT pattern, enabled FROM rules ORDER BY pattern")]
+    assert rules == [("npm", 0), ("pnpm", 1)]
+    valid = "SELECT body FROM memories WHERE kind = 'preference' AND invalid_at IS NULL"
+    assert [r[0] for r in conn.execute(valid)] == ["Use `npm` instead of `pnpm`"]
 
 
 def test_anchors_detect_changed_and_deleted_files(driver: Driver, conn, project):

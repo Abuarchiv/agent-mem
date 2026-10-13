@@ -156,12 +156,15 @@ def _drop_non_error_fixes(conn: sqlite3.Connection) -> int:
 
 
 def _promote_preferences(conn: sqlite3.Connection) -> int:
+    """A preference stated in two projects holds everywhere. It follows its projects: when they take it back (a
+    reversed rule, ``store.learn_rule``), the global copy goes too, and a newer statement makes a newer copy."""
     rows = conn.execute(
-        "SELECT title, body, COUNT(DISTINCT project_id) AS projects FROM memories "
+        "SELECT body, COUNT(DISTINCT project_id) AS projects, MAX(id) AS newest FROM memories "
         "WHERE kind = 'preference' AND source = 'hook' AND trust = 'user' AND project_id IS NOT NULL "
         "AND invalid_at IS NULL GROUP BY body HAVING projects >= 2"
     ).fetchall()
     created = 0
+    current: set[int] = set()
     for row in rows:
         memory_id = store.add_memory(
             conn,
@@ -172,9 +175,18 @@ def _promote_preferences(conn: sqlite3.Connection) -> int:
             source="hook",
             trust="user",
             importance=0.9,
-            dedupe=f"global-pref|{_norm(row['body'])}",
+            dedupe=f"global-pref|{_norm(row['body'])}|{row['newest']}",
         )
         created += memory_id is not None
+        key = conn.execute(
+            "SELECT id FROM memories WHERE dedupe_key = ?", (f"global-pref|{_norm(row['body'])}|{row['newest']}",)
+        ).fetchone()
+        current.add(int(key[0]))
+    for (old,) in conn.execute(
+        "SELECT id FROM memories WHERE dedupe_key LIKE 'global-pref|%' AND invalid_at IS NULL"
+    ).fetchall():
+        if old not in current:
+            store.supersede(conn, int(old), None)
     return created
 
 
