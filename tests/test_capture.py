@@ -67,11 +67,11 @@ def test_failure_without_error_line_is_no_recipe(driver: Driver, conn, config):
     conn.execute(
         "INSERT INTO recipes(project_id, error_sig, error_text, command_key, files_json, successes, updated_at) "
         "VALUES (NULL, 'a', 'context.arc(p.x, p.y)', 'ls', '[]', 1, 't'), "
-        "(NULL, 'b', 'Error: unable to open database', 'sqlite3', '[]', 1, 't'), "
+        "(NULL, 'b', 'Error: unable to open database', 'uv run pytest', '[]', 1, 't'), "
         "(NULL, 'c', 'cat: x.json: No such file or directory', 'cat', '[]', 1, 't')"
     )
     consolidate.run(conn, config)
-    assert [r[0] for r in conn.execute("SELECT command_key FROM recipes")] == ["sqlite3"]
+    assert [r[0] for r in conn.execute("SELECT command_key FROM recipes")] == ["uv run pytest"]
     driver.bash("s1", "cat conf/app.json", "cat: conf/app.json: No such file or directory", failed=True)
     driver.edit("s1", "conf/app.json")
     driver.bash("s1", "cat conf/app.json", "{}")

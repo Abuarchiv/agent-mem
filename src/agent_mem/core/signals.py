@@ -256,7 +256,7 @@ def command_key(command: str) -> str | None:
         key = _segment_key(segment.split("|", 1)[0])
         if key is None:
             continue
-        if key.split()[0] not in INSPECTION:
+        if not looks_only(key):
             return key
         looked = looked or key
     return looked
@@ -377,13 +377,41 @@ def reusable_command(command: str, kind: str) -> str | None:
     return None
 
 
+# Keys that only look, beyond INSPECTION's programs: `git commit` can fail and be fixed, `git status` cannot.
+_LOOKS_ONLY = frozenset(
+    {
+        "git status",
+        "git diff",
+        "git log",
+        "git show",
+        "git branch",
+        "git worktree",
+        "git rev-parse",
+        "git remote",
+        "git ls-files",
+        "git blame",
+        "sqlite3",
+        "nl",
+        "ugrep",
+        "xxd",
+        "hexdump",
+        "lsof",
+    }
+)
+
+
+def looks_only(command_key: str) -> bool:
+    """The command only looks at things; failing and then passing is no error that a change fixed."""
+    return command_key.split(maxsplit=1)[0] in INSPECTION or command_key in _LOOKS_ONLY
+
+
 def fixable(command_key: str | None) -> bool:
     """A failure of this command can be fixed by a change (a test, a build), not just retried with other words."""
     if not command_key:
         return False
     program = command_key.split()[0]
     # Keys recorded before command_key skipped shell setup: "cd", "-t" from "f=$(ls -t …)".
-    return program not in INSPECTION and program not in _SETUP and not program.startswith(("-", "$", "("))
+    return not looks_only(command_key) and program not in _SETUP and not program.startswith(("-", "$", "("))
 
 
 def command_kind(command: str) -> str | None:

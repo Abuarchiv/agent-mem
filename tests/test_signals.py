@@ -178,3 +178,13 @@ def test_codex_apply_patch_names_its_files():
     )
     signal = signals.analyze_tool("apply_patch", {"command": patch})
     assert signal.category == "edit" and list(signal.files) == ["/repo/stats.py", "docs/new.md"]
+
+
+def test_read_only_git_and_queries_fix_nothing():
+    """Live recipes said `git status` fixed "ugrep: warning…", `git diff` fixed a failing test and `sqlite3` fixed a
+    Codex error: they only look, and in a chain they hid the command that did the work."""
+    for key in ("git status", "git diff", "git log", "git show", "git worktree", "sqlite3", "nl", "ugrep"):
+        assert not signals.fixable(key), key
+    assert signals.fixable("git commit") and signals.fixable("uv run pytest")
+    assert signals.command_key("git status --short && uv run pytest -q") == "uv run pytest"
+    assert signals.command_key('sqlite3 db "select 1" && git diff') == "sqlite3"  # only looking: the first look
