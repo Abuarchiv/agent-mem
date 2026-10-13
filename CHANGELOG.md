@@ -2,6 +2,21 @@
 
 ## Unreleased (2.0 track)
 
+### Fixed in the tenth review round
+
+- Turns over `observe.daily_limit`, or while the only stage for their harness is paused after a usage limit, were kept raw for good and never got facts. They now wait in the queue until midnight UTC or the end of the pause, without using up an attempt.
+- After an embedder change the mem0 index was rebuilt from facts only; decisions, dead ends and rules were missing there and the next extraction wrote them again. Every mirrored kind is rebuilt, with its tag.
+- A memory replaced through `mem_remember(supersedes=…)`, a title duplicate or a deleted file's decision kept its mem0 copy, so the next extraction saw it as current. `supersede` now takes the copy along wherever it is called.
+- Command rules from the observer need both names in what the developer typed: since the observer sees tool output, a README saying "always use yarn" could have grown into a rule blocking npm. On real data "Nutze Verbessern statt Entfernen", extracted twice, had already become a rule and a preference marked as the user's.
+- A reversed rule ("npm statt pnpm" after "pnpm statt npm") switches the old one off; before, both stayed and, enabled, blocked both tools. A preference "across projects" goes when its projects take it back.
+- A deleted Claude Code memory file is retired (Codex summaries stay, Codex prunes them by age); a restored one comes back. Notes are read before the write lock is taken (100 ms per indexer run before, every hook waiting).
+- `record_anchors` hashed up to 2000 files while holding the write lock, each read whole into memory; hashing now happens first, in 1 MB chunks.
+- A graph batch the model answers without JSON is skipped after the second try instead of being retried, and paid for, on every run while every later memory waited.
+- `mem_forget` deletes only within the session's projects (as search sees them); another project's memory needs `agent-mem purge --id`.
+- Redaction covers quoted passphrases with spaces, `Cookie`/`Set-Cookie` headers, `Authorization: Basic|Digest|Token` and Azure `AccountKey=`.
+- Clearing a failure reads only its own session's edits (schema 8, index `events_session_ts`) and lets SQLite pick the edits instead of parsing every tool payload in the hook.
+- Load test: four sessions (Claude Code and Codex), every hook its own process, indexer, observer, viewer and search running: 488 hooks, median 87 ms, nothing lost, every tool call in its turn; with a second process holding the write lock 800 ms every 1.5 s, 422 events went through the spool and were replayed in order.
+
 ### Viewer and terminal
 
 - No more backups: the daily copies, `agent-mem backup`, `agent-mem restore`, the pre-migration copy and the `retention.backup_*` settings are gone. Migrations run in one transaction; a damaged database is moved aside as `memory.db.corrupt-<time>` with its WAL. `doctor --fix` (and so `agent-mem upgrade`) deletes the `backups` folder older releases wrote; `purge` does too.
