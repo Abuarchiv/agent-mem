@@ -228,6 +228,14 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         stats["spool_applied"] += applied
         stats["spool_quarantined"] += quarantined
 
+    if stats["spool_applied"] or stats["stale_turns_closed"]:
+        # Turns closed here (a replayed Stop, a stale turn) had no live Stop hook to start the fact worker; under load
+        # most Stops wait in the spool, and their turns stayed pending until some later session ended a turn.
+        from agent_mem.hooks import hook
+
+        if conn.execute("SELECT 1 FROM observe_queue WHERE state = 'pending' LIMIT 1").fetchone():
+            hook.spawn_observer(config)
+
     conn.execute("PRAGMA optimize")
     with contextlib.suppress(sqlite3.OperationalError):
         conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
