@@ -492,7 +492,9 @@ def test_one_statement_counts_once_although_hook_and_observer_both_read_it(confi
     for attempt in range(2):  # the observer also retries a bundle after an error
         worker.mirror(conn, config, b, [Fact(id=f"p{attempt}", text="[rule] Use uv instead of pip", metadata={})])
     assert [tuple(r) for r in conn.execute("SELECT pattern, evidence FROM rules")] == [("pip", 1)]
-    assert conn.execute("SELECT COUNT(*) FROM memories WHERE source = 'hook' AND kind = 'preference'").fetchone()[0] == 0
+    assert (
+        conn.execute("SELECT COUNT(*) FROM memories WHERE source = 'hook' AND kind = 'preference'").fetchone()[0] == 0
+    )
     conn.close()
     _turn(config, project, "s2", "Again: use uv instead of pip.", "Done.")
     conn = db.connect(config)
