@@ -45,18 +45,20 @@ ANSWER_TRIES = 6
 ANSWER_WAIT_S = 0.05
 
 
-def _answer_in(transcript: str) -> str | None:
-    """The last message of the current turn, or None while it is not written yet."""
+def _answer_in(transcript: str) -> tuple[str | None, bool]:
+    """The last text of the current turn (None while none is written) and whether the turn's latest message is final.
+    A message that asks for tools is commentary ("Ich prüfe jetzt …"); the final answer asks for none."""
     try:
         with open(transcript, "rb") as fh:
             fh.seek(0, 2)
             fh.seek(max(0, fh.tell() - TAIL_BYTES))
             tail = fh.read()
     except OSError:
-        return None
+        return None, False
+    final: bool | None = None
     for raw in reversed(tail.splitlines()):
         if b'"user.message"' in raw:
-            return None  # reached the prompt: the answer before it belongs to the previous turn
+            break  # reached the prompt: the answer before it belongs to the previous turn
         if b'"assistant.message"' not in raw:
             continue
         try:
@@ -64,23 +66,29 @@ def _answer_in(transcript: str) -> str | None:
         except ValueError:
             continue  # the first line of the tail is usually cut
         data = entry.get("data") if isinstance(entry, dict) else None
-        content = data.get("content") if isinstance(data, dict) else None
-        if entry.get("type") == "assistant.message" and isinstance(content, str) and content.strip():
-            return content
-    return None
+        if entry.get("type") != "assistant.message" or not isinstance(data, dict):
+            continue
+        if final is None:
+            final = not data.get("toolRequests")
+        content = data.get("content")
+        if isinstance(content, str) and content.strip():
+            return content, final
+    return None, bool(final)
 
 
 def last_answer(transcript: str | None) -> str | None:
     """The agent's answer from the session transcript (``session-state/<id>/events.jsonl``): ``agentStop`` carries
-    no answer, only the transcript's path. Reads only the end of the file, waiting at most 250 ms for it."""
+    no answer, only the transcript's path. Reads only the end of the file, waiting at most 250 ms for the final
+    message; if it never comes, the turn's last commentary is better than nothing."""
     if not transcript or not os.path.isfile(transcript):
         return None
+    answer = None
     for attempt in range(ANSWER_TRIES):
-        answer = _answer_in(transcript)
-        if answer is not None or attempt == ANSWER_TRIES - 1:
-            return answer
+        answer, final = _answer_in(transcript)
+        if (answer is not None and final) or attempt == ANSWER_TRIES - 1:
+            break
         time.sleep(ANSWER_WAIT_S)
-    return None
+    return answer
 
 
 def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event | None:

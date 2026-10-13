@@ -240,6 +240,34 @@ def test_copilot_stop_takes_the_answer_from_the_transcript(tmp_path):
     assert normalize("copilot", payload, "agentStop").answer is None
 
 
+def test_copilot_stop_waits_for_the_final_answer_after_a_commentary(tmp_path, monkeypatch):
+    """A real Copilot turn wrote "Ich prüfe jetzt die Dateien …" next to its tool calls; agentStop read the transcript
+    before the final answer was written and stored that commentary as the turn's answer (sandbox session, CLI 1.0.96)."""
+    from agent_mem.hooks.normalize import copilot
+
+    transcript = tmp_path / "events.jsonl"
+    commentary = {"content": "Ich prüfe jetzt die Dateien.", "phase": "commentary", "toolRequests": [{"name": "bash"}]}
+    lines = [
+        {"type": "user.message", "data": {"content": "Füge teile(a, b) hinzu."}},
+        {"type": "assistant.message", "data": commentary},
+        {"type": "assistant.message", "data": {"content": "", "toolRequests": [{"name": "bash"}]}},
+    ]
+    transcript.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    final = {"type": "assistant.message", "data": {"content": "teile ist fertig, 6 Tests grün.", "toolRequests": []}}
+
+    def final_arrives(_seconds):
+        with transcript.open("a") as fh:
+            fh.write(json.dumps(final) + "\n")
+
+    monkeypatch.setattr(copilot.time, "sleep", final_arrives)
+    payload = {"sessionId": "p", "transcriptPath": str(transcript)}
+    assert normalize("copilot", payload, "agentStop").answer == "teile ist fertig, 6 Tests grün."
+    # Never written: the commentary is better than no answer.
+    transcript.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    monkeypatch.setattr(copilot.time, "sleep", lambda _seconds: None)
+    assert normalize("copilot", payload, "agentStop").answer == "Ich prüfe jetzt die Dateien."
+
+
 def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
     """Codex 0.162 sends a shell call's output without its exit code: of 288 live Codex shell calls 2 counted as
     failed, a Traceback and a failed uv run among the rest. Clear signs mark a failure; ordinary output does not."""
