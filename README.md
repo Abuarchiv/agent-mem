@@ -48,7 +48,7 @@ All agents write into the same memory. What Claude Code learned is available to 
 
 ### Facts, without an API key
 
-After each request the Stop hook starts `agent-mem observe` in the background. It takes up to five requests of a session at a time, runs mem0's extraction with a prompt tuned for coding work (conventions, decisions, failed attempts, preferences; no generic knowledge, no secrets, in your language), and stores the facts in SQLite with a mirror in a local Qdrant index. Each fact is tagged as decision, rule, failed attempt or fact; a rule written as "Use pnpm instead of npm" becomes the same rule as a typed correction. Final answers of subagents are part of the bundle. For every new fact it checks similar old facts once per bundle and asks the model: KEEP, SUPERSEDE or DUPLICATE. A correction such as "we switched from pytest to nox" invalidates the old fact and removes it from the index.
+After each request the Stop hook starts `agent-mem observe` in the background. It takes up to five requests of a session at a time, runs mem0's extraction with a prompt tuned for coding work (conventions, decisions, failed attempts, preferences; no generic knowledge, no secrets, in your language), and stores the facts in SQLite with a mirror in a local Qdrant index. Each fact is tagged as decision, rule, failed attempt or fact; a rule written as "Use pnpm instead of npm" becomes the same rule as a typed correction. Final answers of subagents are part of the bundle. A correction such as "we switched from pytest to nox" is stored next to the old fact; the daily review retires the old one.
 
 The model is the CLI you already pay for, started under your login with no tools, no MCP servers and no settings:
 
@@ -59,7 +59,7 @@ The model is the CLI you already pay for, started under your login with no tools
 | Copilot CLI | Auto, efficiency tier (resolves to GPT-6-Luna) | `copilot -s --model auto --auto-tier efficiency` |
 | OpenCode, or no CLI found | none | the request is saved word for word |
 
-A request never leaves its vendor (a Claude request is not sent to OpenAI). Each uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, it tries once more with the CLI's own default. With only one CLI installed, its requests get facts and the others are saved word for word; with all three, each request goes to the CLI it came from. A usage limit or a missing login pauses facts for an hour; the request waits. Ollama can be added as a local fallback (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95.
+A request never leaves its vendor (a Claude request is not sent to OpenAI). Each uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, it tries once more with the CLI's own default. With only one CLI installed, its requests get facts and the others are saved word for word; with all three, each request goes to the CLI it came from. A usage limit or a missing login pauses facts for an hour; the request waits. Ollama can be added as a local fallback (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine.
 
 ### How ranking learns (no model needed)
 
@@ -75,7 +75,7 @@ Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusi
 
 ### Tokens: what reading costs against what finding out took
 
-Like claude-mem, Agent Mem compares what a memory costs the agent to read with the work it took to find it out. The work is measured, not estimated: after a request ends, the indexer reads the agent's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that request: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its request's share (the request's work divided by the memories it produced), so several memories of one request count that request once. Copilot requests are measured from `~/.copilot/session-state/<id>/events.jsonl`; OpenCode requests stay unmeasured.
+Agent Mem compares what a memory costs the agent to read with the work it took to find it out. The work is measured, not estimated: after a request ends, the indexer reads the agent's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that request: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its request's share (the request's work divided by the memories it produced), so several memories of one request count that request once. Copilot requests are measured from `~/.copilot/session-state/<id>/events.jsonl`; OpenCode requests stay unmeasured.
 
 - Terminal (session start): `Your savings: ~84,760 tokens (98% reduction from reuse)`, shown only when measured work stands behind it.
 - `agent-mem status`: the same for the last 7 days.

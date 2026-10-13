@@ -108,4 +108,4 @@ Automatic injection (prompt hook) is lexical and also requires a minimum score a
 
 ## Why mem0 search is not the retrieval path
 
-Measured: mem0's hybrid search always returns results and scores unrelated hits above true ones, so it cannot abstain (fixture abstention 0.0 against 0.6 for the SQLite path at equal hit@1). Qdrant therefore serves deduplication and contradiction candidates; the hook and the MCP server search SQLite.
+mem0's hybrid search always returns results and scores unrelated hits above true ones, so it cannot abstain. Qdrant therefore only serves mem0's deduplication during extraction; the hook and the MCP server search SQLite.

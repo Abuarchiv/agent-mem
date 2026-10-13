@@ -253,8 +253,6 @@ class FakeLLM(LLMBase):
             FakeLLM.calls[path] = index + 1
             answer = answers[index]
             return answer if isinstance(answer, str) else json.dumps(answer)
-        if '"verdicts"' in prompt or "SUPERSEDE" in prompt:
-            return json.dumps({"verdicts": []})
         facts = re.findall(r"^\s*user:\s*(.+)$", prompt, re.M | re.I) or re.findall(r"^\[user\]\n(.+)$", prompt, re.M)
         return json.dumps({"memory": [{"text": f.strip()} for f in facts[-3:]]})
 

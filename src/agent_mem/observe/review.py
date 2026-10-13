@@ -1,7 +1,7 @@
 """Daily review of a project's facts: duplicates and outdated facts across the whole memory.
 
-The per-bundle contradiction check only compares a new fact with its three nearest neighbours, so a fact that a
-later decision made wrong ("no server") survives when the new fact is worded differently ("viewer on localhost").
+Extraction stores a new fact next to the older ones it contradicts, so a fact that a later decision made wrong
+("no server") stays until a review sees the new one ("viewer on localhost").
 Once a day, or after ``NEW_FACTS`` new facts, the model reads a project's active facts and names duplicates, facts
 replaced by a newer one, and plain facts that only record an event or a status snapshot ("pushed", "135 tests").
 A fact is only retired with evidence: a duplicate needs a kept twin, an outdated fact a newer fact that replaces it,

@@ -204,9 +204,9 @@ class Mem0Adapter:
         result: Any = self.memory.add(messages, user_id=namespace, metadata=metadata or {}, infer=False)
         return [Fact(id=str(r["id"]), text=str(r["memory"])) for r in result.get("results", [])]
 
-    def search(self, query: str, namespace: str, k: int = 5, exclude: frozenset[str] = frozenset()) -> list[Fact]:
-        result: Any = self.memory.search(query, filters={"user_id": namespace}, limit=k + len(exclude))
-        facts = [
+    def search(self, query: str, namespace: str, k: int = 5) -> list[Fact]:
+        result: Any = self.memory.search(query, filters={"user_id": namespace}, limit=k)
+        return [
             Fact(
                 id=str(r["id"]),
                 text=str(r["memory"]),
@@ -214,9 +214,7 @@ class Mem0Adapter:
                 metadata=dict(r.get("metadata") or {}),
             )
             for r in result.get("results", [])
-            if str(r["id"]) not in exclude
-        ]
-        return facts[:k]
+        ][:k]
 
     def forget(self, mem0_id: str) -> bool:
         """Remove a fact from Qdrant and entity links (``scrub`` clears its history). False if mem0 no longer has it."""
