@@ -17,7 +17,7 @@
 - The observer sees what the tools showed (command or file and the start of the output) and records what they revealed, with exact names. Before, the bundle held only prompts, answers and command lines, and the prompt forbade tool output, so details such as where `uv tool` keeps the install source never became facts. Bundles are larger (20,000 tokens).
 - The graph orders what text and vectors found instead of voting like a text match; an exact match no longer drops behind whatever touched a file with the word in its path last. A hit naming more of the question's words comes first.
 - A project's search includes the projects around it (not the home folder): what a session in `~/Lernen` learned about `~/Lernen/agent-mem` was invisible from there.
-- On 32 real questions answered from the same two days: automatic context 24/32 against claude-mem's 3/32 (8/32 with its prompt injection on), search 23/32 against 6/32, silent on 8 of 8 unrelated questions against 0 of 8 (docs/PLAN.md B.33).
+- On 32 real questions answered from the same two days, measured on the live database: automatic context 20/32 against claude-mem's 3/32 (8/32 with its prompt injection on), search 19/32 against 7/32, silent on 8 of 8 unrelated questions against 0 of 8 (docs/PLAN.md B.33; 24/32 and 23/32 on a copy with an earlier extraction run).
 
 ### More context
 
