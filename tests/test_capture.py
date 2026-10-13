@@ -255,3 +255,15 @@ def test_only_a_failing_project_command_makes_a_turn_an_error(driver: Driver, co
     driver.bash("s1", "pytest -q", "FAILED tests/test_parse.py::test_empty - IndexError", failed=True)
     driver.stop("s1", "I could not fix it yet.")
     assert [r[0] for r in conn.execute("SELECT outcome FROM turns ORDER BY id")] == ["ok", "error"]
+
+
+def test_a_failure_is_fixed_by_the_same_tool_started_another_way(driver: Driver, conn):
+    """Real Copilot session: `python3 -m pytest` failed (no pytest), `uv run --with pytest python3 -m pytest` passed
+    after the fix; the turn still ended `error` and nothing was learned."""
+    driver.prompt("s1", "Run the tests and fix calc.py")
+    driver.bash("s1", "python3 -m pytest -q", "/usr/bin/python3: No module named pytest", failed=True)
+    driver.edit("s1", "calc.py")
+    driver.bash("s1", "uv run --with pytest python3 -m pytest -q", "1 passed")
+    driver.stop("s1", "Fixed calc.add; the tests pass.")
+    assert conn.execute("SELECT outcome FROM turns").fetchone()[0] == "ok"
+    assert conn.execute("SELECT COUNT(*) FROM events WHERE error_sig IS NOT NULL AND resolved = 0").fetchone()[0] == 0

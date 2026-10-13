@@ -665,11 +665,16 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
 def _resolve_failures(
     conn: sqlite3.Connection, project_id: str | None, session_id: str, turn_id: int, command_key: str, ts: str
 ) -> None:
-    failures = conn.execute(
-        "SELECT id, ts, error_sig, payload FROM events WHERE session_id = ? AND command_key = ? "
-        "AND error_sig IS NOT NULL AND resolved = 0 ORDER BY ts",
-        (session_id, command_key),
-    ).fetchall()
+    # The same tool counts however it was started: `python3 -m pytest` failing, `uv run --with pytest …` passing.
+    failures = [
+        row
+        for row in conn.execute(
+            "SELECT id, ts, error_sig, payload, command_key FROM events WHERE session_id = ? "
+            "AND command_key IS NOT NULL AND error_sig IS NOT NULL AND resolved = 0 ORDER BY ts",
+            (session_id,),
+        )
+        if signals.same_tool(row["command_key"], command_key)
+    ]
     if not failures:
         return
     first_ts = failures[0]["ts"]

@@ -126,3 +126,14 @@ def test_task_notification_reads_as_its_summary():
     assert signals.request_text(notice) == 'Background command "Run eval" failed with exit code 144'
     assert signals.request_text("fix the parser") == "fix the parser"
     assert signals.request_text(None) == ""
+
+
+def test_a_runner_and_its_options_do_not_hide_the_command():
+    """Copilot ran `uv run --with pytest python3 -m pytest -q`: the value of --with was taken for the command."""
+    assert signals.command_key("uv run --with pytest python3 -m pytest -q") == "uv run pytest"
+    assert signals.command_key("uv run --with requests python app.py") == "uv run python"
+    assert signals.command_key("uv run -m pytest -x") == "uv run pytest"
+    assert signals.command_key("poetry run --directory api pytest") == "poetry run pytest"
+    # the same tool, however it is started: a failure of one is fixed by a pass of the other
+    assert signals.same_tool("python -m pytest", "uv run pytest") and signals.same_tool("pytest", "uv run pytest")
+    assert not signals.same_tool("uv run ruff", "uv run pytest") and not signals.same_tool("npm test", "pytest")

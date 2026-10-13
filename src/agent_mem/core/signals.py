@@ -280,11 +280,67 @@ def _segment_key(segment: str) -> str | None:
             return f"python -m {tokens[index + 1]}"
     if program in {"npm", "pnpm", "yarn", "bun"} and rest[:1] == ["run"] and len(rest) > 1:
         return f"{program} run {rest[1]}"
-    if program in {"uv", "poetry", "pdm", "hatch"} and rest[:1] == ["run"] and len(rest) > 1:
-        return f"{program} run {PurePosixPath(rest[1]).name}"
+    if program in {"uv", "poetry", "pdm", "hatch"} and "run" in tokens[1:2]:
+        inner = _runner_command(tokens[2:])
+        if inner:
+            return f"{program} run {inner}"
     if program in _MULTI and rest:
         return f"{program} {rest[0]}"
     return program
+
+
+# Options of `uv run`, `poetry run`, `pdm run` and `hatch run` that take a value: `--with pytest` names no command.
+_RUNNER_VALUE_OPTIONS = frozenset(
+    {
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "--python",
+        "-p",
+        "--project",
+        "--directory",
+        "-C",
+        "--package",
+        "--extra",
+        "--group",
+        "--env-file",
+        "--index",
+        "--default-index",
+        "--index-url",
+        "-e",
+        "--env",
+    }
+)
+
+
+def _runner_command(tokens: list[str]) -> str | None:
+    """The program a runner starts: `--with pytest python3 -m pytest -q` runs pytest, `-m pytest` too."""
+    index = 0
+    while index < len(tokens) and tokens[index].startswith("-"):
+        option = tokens[index]
+        if option == "-m" and index + 1 < len(tokens):
+            return tokens[index + 1]
+        index += 2 if option in _RUNNER_VALUE_OPTIONS else 1
+    if index >= len(tokens):
+        return None
+    program = PurePosixPath(tokens[index].replace("\\", "/")).name
+    if program in {"python", "python3", "py"} and tokens[index + 1 : index + 2] == ["-m"] and len(tokens) > index + 2:
+        return tokens[index + 2]
+    return program
+
+
+def same_tool(a: str | None, b: str | None) -> bool:
+    """Two command keys run the same tool: `python -m pytest`, `uv run pytest` and `pytest` all run pytest."""
+
+    def tool(key: str | None) -> str | None:
+        if not key:
+            return None
+        parts = key.split()
+        if parts[:1] in (["python"], ["uv"], ["poetry"], ["pdm"], ["hatch"]) and len(parts) == 3:
+            return parts[2]  # "python -m pytest", "uv run pytest"
+        return key
+
+    return tool(a) is not None and tool(a) == tool(b)
 
 
 def fixable(command_key: str | None) -> bool:
