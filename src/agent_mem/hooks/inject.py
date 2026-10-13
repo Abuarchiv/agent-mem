@@ -9,7 +9,7 @@ import contextlib
 import json
 import re
 import sqlite3
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from agent_mem.core import spool, timeutil
@@ -636,6 +636,66 @@ def session_summary(conn: sqlite3.Connection, session_id: str, color: bool = Tru
     return f"\x1b[1;36magent-mem\x1b[0m \x1b[2m{summary}\x1b[0m" if color else f"agent-mem {summary}"
 
 
+# One panel row before it is painted: id, glyph, ANSI colour, text, label.
+_Row = tuple[str, str, str, str, str]
+
+
+@dataclass
+class _Panel:
+    """The injected block, sorted into the panel's sections."""
+
+    warnings: list[str] = field(default_factory=list)
+    commands: str = ""
+    files: str = ""
+    goal: list[_Row] = field(default_factory=list)
+    last: list[_Row] = field(default_factory=list)
+    last_heading: str = "Last session"
+    errors: list[_Row] = field(default_factory=list)
+    work: list[_Row] = field(default_factory=list)
+    kinds: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    count: int = 0
+
+
+def _read_panel(context: str) -> _Panel:
+    panel = _Panel()
+    for line in context.splitlines():
+        if line.startswith("! "):
+            panel.warnings.append(line[2:])
+        elif line.startswith("- Commands that worked here: "):
+            panel.commands = line.split(": ", 1)[1]
+        elif line.startswith("- Files touched: "):
+            panel.files = line.split(": ", 1)[1]
+        elif line.startswith(("- Done: ", "- Next steps: ")):
+            label, text = line[2:].split(": ", 1)
+            glyph, code = ("✓", "32") if label == "Done" else ("→", "33")
+            panel.last.append(("", glyph, code, text, label.lower()))
+            panel.count += 1
+        elif line.startswith("- Still failing: "):
+            panel.errors.append(("", "!", "31", line[17:], ""))
+            panel.count += 1
+        elif found := _GOAL.match(line):
+            panel.goal.append((found["id"], "◎", "1", found["text"], "goal"))
+            panel.count += 1
+        elif match := _ENTRY.match(line):
+            panel.count += 1
+            _read_entry(panel, match["kind"], match["text"], match["id"] or "")
+    return panel
+
+
+def _read_entry(panel: _Panel, kind: str, text: str, ident: str) -> None:
+    if kind.startswith("work, "):
+        glyph, code = _WORK.get(kind[6:], ("›", "2"))
+        panel.work.append((ident, glyph, code, text, ""))
+    elif kind == "unresolved":
+        panel.errors.append((ident, "!", "31", text, ""))
+    elif kind.startswith("last session"):
+        if ", " in kind:
+            panel.last_heading = f"Last session · {kind.split(', ', 1)[1]}"
+        panel.last.insert(0, (ident, "›", "1", text, ""))
+    else:
+        panel.kinds.setdefault(kind, []).append((ident, text))
+
+
 def terminal(
     context: str,
     heading: str,
@@ -658,70 +718,30 @@ def terminal(
     def paint(code: str, text: str) -> str:
         return f"\x1b[{code}m{text}\x1b[0m" if color else text
 
-    def row(ident: str, glyph: str, code: str, text: str, label: str = "") -> str:
+    def row(item: _Row) -> str:
+        ident, glyph, code, text, label = item
         kind = f"{label:<11}" if label else ""
         return f"  {paint('2', ident.ljust(5))} {paint(code, glyph)} {paint(code, kind)}{_clip(text, 92)}"
 
     def more(hidden: int) -> list[str]:
         return [paint("2", f"        … {hidden} more")] if hidden > 0 else []
 
-    warnings: list[str] = []
-    commands = files = ""
-    goal: list[str] = []
-    last: list[str] = []
-    last_heading = "Last session"
-    errors: list[str] = []
-    work: list[str] = []
-    kinds: dict[str, list[tuple[str, str]]] = {}
-    count = 0
-    for line in context.splitlines():
-        if line.startswith("! "):
-            warnings.append(paint("31", line[2:]))
-        elif line.startswith("- Commands that worked here: "):
-            commands = line.split(": ", 1)[1]
-        elif line.startswith("- Files touched: "):
-            files = line.split(": ", 1)[1]
-        elif line.startswith(("- Done: ", "- Next steps: ")):
-            label, text = line[2:].split(": ", 1)
-            glyph, code = ("✓", "32") if label == "Done" else ("→", "33")
-            last.append(row("", glyph, code, text, label.lower()))
-            count += 1
-        elif line.startswith("- Still failing: "):
-            errors.append(row("", "!", "31", line[17:]))
-            count += 1
-        elif found := _GOAL.match(line):
-            goal.append(row(found["id"], "◎", "1", found["text"], "goal"))
-            count += 1
-        elif match := _ENTRY.match(line):
-            kind, text, ident = match["kind"], match["text"], match["id"] or ""
-            count += 1
-            if kind.startswith("work, "):
-                glyph, code = _WORK.get(kind[6:], ("›", "2"))
-                work.append(row(ident, glyph, code, text))
-            elif kind == "unresolved":
-                errors.append(row(ident, "!", "31", text))
-            elif kind.startswith("last session"):
-                if ", " in kind:
-                    last_heading = f"Last session · {kind.split(', ', 1)[1]}"
-                last.insert(0, row(ident, "›", "1", text))
-            else:
-                kinds.setdefault(kind, []).append((ident, text))
-
+    panel = _read_panel(context)
     out = [
-        f"{paint('1;36', 'agent-mem')} {paint('2', f'· {heading} · {count} item{chr(115) * (count != 1)} · ~{tokens(context)} tokens')}",
+        f"{paint('1;36', 'agent-mem')} {paint('2', f'· {heading} · {panel.count} item{chr(115) * (panel.count != 1)} · ~{tokens(context)} tokens')}",
         *(paint("2", f"  {line}") for line in facts or []),
         paint("2", _RULE),
-        *warnings,
+        *(paint("31", line) for line in panel.warnings),
         *(paint("31", f"! {line}") for line in notices or []),
     ]
-    if goal:
-        out += [paint("1", "This session"), *goal]
-    if last:
-        out += [paint("1", last_heading), *last]
-    if errors:
-        out += [paint("1;31", "Open errors"), *errors[:3], *more(len(errors) - 3)]
-    if work:  # from the context, newest first
-        out += [paint("1", "Recent work"), *work[:WORK_ROWS], *more(len(work) - WORK_ROWS)]
+    if panel.goal:
+        out += [paint("1", "This session"), *map(row, panel.goal)]
+    if panel.last:
+        out += [paint("1", panel.last_heading), *map(row, panel.last)]
+    if panel.errors:
+        out += [paint("1;31", "Open errors"), *map(row, panel.errors[:3]), *more(len(panel.errors) - 3)]
+    if panel.work:  # from the context, newest first
+        out += [paint("1", "Recent work"), *map(row, panel.work[:WORK_ROWS]), *more(len(panel.work) - WORK_ROWS)]
     elif recent:  # after compaction the block has no work log; the hook passes it for the terminal only
         out.append(paint("1", "Recent work"))
         for ident, started, kind, title in recent[:WORK_ROWS]:
@@ -732,19 +752,21 @@ def terminal(
                 f"  {paint('2', ident.ljust(5))} {paint('2', when.ljust(11))} {paint(code, glyph)} {_clip(title, 80)}"
             )
     # Memories by kind in the order an agent acts on them; inside a kind the context lists oldest first.
-    for kind in sorted(kinds, key=lambda name: _KIND_ORDER.index(name) if name in _KIND_ORDER else len(_KIND_ORDER)):
-        items = kinds[kind][::-1]
+    for kind in sorted(
+        panel.kinds, key=lambda name: _KIND_ORDER.index(name) if name in _KIND_ORDER else len(_KIND_ORDER)
+    ):
+        items = panel.kinds[kind][::-1]
         glyph, code = _STYLE.get(kind, ("›", "2"))
         name = _KIND_NAME.get(kind, kind.replace("_", " ").capitalize())
         out.append(f"{paint(code, glyph)} {paint('1', name)} {paint('2', str(len(items)))}")
-        out += [row(ident, " ", "2", text) for ident, text in items[:KIND_ROWS]]
+        out += [row((ident, " ", "2", text, "")) for ident, text in items[:KIND_ROWS]]
         out += more(len(items) - KIND_ROWS)
-    if not (goal or last or errors or work or recent or kinds):
+    if not (panel.goal or panel.last or panel.errors or panel.work or recent or panel.kinds):
         out.append(paint("2", "Nothing to recall here yet; this session is being recorded."))
-    if commands:
-        out.append(f"{paint('1', 'Commands')}  {_clip(commands, 100)}")
-    if files:
-        out.append(f"{paint('1', 'Files')}  {_clip(files, 100)}")
+    if panel.commands:
+        out.append(f"{paint('1', 'Commands')}  {_clip(panel.commands, 100)}")
+    if panel.files:
+        out.append(f"{paint('1', 'Files')}  {_clip(panel.files, 100)}")
     shown = re.findall(r"\b[MT]\d+\b", re.sub(r"\x1b\[[\d;]*m", " ", "\n".join(out[3:])))
     hint = f"agent-mem show {shown[0]}" if shown else "agent-mem search <words>"
     browse = f"everything: {viewer}" if viewer else "everything: agent-mem view"

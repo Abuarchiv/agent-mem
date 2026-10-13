@@ -194,6 +194,45 @@ def _injected(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
 
 
 def doctor(config: Config, *, fix: bool = False) -> list[Check]:
+    checks = _install_checks(config, fix)
+    try:
+        conn = db.connect(config)
+    except db.SchemaTooNewError as error:
+        checks.append(Check("database", False, str(error), "Run `agent-mem upgrade`."))
+        return checks
+    except db.MigrationInProgressError as error:
+        checks.append(Check("database", False, f"migration in progress: {error}", "Run `agent-mem doctor` again."))
+        return checks
+    except sqlite3.Error as error:
+        checks.append(
+            Check(
+                "database",
+                False,
+                str(error),
+                "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
+            )
+        )
+        return checks
+    try:
+        checks += _database_checks(conn, config)
+        checks += _capture_checks(conn)
+        checks += _housekeeping_checks(conn, config, fix)
+        checks += _observer_checks(conn, config)
+    finally:
+        conn.close()
+    checks.extend(_hook_checks(fix))
+    record_setup_health(config)
+    checks.extend(_viewer_checks(config, fix))
+    if fix:
+        from agent_mem.memory import indexer
+
+        with contextlib.suppress(Exception):
+            indexer.run(config, allow_download=False)
+    return checks
+
+
+def _install_checks(config: Config, fix: bool) -> list[Check]:
+    """Python, the binary on PATH, a private data directory, disk space and the config file."""
     checks: list[Check] = []
     checks.append(
         Check(
@@ -232,122 +271,108 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     checks.append(Check("disk space", free_mb > 200, f"{free_mb:.0f} MB free", "Free disk space."))
     for warning in config.warnings:
         checks.append(Check("config", False, warning, f"Edit {config.config_path}.", warn_only=True))
+    return checks
+
+
+def _database_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
+    """Integrity, full-text search and the embedding model."""
+    checks: list[Check] = []
+    ok = db.quick_check(conn)
+    checks.append(
+        Check(
+            "database integrity",
+            ok,
+            f"schema v{db.user_version(conn)}, sqlite {sqlite3.sqlite_version}",
+            "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
+        )
+    )
     try:
-        conn = db.connect(config)
-    except db.SchemaTooNewError as error:
-        checks.append(Check("database", False, str(error), "Run `agent-mem upgrade`."))
-        return checks
-    except db.MigrationInProgressError as error:
-        checks.append(Check("database", False, f"migration in progress: {error}", "Run `agent-mem doctor` again."))
-        return checks
+        conn.execute("SELECT count(*) FROM search_fts").fetchone()
+        checks.append(Check("full-text search (FTS5 trigram)", True, "available"))
     except sqlite3.Error as error:
-        checks.append(
-            Check(
-                "database",
-                False,
-                str(error),
-                "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
-            )
-        )
-        return checks
-    try:
-        ok = db.quick_check(conn)
-        checks.append(
-            Check(
-                "database integrity",
-                ok,
-                f"schema v{db.user_version(conn)}, sqlite {sqlite3.sqlite_version}",
-                "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
-            )
-        )
-        try:
-            conn.execute("SELECT count(*) FROM search_fts").fetchone()
-            checks.append(Check("full-text search (FTS5 trigram)", True, "available"))
-        except sqlite3.Error as error:
-            checks.append(
-                Check("full-text search (FTS5 trigram)", False, str(error), "Use a Python with SQLite ≥ 3.34.")
-            )
-        from agent_mem.memory import semantic
+        checks.append(Check("full-text search (FTS5 trigram)", False, str(error), "Use a Python with SQLite ≥ 3.34."))
+    from agent_mem.memory import semantic
 
-        embedder, reason = semantic.load_embedder_verbose(config)
+    embedder, reason = semantic.load_embedder_verbose(config)
+    checks.append(
+        Check(
+            "semantic search",
+            embedder is not None,
+            f"model {embedder.model} ready" if embedder else str(reason),
+            "Run `agent-mem models install`. Lexical search works without it.",
+            warn_only=True,
+        )
+    )
+    return checks
+
+
+def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
+    """Whether each harness that is installed here has delivered events, and its last error."""
+    checks: list[Check] = []
+    for harness in ("claude", "codex", "copilot", "opencode"):
+        installed_here = harness_installed(harness)
+        row = conn.execute("SELECT * FROM health WHERE component = ?", (f"hook:{harness}",)).fetchone()
+        if not installed_here and row is None:
+            continue
+        if row is None:
+            hint = (
+                "Start a session. For Codex, trust the hooks with /hooks."
+                if harness == "codex"
+                else "Start a session in this harness."
+            )
+            checks.append(
+                Check(f"{harness} capture", False, "plugin found, nothing captured yet", hint, warn_only=True)
+            )
+            continue
+        failing = row["last_error_at"] and (not row["last_ok_at"] or row["last_error_at"] > row["last_ok_at"])
         checks.append(
             Check(
-                "semantic search",
-                embedder is not None,
-                f"model {embedder.model} ready" if embedder else str(reason),
-                "Run `agent-mem models install`. Lexical search works without it.",
+                f"{harness} capture",
+                not failing,
+                f"last ok {row['last_ok_at'] or 'never'}; errors {row['error_count']}"
+                + (f" (last: {row['last_error']})" if failing else ""),
+                "See logs in the data dir (logs/hook.log).",
+            )
+        )
+    return checks
+
+
+def _housekeeping_checks(conn: sqlite3.Connection, config: Config, fix: bool) -> list[Check]:
+    """Spool backlog, backups left by older releases (deleted with ``fix``) and the indexer's last run."""
+    checks: list[Check] = []
+    backlog = spool.count(config.spool_dir)
+    checks.append(
+        Check(
+            "spool",
+            backlog == 0,
+            f"{backlog} pending",
+            "Run `agent-mem index` (or doctor --fix).",
+            warn_only=backlog < 1000,
+        )
+    )
+    if config.backup_dir.exists():
+        if fix:
+            shutil.rmtree(config.backup_dir, ignore_errors=True)
+        gone = not config.backup_dir.exists()
+        checks.append(
+            Check(
+                "old backups",
+                gone,
+                "deleted" if gone else f"{config.backup_dir} left by an older release",
+                "Run `agent-mem doctor --fix` to delete it.",
                 warn_only=True,
             )
         )
-        for harness in ("claude", "codex", "copilot", "opencode"):
-            installed_here = harness_installed(harness)
-            row = conn.execute("SELECT * FROM health WHERE component = ?", (f"hook:{harness}",)).fetchone()
-            if not installed_here and row is None:
-                continue
-            if row is None:
-                hint = (
-                    "Start a session. For Codex, trust the hooks with /hooks."
-                    if harness == "codex"
-                    else "Start a session in this harness."
-                )
-                checks.append(
-                    Check(f"{harness} capture", False, "plugin found, nothing captured yet", hint, warn_only=True)
-                )
-                continue
-            failing = row["last_error_at"] and (not row["last_ok_at"] or row["last_error_at"] > row["last_ok_at"])
-            checks.append(
-                Check(
-                    f"{harness} capture",
-                    not failing,
-                    f"last ok {row['last_ok_at'] or 'never'}; errors {row['error_count']}"
-                    + (f" (last: {row['last_error']})" if failing else ""),
-                    "See logs in the data dir (logs/hook.log).",
-                )
-            )
-        backlog = spool.count(config.spool_dir)
-        checks.append(
-            Check(
-                "spool",
-                backlog == 0,
-                f"{backlog} pending",
-                "Run `agent-mem index` (or doctor --fix).",
-                warn_only=backlog < 1000,
-            )
+    indexer = conn.execute("SELECT last_ok_at, last_error FROM health WHERE component = 'indexer'").fetchone()
+    checks.append(
+        Check(
+            "indexer",
+            indexer is not None and indexer["last_ok_at"] is not None,
+            f"last run {indexer['last_ok_at'] if indexer else 'never'}",
+            "Run `agent-mem index`.",
+            warn_only=True,
         )
-        if config.backup_dir.exists():
-            if fix:
-                shutil.rmtree(config.backup_dir, ignore_errors=True)
-            gone = not config.backup_dir.exists()
-            checks.append(
-                Check(
-                    "old backups",
-                    gone,
-                    "deleted" if gone else f"{config.backup_dir} left by an older release",
-                    "Run `agent-mem doctor --fix` to delete it.",
-                    warn_only=True,
-                )
-            )
-        indexer = conn.execute("SELECT last_ok_at, last_error FROM health WHERE component = 'indexer'").fetchone()
-        checks.append(
-            Check(
-                "indexer",
-                indexer is not None and indexer["last_ok_at"] is not None,
-                f"last run {indexer['last_ok_at'] if indexer else 'never'}",
-                "Run `agent-mem index`.",
-                warn_only=True,
-            )
-        )
-        checks.extend(_observer_checks(conn, config))
-    finally:
-        conn.close()
-    checks.extend(_hook_checks(fix))
-    record_setup_health(config)
-    checks.extend(_viewer_checks(config, fix))
-    if fix:
-        from agent_mem.memory import indexer
-
-        with contextlib.suppress(Exception):
-            indexer.run(config, allow_download=False)
+    )
     return checks
 
 
