@@ -394,7 +394,7 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
         try:
             path = concepts.download_model(config)
         except (OSError, ValueError) as error:
-            print(f"Concept model {name} not downloaded: {error}. Facts work; the graph of concepts stays empty.")
+            print(f"Concept model {name} not downloaded: {error}. Facts work without mem0's entity linking.")
             return 1
     print(
         f"Concept model {'ready: ' + name + f' ({path})' if path else name + ' missing: run `agent-mem models install`'}."

@@ -445,9 +445,9 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
         Check(
             "entity linking",
             present,
-            f"spaCy model {model} present; concepts feed the viewer's graph"
+            f"spaCy model {model} present; mem0 links facts to the concepts they name"
             if present
-            else f"spaCy model {model} missing; facts and search work, the graph of concepts stays empty",
+            else f"spaCy model {model} missing; facts and search work without mem0's entity linking",
             "Run `agent-mem models install`. Set `observe.entity_model` to the language of your facts "
             "(de_core_news_sm, en_core_web_sm, ...).",
             warn_only=True,
