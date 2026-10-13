@@ -1,4 +1,4 @@
-"""Notes the harnesses keep themselves, stored as memories without a model call (claude-mem `memory ingest`).
+"""Notes the harnesses keep themselves, stored as memories without a model call.
 
 Claude Code writes one Markdown file per fact under ``~/.claude/projects/<folder>/memory/``; Codex writes one
 summary per session under ``~/.codex/memories/rollout_summaries/``. Both are already distilled, so they are

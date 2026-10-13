@@ -1,4 +1,4 @@
-"""The graph: what memories are about and how those things relate, as agentmemory's graph extraction reads it.
+"""The graph: what memories are about and how those things relate.
 
 The observer gets a batch of a project's memories and names the concrete things in them (files, functions, tools,
 errors, settings ...) and typed relations between them ("search.py uses FTS5", "the retry fixes the lock error").

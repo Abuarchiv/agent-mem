@@ -133,7 +133,7 @@ def test_eval_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_eval_runner_coding_life_and_injection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """agentmemory's coding corpus runs as is; the fixture reports what the prompt hook would inject."""
+    """The coding corpus runs as is; the fixture reports what the prompt hook would inject."""
     from agent_mem.bench import evaluate
 
     monkeypatch.setenv("AGENT_MEM_DATA_DIR", str(tmp_path / "evaldata"))

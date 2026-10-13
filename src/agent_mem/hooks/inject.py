@@ -275,7 +275,7 @@ def _memory_lines(
 
 
 def _more(body: str | None, shown: str) -> str:
-    """What opening the entry costs, when it holds clearly more than its line (claude-mem shows ~tokens per entry)."""
+    """What opening the entry costs, when it holds clearly more than its line."""
     extra = tokens(body or "") - tokens(shown)
     return f" (+{extra} tok)" if extra > 30 else ""
 
@@ -327,7 +327,7 @@ def _briefing_lines(
     lines.extend(_open_errors(conn, project_id, session_id))
     last = _last_session_lines(conn, project_id, session_id)
     lines.extend(last)
-    # The work log as an index, like claude-mem's: titles with ids the agent can open (mem_get). Last, so the budget
+    # The work log as an index: titles with ids the agent can open (mem_get). Last, so the budget
     # drops it before facts and lessons; the agent sees what happened lately and can tell a newer decision itself.
     lines.extend(_work_lines(conn, project_id, session_id, {owner for _, owner in last if owner}, round(10 * scale)))
     return lines
@@ -799,7 +799,7 @@ def terminal(
     browse = f"everything in the browser: {viewer}" if viewer else "everything in the browser: agent-mem view"
     out.append(paint("2", _RULE))
     read = tokens(context)
-    if spent > read:  # claude-mem's footer: what loading costs against what finding it out took
+    if spent > read:  # footer: what loading costs against what finding it out took
         out.append(
             paint(
                 "32", f"Your savings: ~{spent - read:,} tokens ({(spent - read) * 100 // spent}% reduction from reuse)"

@@ -1,6 +1,6 @@
 -- Agent Mem database schema, version 7: the graph. The observer reads memories and names the things they are about
 -- (files, functions, tools, errors, ...) and how they relate ("search.py uses fts5", "the patch fixes the lock
--- error"), as agentmemory's graph extraction does. Things reuse the concepts table; spaCy's concepts from version 5
+-- error"). Things reuse the concepts table; spaCy's concepts from version 5
 -- named plain words and are cleared. Each relation keeps the memory it was read from, so forgetting the memory
 -- removes it. The call log learns the purpose 'graph'.
 

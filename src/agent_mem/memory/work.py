@@ -1,4 +1,4 @@
-"""The tokens the agent spent on each turn, read from the harness's own transcript (claude-mem calls this "work").
+"""The tokens the agent spent on each turn, read from the harness's own transcript.
 
 Claude Code writes every assistant message with its ``usage``; Codex writes a ``token_count`` event per model call,
 Copilot CLI a ``session.usage_record``.
@@ -7,8 +7,7 @@ subagents included. Cache reads stay out: every step re-reads the whole context,
 30-step turn look like millions of tokens. The indexer measures closed turns, never the hook path.
 
 A memory's share is its turn's work divided by the memories that turn produced, so a block that names several
-memories of one turn counts that turn once. claude-mem's number is the tokens its own observer read; this one is
-what the agent itself spent, so "read 400 tokens built from 30,000" compares what an injection costs with what
+memories of one turn counts that turn once. The number is what the agent itself spent, so "read 400 tokens built from 30,000" compares what an injection costs with what
 finding it out again took. It is not a measured saving: nobody knows what the agent would have redone.
 """
 

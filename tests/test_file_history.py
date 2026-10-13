@@ -1,5 +1,5 @@
-"""Earlier memories about a file when an agent reads or edits it, in every harness (claude-mem File Read Gate,
-without the gate: claude-mem's own measurement showed blocking reads costs more on mid-size files)."""
+"""Earlier memories about a file when an agent reads or edits it, in every harness. The history is shown
+as extra information and never blocks the read."""
 
 from __future__ import annotations
 

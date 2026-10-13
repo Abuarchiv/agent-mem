@@ -506,7 +506,7 @@ def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id,
 
 # Kind, label and weight in the file history: what went wrong before matters most when touching a file.
 _HISTORY = {"dead_end": ("Caution", 3), "decision": ("Decision", 2), "lesson": ("Lesson", 2), "fact": ("Note", 1)}
-# Below this size reading the file costs about what its history would (claude-mem File Read Gate, measured).
+# Below this size reading the file costs about what its history would.
 HISTORY_MIN_BYTES = 1_500
 
 
