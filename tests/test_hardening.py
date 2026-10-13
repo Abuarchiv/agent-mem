@@ -273,7 +273,7 @@ def test_odd_ids_and_durations_are_rejected(config: Config, capsys):
     assert store.parse_owner("T²") is None
     assert store.parse_owner("M99999999999999999999") is None
     assert store.parse_owner("t12") == ("t", 12)
-    assert cli.main([*base, "show", "T²"]) == 0
+    assert cli.main([*base, "show", "T²"]) == 1
     assert cli.main([*base, "purge", "--id", "M99999999999999999999", "--yes"]) == 2
     with pytest.raises(SystemExit):
         cli.main([*base, "rules", "enable", "99999999999999999999"])
