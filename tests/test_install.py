@@ -325,3 +325,14 @@ def test_a_binary_path_with_a_space_is_quoted_and_read_back(homes: Path) -> None
         assert ran.stdout.startswith(f"ran hook {harness}")
     powershell = json.loads((homes / ".copilot" / "hooks" / "agent-mem.json").read_text())["hooks"]["agentStop"]
     assert powershell[0]["powershell"] == f"& '{exe}' hook copilot agentStop"
+
+
+def test_uninstall_leaves_no_copy_of_agent_mems_own_copilot_hooks(homes: Path) -> None:
+    """A second `setup --write` keeps the previous hooks file as `agent-mem.json.agent-mem-backup`; uninstall left it
+    behind in ~/.copilot/hooks. The user's own files keep their backups."""
+    install.write("copilot", PLUGINS, EXE)
+    install.write("copilot", PLUGINS, EXE)
+    hooks = homes / ".copilot" / "hooks"
+    assert (hooks / "agent-mem.json.agent-mem-backup").exists()
+    install.remove("copilot")
+    assert list(hooks.iterdir()) == []

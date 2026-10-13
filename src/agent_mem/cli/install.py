@@ -230,6 +230,8 @@ def remove(harness: str) -> list[Path]:
         if hooks.exists():
             hooks.unlink()
             touched.append(hooks)
+        # The file is agent-mem's own; a second `setup --write` kept the old one next to it.
+        hooks.with_name(hooks.name + ".agent-mem-backup").unlink(missing_ok=True)
         mcp = copilot_home() / "mcp-config.json"
         data = _load_for_update(mcp)
         if MARK in data.get("mcpServers", {}):
