@@ -395,8 +395,12 @@ def test_a_worker_killed_during_the_work_log_does_not_extract_the_bundle_again(
 
     monkeypatch.setattr(summary, "summarize", killed)
     w = worker.Worker(config, conn, adapter=Adapter())  # type: ignore[arg-type]
-    with pytest.raises(KeyboardInterrupt):
+    try:
         w.step()
+    except KeyboardInterrupt:
+        pass
+    else:  # Windows CI got here with no reason given; the queue row names it
+        pytest.fail(f"no title call: {tuple(conn.execute('SELECT state, last_error FROM observe_queue').fetchone())}")
     assert conn.execute("SELECT state FROM observe_queue").fetchone()[0] == "done"
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE dedupe_key = 'mem0:f1'").fetchone()[0] == 1
     conn.close()
