@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -301,3 +303,20 @@ def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Pa
         assert not any("setup:claude" in line for line in problems(conn))
     finally:
         conn.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the hook command through sh")
+def test_a_binary_path_with_a_space_is_quoted_and_read_back(homes: Path) -> None:
+    """Unquoted, `/Users/a b/.local/bin/agent-mem hook claude` ran `/Users/a` (exit 127) on every event."""
+    exe = homes / "my apps" / "agent-mem"
+    exe.parent.mkdir()
+    exe.write_text('#!/bin/sh\necho "ran $*"\n')
+    exe.chmod(0o755)
+    for harness in ("claude", "codex", "copilot"):
+        install.write(harness, PLUGINS, str(exe))
+        command = install.hook_commands(harness)[0]
+        assert install.hook_binary(command) == str(exe) and not install.stale(harness)
+        ran = subprocess.run(["sh", "-c", command], capture_output=True, text=True, check=True)
+        assert ran.stdout.startswith(f"ran hook {harness}")
+    powershell = json.loads((homes / ".copilot" / "hooks" / "agent-mem.json").read_text())["hooks"]["agentStop"]
+    assert powershell[0]["powershell"] == f"& '{exe}' hook copilot agentStop"

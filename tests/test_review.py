@@ -171,3 +171,26 @@ def test_a_stated_replacement_brings_the_review_forward_at_most_hourly(conn):
     conn.execute("UPDATE memories SET created_at = '2026-10-20T10:40:00.000Z' WHERE id = ?", (switch,))
     assert review.due_projects(conn, now=now) == ["p1"]
     assert review.due_projects(conn, now=timeutil.parse("2026-10-20T10:50:00.000Z")) == []  # within the hour
+
+
+def test_a_failed_review_waits_before_it_is_tried_again(conn, config, monkeypatch):
+    """A review that timed out ran again, and was paid for, on every worker run (`reviewed_at` is set before the
+    call); a usage limit there pauses the stage like in extraction."""
+    from agent_mem.observe import providers, worker
+
+    _project(conn)
+    _facts(conn, [*TEXTS[:5], "a", "b", "c"])
+    calls: list[str] = []
+
+    class Slow:
+        def generate_response(self, messages, **kwargs):
+            calls.append("review")
+            raise providers.ProviderError("claude exit 1: usage limit reached")
+
+    monkeypatch.setattr(providers, "available", lambda name: name == "claude")
+    monkeypatch.setattr(providers, "make_llm", lambda name, model=None: Slow())
+    w = worker.Worker(config, conn)
+    w.review_due()
+    w.review_due()
+    assert calls == ["review"]
+    assert providers.paused_until(conn, "claude")

@@ -521,7 +521,7 @@ def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
     works in ~/Lernen/agent-mem has its turns and facts filed under agent-mem (``capture._narrow_turn``); searching
     from ~/Lernen must find them. The other way round, what a session in ~/Lernen learned about agent-mem stays filed
     under ~/Lernen (46 memories on real data), so agent-mem looks there too. The home folder is around everything
-    and no project of its own."""
+    and no project of its own, in either direction."""
     if project_id is None:
         return [None]
     rows = conn.execute("SELECT id, root FROM projects").fetchall()
@@ -529,8 +529,9 @@ def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
     if not root:
         return [project_id]
     others = [r for r in rows if r[0] != project_id]
-    nested = [r[0] for r in others if identity.is_within(r[1], root)]
     home = os.path.expanduser("~")
+    # A session in the home folder is in no project: it does not see every project below it (~/Company too).
+    nested = [r[0] for r in others if identity.is_within(r[1], root)] if root not in {home, os.sep} else []
     around = [r[0] for r in others if r[1] not in {home, os.sep} and identity.is_within(root, r[1])]
     return [project_id, *nested, *around]
 

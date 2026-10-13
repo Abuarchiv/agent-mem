@@ -346,3 +346,14 @@ def test_a_repository_without_remote_keeps_its_memory_after_a_move(tmp_path: Pat
     empty = tmp_path / "no-commits"
     subprocess.run(["git", "init", "-q", str(empty)], check=True)
     assert identity.resolve(conn, empty) is not None  # nothing to walk yet: the path names it
+
+
+def test_purge_of_a_path_inside_a_project_deletes_nothing(driver: Driver, config: Config, project: Path, capsys):
+    """`purge --project ~/Lernen/gibtsnicht --yes` resolved to the project around it and deleted it whole."""
+    driver.prompt("s1", "hello")
+    base = ["--data-dir", str(config.data_dir)]
+    for path in (project / "typo", project / "src"):
+        assert cli.main([*base, "purge", "--project", str(path), "--yes"]) == 2
+        assert f"--project {project}" in capsys.readouterr().err
+    assert driver.conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 1
+    assert cli.main([*base, "purge", "--project", str(project), "--yes"]) == 0

@@ -7,9 +7,11 @@ again by :func:`remove`; data stays. Standard library only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -122,10 +124,34 @@ def _strip_hooks(existing: dict[str, Any]) -> dict[str, Any]:
     return kept
 
 
+def _shell(exe: str, key: str) -> str:
+    """``exe`` as the first word of a hook command: quoted when it holds a space or another shell character."""
+    if not re.search(r"[^\w@%+=:,./\\-]", exe):
+        return exe
+    if key == "powershell":
+        return "& '" + exe.replace("'", "''") + "'"
+    return f'"{exe}"' if sys.platform == "win32" else shlex.quote(exe)
+
+
+def hook_binary(command: str) -> str:
+    """The binary a hook command runs, its quoting undone."""
+    exe = command.rsplit(" hook ", 1)[0].strip()
+    if exe[:1] in {"'", '"'}:
+        with contextlib.suppress(ValueError):
+            exe = shlex.split(exe)[0]
+    return exe
+
+
 def _plugin_hooks(plugins: Path, harness: str, exe: str) -> dict[str, Any]:
     file = plugins / harness / ("hooks.json" if harness == "codex" else "hooks/hooks.json")
-    text = file.read_text(encoding="utf-8").replace(f'"{MARK} hook', f'"{json.dumps(exe)[1:-1]} hook')
-    return json.loads(text)
+    data = json.loads(file.read_text(encoding="utf-8"))
+    for entries in data["hooks"].values():
+        for entry in entries:
+            for hook in entry.get("hooks", [entry]):
+                for key in ("command", "bash", "powershell"):
+                    if str(hook.get(key, "")).startswith(f"{MARK} hook"):
+                        hook[key] = _shell(exe, key) + hook[key][len(MARK) :]
+    return data
 
 
 # --- write -----------------------------------------------------------------------------------------
@@ -298,7 +324,7 @@ def stale(harness: str) -> bool:
     commands = hook_commands(harness)
     if not commands:
         return False
-    exe = commands[0].rsplit(" hook ", 1)[0]
+    exe = hook_binary(commands[0])
     plugins = plugins_dir()
     if harness == "opencode":
         shipped = (plugins / "opencode" / "agent-mem.ts").read_text(encoding="utf-8")

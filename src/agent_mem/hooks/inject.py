@@ -613,7 +613,10 @@ def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str |
     if paused and paused[0] > timeutil.iso():
         when = timeutil.parse(paused[0])
         until = when.astimezone().strftime("%H:%M") if when else paused[0]
-        return f"facts: {found[0]} paused until {until} (quota or login); requests stay queued"
+        kind = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause_kind.{found[0]}",)).fetchone()
+        if kind and kind[0] == "login":
+            return f"facts: `{found[0]}` is not logged in; log in there once. Requests stay queued (retry at {until})"
+        return f"facts: {found[0]} paused until {until} after a usage limit; requests stay queued"
     return f"facts by {found[1]} via {found[0]}"
 
 

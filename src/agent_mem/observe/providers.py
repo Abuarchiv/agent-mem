@@ -300,6 +300,15 @@ def paused_until(conn: Any, name: str) -> str | None:
     return db.get_meta(conn, f"observe.pause.{name}")
 
 
+def provider_error(error: BaseException | None) -> ProviderError | None:
+    """The ProviderError behind ``error``: mem0 re-raises it as the cause of its LLMError."""
+    while error is not None:
+        if isinstance(error, ProviderError):
+            return error
+        error = error.__cause__
+    return None
+
+
 def note_failure(conn: Any, config: Any, name: str, error: ProviderError) -> None:
     """A quota or login failure pauses the stage for ``pause_minutes`` instead of punishing the turn."""
     if error.kind not in {"quota", "login"}:
@@ -310,6 +319,7 @@ def note_failure(conn: Any, config: Any, name: str, error: ProviderError) -> Non
 
     until = timeutil.iso(timeutil.now() + timedelta(minutes=config.observe.pause_minutes))
     db.set_meta(conn, f"observe.pause.{name}", until)
+    db.set_meta(conn, f"observe.pause_kind.{name}", error.kind)
 
 
 def chain(config: Any, harness: str, conn: Any) -> list[str]:

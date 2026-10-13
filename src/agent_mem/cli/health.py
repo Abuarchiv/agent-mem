@@ -464,15 +464,23 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
     stages = [name for name in config.observe.providers if shutil.which(name)]
     now = timeutil.iso()
     shown = []
+    logged_out = []
     for name in stages:
         until = providers.paused_until(conn, name)
-        paused = f", paused until {until}" if until and until > now else ""
+        paused = ""
+        if until and until > now:
+            login = db.get_meta(conn, f"observe.pause_kind.{name}") == "login"
+            paused = f", not logged in, retry at {until}" if login else f", usage limit, paused until {until}"
+            logged_out += [name] if login else []
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
+    remedy = 'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.'
+    if logged_out:
+        remedy = f"Start {' and '.join(f'`{name}`' for name in logged_out)} once and log in."
     return Check(
         "observer providers",
-        bool(stages),
+        bool(stages) and not logged_out,
         ", ".join(shown) if stages else f"none of {config.observe.providers} on PATH",
-        'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.',
+        remedy,
         warn_only=True,
     )
 
@@ -535,7 +543,7 @@ def _hook_checks(fix: bool) -> list[Check]:
         commands = install.hook_commands(harness)
         if not commands:
             continue
-        exe = commands[0].rsplit(" hook ", 1)[0]
+        exe = install.hook_binary(commands[0])
         fixed = False
         if fix and (install.stale(harness) or not Path(exe).is_file()):
             # The path they already use (a checkout's `uv run` must not take them over), unless it is gone.
@@ -563,7 +571,7 @@ def _hook_checks(fix: bool) -> list[Check]:
             )
         )
         for command in commands:
-            exe = command.split(" hook ", 1)[0]
+            exe = install.hook_binary(command)
             resolved = Path(exe) if os.path.isabs(exe) else Path(shutil.which(exe) or "")
             checks.append(
                 Check(

@@ -217,32 +217,17 @@ class Worker:
                 facts = self.adapter.extract(
                     b.messages, namespace, {"turn_id": b.turn_ids[-1], "session_id": b.session_id, "harness": b.harness}
                 )
-            except providers.ProviderError as error:
+            except Exception as error:  # provider, mem0 or JSON failure: try the next stage, keep the turn
+                # mem0 raises the provider's error as the cause of its own LLMError; unwrapped, a usage limit or
+                # a logged-out CLI pauses the stage instead of failing every turn.
+                failure = providers.provider_error(error)
+                text = str(failure) if failure else f"{type(error).__name__}: {error}"
                 _record_call(
-                    self.conn,
-                    name,
-                    "extract",
-                    time.perf_counter() - started,
-                    False,
-                    b.chars,
-                    b.turn_ids,
-                    str(error)[:300],
+                    self.conn, name, "extract", time.perf_counter() - started, False, b.chars, b.turn_ids, text[:300]
                 )
-                providers.note_failure(self.conn, self.config, name, error)
-                last_error = f"{name}: {error}"
-                continue
-            except Exception as error:  # mem0 or JSON failure: try the next stage, keep the turn
-                _record_call(
-                    self.conn,
-                    name,
-                    "extract",
-                    time.perf_counter() - started,
-                    False,
-                    b.chars,
-                    b.turn_ids,
-                    f"{type(error).__name__}: {error}"[:300],
-                )
-                last_error = f"{name}: {type(error).__name__}: {error}"
+                if failure:
+                    providers.note_failure(self.conn, self.config, name, failure)
+                last_error = f"{name}: {text}"
                 continue
             # mem0 stores the facts before SQLite takes them. After a failure in between (a write lock held over
             # 10 s, a killed worker) the retry showed the model its own facts as existing memories, it extracted
@@ -405,6 +390,8 @@ class Worker:
                     self.conn, providers.make_llm(name, providers.model_for(self.config, name)), project_id
                 )
             except Exception as error:  # the review is housekeeping; it never stops the worker
+                if failure := providers.provider_error(error):
+                    providers.note_failure(self.conn, self.config, name, failure)
                 _record_call(
                     self.conn,
                     name,
@@ -440,6 +427,8 @@ class Worker:
                     self.conn, providers.make_llm(name, providers.model_for(self.config, name)), project_id, rows
                 )
             except Exception as error:  # the graph is a view; it never stops the worker
+                if failure := providers.provider_error(error):
+                    providers.note_failure(self.conn, self.config, name, failure)
                 _record_call(
                     self.conn,
                     name,

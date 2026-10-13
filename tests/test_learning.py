@@ -1,4 +1,5 @@
 import math
+import os
 
 from agent_mem.memory import learn, search
 from tests.conftest import Driver
@@ -248,3 +249,14 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
         conn, config, parent_id, "claude:s2", "How does the viewer launch agent restart?", "claude"
     )
     assert block is not None and "launch agent" in block.text
+
+
+def test_a_session_in_the_home_folder_does_not_see_the_projects_below_it(conn):
+    """A session in ~ searched every project below it, ~/Company with client data too (audit 2026-10-13)."""
+    home = os.path.expanduser("~")
+    for project_id, root in (("home", home), ("client", os.path.join(home, "Company", "client"))):
+        conn.execute(
+            "INSERT INTO projects(id, name, root, created_at) VALUES (?, ?, ?, '2026-10-13')", (project_id, root, root)
+        )
+    assert search.scope(conn, "home") == ["home"]
+    assert search.scope(conn, "client") == ["client"]  # the home folder is not around it either

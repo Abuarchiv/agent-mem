@@ -111,3 +111,25 @@ def test_quoted_passphrases_cookies_basic_auth_and_azure_keys_are_redacted():
         assert secret not in privacy.clean_text(text, 1000), text
     for prose in ("the basic idea is simple", "cookie handling in browsers is tricky", '"password": "${DB_PASS}"'):
         assert privacy.clean_text(prose, 1000) == prose
+
+
+def test_passwords_said_in_words_are_redacted():
+    """Live data: "Passwort: …" and "mein passwort ist …" were stored in plain text three times."""
+    for text, secret in [
+        ("Passwort: Sommer2026!", "Sommer2026"),
+        ("mein passwort ist Sommer2026", "Sommer2026"),
+        ("my password is hunter22x", "hunter22x"),
+        ("Kennwort = abc12345", "abc12345"),
+        ("the password for the db is Tr0ub4dor&3", "Tr0ub4dor"),
+        ("Passwort lautet: blau-Haus-7", "blau-Haus"),
+        ("aws secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI"),
+    ]:
+        assert secret not in privacy.clean_text(text, 500), text
+    for text in [
+        "das Passwort ist nicht gesetzt",
+        "the password is required",
+        "password reset flow fixed",
+        "pw = getpass()",
+        "pw: $DB_PASS",
+    ]:
+        assert privacy.clean_text(text, 500) == text

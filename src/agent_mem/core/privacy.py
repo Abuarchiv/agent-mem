@@ -46,6 +46,20 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # Headers that carry credentials: the whole value goes (a cookie line holds several, Basic is user:password).
     ("header", re.compile(r"(?im)(\b(?:set-)?cookie\s*:\s*)([^\r\n]+)")),
     ("header", re.compile(r"(?i)(\bauthorization\s*:\s*(?:basic|digest|token)\s+)(\S+)")),
+    # An AWS secret access key is 40 characters of base64 with no prefix; only after its name.
+    (
+        "cli_password",
+        re.compile(r"(?i)(\baws\b[^\n]{0,30}?\bsecret\b[^\n]{0,20}?[\s:=\"'])([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+])"),
+    ),
+    # A password said in words, German or English: "mein Passwort ist …", "the password for the db is …".
+    (
+        "phrase",
+        re.compile(
+            r"(?i)(\b(?:password|passwort|passwd|kennwort|pw|pwd|passphrase|pin)\b"
+            r"(?:\s+(?:for|für|of|von|vom|zum|zur|des|der)\s+(?:the\s+|die\s+|der\s+|das\s+|den\s+|dem\s+)?\S+)?"
+            r"\s*(?:\b(?:is|ist|lautet|was|war)\b\s*:?|[:=])\s*)(\S+)"
+        ),
+    ),
     (
         "assignment",
         re.compile(
@@ -77,6 +91,21 @@ def _redact_assignment(match: re.Match[str]) -> str:
     return f"{match.group(1)}{match.group(2)}{REDACTED.format(kind='secret')}"
 
 
+def _redact_phrase(match: re.Match[str]) -> str:
+    """Only a value that looks like a password: "das Passwort ist nicht gesetzt" stays."""
+    value = match.group(2).strip("\"'.,;:!?)(")
+    looks_secret = any(c.isdigit() for c in value) or not value.isalnum() or value[1:] != value[1:].lower()
+    if (
+        len(value) < 6
+        or not looks_secret
+        or value.lower() in _HARMLESS_VALUES
+        or value.startswith(("[REDACTED", "$", "{{", "<"))
+        or "(" in value
+    ):
+        return match.group(0)  # a call (`pw = getpass()`) names where the password comes from, not the password
+    return f"{match.group(1)}{REDACTED.format(kind='secret')}"
+
+
 def redact(text: str) -> tuple[str, int]:
     """Replace known secret formats. Returns the new text and the number of replacements."""
     count = 0
@@ -87,6 +116,8 @@ def redact(text: str) -> tuple[str, int]:
             text, n = pattern.subn(lambda m: f"{m.group(1)}{REDACTED.format(kind='secret')}", text)
         elif kind == "assignment":
             text, n = pattern.subn(_redact_assignment, text)
+        elif kind == "phrase":
+            text, n = pattern.subn(_redact_phrase, text)
         else:
             text, n = pattern.subn(REDACTED.format(kind=kind), text)
         count += n

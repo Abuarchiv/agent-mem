@@ -2,6 +2,16 @@
 
 ## Unreleased (2.0 track)
 
+### Fixed from the fresh-install audit
+
+- A usage limit or a logged-out CLI now pauses the observer stage. mem0 re-raises the provider's error as the cause of its `LLMError`, so it was handled as a generic failure: every turn spent its attempts and ended in `failed`. Review and graph calls pause the stage the same way.
+- The panel and `doctor` say which it is: "`claude` is not logged in; log in there once" (doctor turns yellow with that remedy) or "paused after a usage limit". Before, doctor stayed green and the panel said "quota or login".
+- Hook commands quote the binary path when it holds a space or another shell character (`& '…'` for PowerShell); `/Users/a b/…/agent-mem hook claude` ran `/Users/a` and failed every event with exit 127. `doctor` and the staleness check read the quoted path back.
+- `purge --project` needs the project's own folder. Any path inside a project resolved to it, so a typo below `~/Lernen` deleted the whole `Lernen` project with `--yes`, and an unknown folder resolved to the project at `/`.
+- Passwords said in words are redacted: "Passwort: …", "mein Passwort ist …", "the password for the db is …", `Kennwort = …`, `pw: …`, and an AWS secret access key after its name. Only values that look like a password go (six characters or more with a digit, a symbol or mixed case): "das Passwort ist nicht gesetzt" and `pw = getpass()` stay.
+- A session in the home folder no longer searches every project below it (`~/Company` included); the home folder is no project in either direction.
+- README: the Claude Code marketplace plugin only registers hooks; the `agent-mem` command has to be installed first.
+
 ### Copilot CLI and the Copilot app
 
 - Copilot shows the panel, the session summary and failures in its timeline: Copilot has no `systemMessage`, so the hook writes the text as a `{"type": "progress"}` line before its output JSON (checked with CLI 1.0.96).

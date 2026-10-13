@@ -300,6 +300,16 @@ def _purge_project(ns: argparse.Namespace, config: Config, conn: sqlite3.Connect
     project = _project(conn, ns.project)
     if project is None:
         return _unknown_project(ns.project)
+    # Any path inside a project resolves to it: a typo below ~/Lernen named "Lernen", an unknown folder "/".
+    # Deleting a whole project takes its own folder.
+    target = os.path.abspath(ns.project)
+    if not (identity.is_within(target, project.root) and identity.is_within(str(project.root), target)):
+        print(
+            f"{target} is not a project root; it lies in project {project.name} ({project.root}). "
+            f"To delete that project, pass --project {project.root}.",
+            file=sys.stderr,
+        )
+        return 2
     if not _confirm(ns, f"delete all data of project {project.name}"):
         return 1
     ui.discard(config)

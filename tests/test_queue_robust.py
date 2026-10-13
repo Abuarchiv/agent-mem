@@ -1,6 +1,7 @@
 """A broken turn must never stop fact extraction for the turns behind it."""
 
 import json
+import types
 from pathlib import Path
 
 from agent_mem.core import db
@@ -440,4 +441,48 @@ def test_with_the_observer_off_no_turn_waits_to_be_sent_later(config: Config, pr
     assert conn.execute("SELECT COUNT(*) FROM observe_queue").fetchone()[0] == 0
     monkeypatch.setattr(worker.Worker, "step", lambda self: (_ for _ in ()).throw(AssertionError("model call")))
     worker.Worker(config, conn).run(drain=False)
+    conn.close()
+
+
+def test_a_usage_limit_wrapped_by_mem0_pauses_the_stage(config: Config, project: Path, monkeypatch):
+    """mem0 re-raises a provider's error as ``LLMError(...) from error``. Caught as a generic error, a usage limit
+    never paused the stage: every turn spent its attempts and ended in `failed` (sandbox install, 2026-10-13)."""
+    from mem0.exceptions import LLMError
+
+    from agent_mem.observe import providers, worker
+
+    monkeypatch.setattr(providers, "available", lambda name: name == "claude")
+    _turn(config, project, "s1", "Configure the release workflow")
+    conn = db.connect(config)
+
+    class Adapter:
+        memory = types.SimpleNamespace(llm=None)
+
+        def extract(self, *args, **kwargs):
+            try:
+                raise providers.ProviderError("claude exit 1: You've hit your limit · resets 6pm")
+            except providers.ProviderError as error:
+                raise LLMError(f"LLM extraction failed: {error}") from error
+
+    worker.Worker(config, conn, adapter=Adapter()).step()  # type: ignore[arg-type]
+    assert providers.paused_until(conn, "claude")
+    conn.close()
+
+
+def test_a_logged_out_cli_is_named_in_the_panel_and_in_doctor(config: Config, project: Path, monkeypatch):
+    """`claude` logged out kept doctor green; the panel said "1 turn waiting" without saying why."""
+    from agent_mem.cli import health
+    from agent_mem.hooks import inject
+    from agent_mem.observe import providers
+
+    monkeypatch.setattr(providers, "available", lambda name: name == "claude")
+    monkeypatch.setattr(health.shutil, "which", lambda name: f"/bin/{name}" if name == "claude" else None)
+    conn = db.connect(config)
+    providers.note_failure(conn, config, "claude", providers.ProviderError("claude exit 1: Not logged in"))
+    assert "`claude` is not logged in" in (inject._facts_line(conn, config, "claude") or "")
+    check = health._provider_check(conn, config)
+    assert not check.ok and "not logged in" in check.detail and "log in" in (check.fix or "")
+    providers.note_failure(conn, config, "claude", providers.ProviderError("claude exit 1: usage limit reached"))
+    assert "usage limit" in (inject._facts_line(conn, config, "claude") or "")
+    assert health._provider_check(conn, config).ok
     conn.close()
