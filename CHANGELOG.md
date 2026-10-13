@@ -18,6 +18,8 @@
 - Sessions of the Copilot app on a repository are recorded. The app checks repositories out below `~/.copilot/copilot-worktrees`, and everything below `~/.copilot` was dropped as the harness's own work. Plain app chats (`~/.copilot/chats`) still are.
 - The observer runs `copilot` in a private `COPILOT_HOME` per call, with `--no-custom-instructions --disable-builtin-mcps`. Before, every call was saved as a Copilot session (three per turn, listed in the Copilot app) and ran the user's hooks and MCP servers.
 - `setup`, `uninstall` and `doctor` honour `COPILOT_HOME`.
+- A Copilot session ends with the same short summary as a Claude Code one ("session saved · 3 turns · 2 files").
+- README: Copilot shows the panel, its turns are measured, and its extra context after a tool call does arrive (checked with CLI 1.0.96, the old note about copilot-cli#2980 is gone).
 - Agent work per turn is measured for Copilot too, from `session.usage_record` in `session-state/<id>/events.jsonl` (input minus cache reads, plus output).
 
 ### Fixed in the tenth review round

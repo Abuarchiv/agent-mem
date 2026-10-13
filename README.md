@@ -34,7 +34,7 @@ Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, k
 
 | Moment | What happens |
 | --- | --- |
-| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, and the last session with what was done and what is still open, oldest first so an update reads as one. Claude Code and Codex show a panel in your terminal: the project's memory size, which model turns your requests into facts (or why none does), the recent work (time, type, title), what was injected (grouped by day, with ids), anything that needs your attention, and the viewer address. Copilot CLI has no way for hooks to show text; use the viewer. |
+| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, and the last session with what was done and what is still open, oldest first so an update reads as one. Claude Code and Codex show a panel in your terminal: the project's memory size, which model turns your requests into facts (or why none does), the recent work (time, type, title), what was injected (grouped by day, with ids), anything that needs your attention, and the viewer address. Copilot CLI and the Copilot app show the same panel, uncoloured, as progress lines in their timeline, and a short summary when a session ends. |
 | You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). The terminal stays quiet. |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
@@ -75,7 +75,7 @@ Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusi
 
 ### Tokens: what reading costs against what finding out took
 
-Like claude-mem, Agent Mem compares what an injected memory costs to read with the work behind it. The work is measured, not estimated: after a turn ends, the indexer reads the harness's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that turn: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its turn's share (the turn's work divided by the memories it produced), so a block that names several memories of one turn counts that turn once. Copilot CLI and OpenCode turns stay unmeasured.
+Like claude-mem, Agent Mem compares what an injected memory costs to read with the work behind it. The work is measured, not estimated: after a turn ends, the indexer reads the harness's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that turn: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its turn's share (the turn's work divided by the memories it produced), so a block that names several memories of one turn counts that turn once. Copilot turns are measured from `~/.copilot/session-state/<id>/events.jsonl`; OpenCode turns stay unmeasured.
 
 - Terminal (session start): `Read ~1,240 tokens · built from ~86,000 tokens of agent work · 99% less to read than to redo`, shown only when measured work stands behind the block.
 - `agent-mem status`: the same for the last 7 days, plus the total work the memory was built from.
@@ -169,10 +169,10 @@ See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 | --- | --- |
 | Python | 3.11 to 3.14 |
 | OS | Ubuntu, macOS arm64, macOS Intel (no fastembed wheels: lexical and graph search only), Windows |
-| Harnesses tested | Claude Code 2.x, Codex CLI 0.x, Copilot CLI 1.0.95, OpenCode 1.18 |
+| Harnesses tested | Claude Code 2.x, Codex CLI 0.x, Copilot CLI 1.0.96 and the Copilot app 1.1.29 (macOS), OpenCode 1.18 |
 | CI | lint, types, tests, wheel smoke test on all four OS |
 
-Harness notes: Codex asks you to trust plugin hooks once (`/hooks`). Copilot CLI ignores extra context after a successful tool call ([copilot-cli#2980](https://github.com/github/copilot-cli/issues/2980)). Run OpenCode sessions serially per repository.
+Harness notes: Codex asks you to trust plugin hooks once (`/hooks`). Copilot CLI and the Copilot app read the hooks `agent-mem setup copilot --write` puts in `~/.copilot/hooks`; plugin-defined `preToolUse` hooks do not fire there ([copilot-cli#2540](https://github.com/github/copilot-cli/issues/2540)), so use `setup` rather than a Copilot plugin. Sessions the app runs in its worktrees (`~/.copilot/copilot-worktrees`) count for their repository; plain app chats are not recorded. Run OpenCode sessions serially per repository.
 
 ## Development
 

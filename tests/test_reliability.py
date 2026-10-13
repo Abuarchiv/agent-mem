@@ -392,3 +392,8 @@ def test_copilot_shows_the_panel_as_progress_lines(config: Config, project: Path
     progress, output = (json.loads(line) for line in lines)
     assert progress["type"] == "progress" and "Parser" in output["additionalContext"]
     assert "systemMessage" not in output
+    (end,) = hook.run("copilot", "sessionEnd", json.dumps({**start, "reason": "complete"}), config).splitlines()
+    assert json.loads(end) == {
+        "type": "progress",
+        "message": "agent-mem session saved · 1 turn · 0 files · facts follow in the background",
+    }

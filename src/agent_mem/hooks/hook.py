@@ -215,8 +215,9 @@ class _Worker(threading.Thread):
                     self.problems = [*self.config.warnings[:2], *problems(conn)]
                     self.facts = inject.overview(conn, session, self.config)
                     self.recent = inject.recent_work(conn, session)
-            elif self.event.kind == "session_end" and self.event.harness == "claude":
-                self.summary = inject.session_summary(conn, f"claude:{self.event.session_id}", _color())
+            elif self.event.kind == "session_end" and self.event.harness in {"claude", "copilot"}:  # Codex shows none
+                session = f"{self.event.harness}:{self.event.session_id}"
+                self.summary = inject.session_summary(conn, session, _color(self.event.harness))
         except db.MigrationPendingError as error:
             # The indexer migrates (with backup) outside the deadline and then replays the spool.
             self.error = f"{type(error).__name__}: {error}"
@@ -344,8 +345,8 @@ NOTICE_SECONDS = 600
 
 
 def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
-    """What the user sees in the terminal of Claude Code or Codex: a panel at session start and after
-    compaction, a summary when a Claude Code session ends, and failures as they happen. Ordinary prompts and
+    """What the user sees in the terminal of Claude Code, Codex or Copilot: a panel at session start and after
+    compaction, a summary when a Claude Code or Copilot session ends, and failures as they happen. Ordinary prompts and
     tool calls stay quiet."""
     color = _color(event.harness)
     failure = None
