@@ -112,6 +112,9 @@ def test_a_first_day_from_setup_to_purge(home: dict[str, str], project: Path) ->
         [sys.executable, "-m", "agent_mem", "show", "M999"], env=home, capture_output=True, check=False
     )
     assert missing.returncode == 1  # a script can tell that nothing was found
+    for command in (["purge", "--id", "M999", "--yes"], ["rules", "enable", "999"]):
+        gone = subprocess.run([sys.executable, "-m", "agent_mem", *command], env=home, capture_output=True, check=False)
+        assert gone.returncode == 1, command
 
     _run(home, "purge", "--all", "--yes")
     assert "No matching memories" in _run(home, "search", "pnpm", "--all-projects")

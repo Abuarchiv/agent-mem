@@ -308,7 +308,7 @@ def _purge_id(ns: argparse.Namespace, config: Config, conn: sqlite3.Connection) 
     with db.transaction(conn):
         deleted = store.delete_owner(conn, *owner)
     print(f"Deleted {ns.id}." if deleted else f"{ns.id} not found.")
-    return 0
+    return 0 if deleted else 1
 
 
 def _purge_project(ns: argparse.Namespace, config: Config, conn: sqlite3.Connection) -> int:
@@ -399,7 +399,7 @@ def cmd_rules(ns: argparse.Namespace, config: Config) -> int:
                     (1 if ns.action == "enable" else 0, ns.rule_id),
                 ).rowcount
         print(f"R{ns.rule_id}: {ns.action}d." if changed else f"R{ns.rule_id} not found.")
-    return 0
+    return 0 if changed else 1
 
 
 def cmd_lessons(ns: argparse.Namespace, config: Config) -> int:
