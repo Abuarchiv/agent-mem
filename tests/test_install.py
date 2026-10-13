@@ -19,6 +19,7 @@ def homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / ".copilot"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     monkeypatch.setattr(install.shutil, "which", lambda name: None)  # no `claude mcp add` subprocess
     return tmp_path

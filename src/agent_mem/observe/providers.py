@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any, ClassVar
 
 from mem0.configs.llms.base import BaseLlmConfig
@@ -67,9 +68,10 @@ def _clean_json(text: str) -> str:
     return text
 
 
-def _run(cmd: list[str], prompt: str) -> str:
+def _run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -> str:
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE")}
     env["AGENT_MEM_INTERNAL"] = "1"
+    env.update(extra_env or {})
     group: dict[str, Any] = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         if sys.platform == "win32"
@@ -127,16 +129,16 @@ _NO_MODEL = re.compile(
 )
 
 
-def _run_model(cmd: list[str], model_args: list[str], prompt: str) -> str:
+def _run_model(cmd: list[str], model_args: list[str], prompt: str, extra_env: dict[str, str] | None = None) -> str:
     """Runs with the configured model; if the CLI refuses it, once more with the CLI's own default."""
     if not model_args:
-        return _run(cmd, prompt)
+        return _run(cmd, prompt, extra_env)
     try:
-        return _run([*cmd, *model_args], prompt)
+        return _run([*cmd, *model_args], prompt, extra_env)
     except ProviderError as error:
         if not _NO_MODEL.search(str(error)):
             raise
-        return _run(cmd, prompt)
+        return _run(cmd, prompt, extra_env)
 
 
 class ClaudeCliLLM(LLMBase):
@@ -199,6 +201,11 @@ class CodexCliLLM(LLMBase):
         return _clean_json(out) if wants_json else out.strip()
 
 
+def copilot_config() -> Path:
+    home = os.environ.get("COPILOT_HOME")
+    return (Path(home).expanduser() if home else Path.home() / ".copilot") / "config.json"
+
+
 class CopilotCliLLM(LLMBase):
     """Stage 3: ``copilot -s`` with the prompt on stdin (measured 2026-10-12: ``-p`` ignores stdin and
     drops prompts over roughly 30k characters on argv; stdin-only mode works under the GitHub login).
@@ -215,7 +222,15 @@ class CopilotCliLLM(LLMBase):
         model_args = ["--model", self.model] if self.model else []
         if self.model == "auto":
             model_args += ["--auto-tier", "efficiency"]  # only valid together with auto
-        out = _run_model(["copilot", "-s"], model_args, _flatten(messages, wants_json))
+        cmd = ["copilot", "-s", "--no-custom-instructions", "--disable-builtin-mcps"]
+        # A private COPILOT_HOME per call: in the user's own, every call would be a saved session (listed in the
+        # Copilot app) and would run the user's hooks, plugins and MCP servers. The keychain login works from any
+        # home (measured 2026-10-13); config.json comes along for a login kept there on machines without one.
+        with tempfile.TemporaryDirectory() as home:
+            login = copilot_config()
+            if login.is_file():
+                shutil.copy(login, home)
+            out = _run_model(cmd, model_args, _flatten(messages, wants_json), {"COPILOT_HOME": home})
         return _clean_json(out) if wants_json else out.strip()
 
 

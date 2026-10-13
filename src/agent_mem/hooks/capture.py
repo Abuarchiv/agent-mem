@@ -69,10 +69,14 @@ def dedupe_key(event: Event) -> str:
 CORRECTION_CHARS = 400
 # The harnesses run their own background agents (Codex memory consolidation, for one) inside these folders.
 HARNESS_HOMES = (".codex", ".claude", ".copilot", ".config/opencode")
+# The Copilot app checks repositories out below its home (`~/.copilot/copilot-worktrees/<repo>`): work on them.
+HARNESS_WORKTREES = (".copilot/copilot-worktrees",)
 
 
 def _harness_home(root: str) -> bool:
     home = os.path.expanduser("~")
+    if any(identity.is_within(root, os.path.join(home, folder)) for folder in HARNESS_WORKTREES):
+        return False
     return any(identity.is_within(root, os.path.join(home, folder)) for folder in HARNESS_HOMES)
 
 

@@ -1,6 +1,7 @@
 """The tokens the agent spent on each turn, read from the harness's own transcript (claude-mem calls this "work").
 
-Claude Code writes every assistant message with its ``usage``; Codex writes a ``token_count`` event per model call.
+Claude Code writes every assistant message with its ``usage``; Codex writes a ``token_count`` event per model call,
+Copilot CLI a ``session.usage_record``.
 A turn's work is the fresh tokens of the calls between its prompt and its end: input, cache writes and output,
 subagents included. Cache reads stay out: every step re-reads the whole context, and counting that would make a
 30-step turn look like millions of tokens. The indexer measures closed turns, never the hook path.
@@ -46,6 +47,12 @@ def _codex_files(native_id: str, started_at: str) -> list[Path]:
         day = (start.astimezone() + timedelta(days=offset)).strftime("%Y/%m/%d")
         found += sorted((root / day).glob(f"*{native_id}.jsonl"))
     return found[:1]
+
+
+def _copilot_files(native_id: str) -> list[Path]:
+    home = Path(os.environ.get("COPILOT_HOME") or Path.home() / ".copilot").expanduser()
+    path = home / "session-state" / native_id / "events.jsonl"
+    return [path] if path.is_file() else []
 
 
 Call = tuple[str, int, int]  # (timestamp, fresh tokens, byte offset of its line)
@@ -120,8 +127,30 @@ def _codex_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
     return calls, end
 
 
+def _copilot_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
+    """Fresh tokens per model call, and where the complete lines end. ``inputTokens`` includes the cache reads and
+    writes (measured 2026-10-13, CLI 1.0.96)."""
+    calls: list[Call] = []
+    end = offset
+    for position, after, line in _lines(path, offset):
+        end = after
+        if '"session.usage_record"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        data = entry.get("data") if isinstance(entry, dict) else None
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if not isinstance(usage, dict) or not entry.get("timestamp"):
+            continue
+        fresh = int(usage.get("inputTokens") or 0) - int(usage.get("cacheReadTokens") or 0)
+        calls.append((str(entry["timestamp"]), max(fresh, 0) + int(usage.get("outputTokens") or 0), position))
+    return calls, end
+
+
 def measure(conn: sqlite3.Connection) -> int:
-    """Fill ``turns.work_tokens`` for closed turns of Claude Code and Codex sessions whose transcript exists.
+    """Fill ``turns.work_tokens`` for closed turns of Claude Code, Codex and Copilot sessions whose transcript exists.
     A turn without a model call in its window gets 0 (measured, nothing spent). Returns the turns measured.
 
     Each file is read from where the earliest turn still open began (``meta work.offset:<path>``): a 220 MB session
@@ -129,16 +158,20 @@ def measure(conn: sqlite3.Connection) -> int:
     since = timeutil.iso(timeutil.now() - timedelta(days=LOOKBACK_DAYS))
     sessions = conn.execute(
         "SELECT DISTINCT s.id, s.harness, s.native_id, s.started_at FROM turns t JOIN sessions s ON s.id = t.session_id "
-        "WHERE t.work_tokens IS NULL AND t.ended_at IS NOT NULL AND s.harness IN ('claude', 'codex') "
+        "WHERE t.work_tokens IS NULL AND t.ended_at IS NOT NULL AND s.harness IN ('claude', 'codex', 'copilot') "
         "AND s.last_event_at >= ?",
         (since,),
     ).fetchall()
     measured = 0
     for session_id, harness, native_id, started_at in sessions:
-        files = _claude_files(native_id) if harness == "claude" else _codex_files(native_id, started_at)
+        if harness == "claude":
+            files, read = _claude_files(native_id), _claude_usage
+        elif harness == "codex":
+            files, read = _codex_files(native_id, started_at), _codex_usage
+        else:
+            files, read = _copilot_files(native_id), _copilot_usage
         if not files:
             continue
-        read = _claude_usage if harness == "claude" else _codex_usage
         try:
             per_file = {path: read(path, int(db.get_meta(conn, f"work.offset:{path}") or 0)) for path in files}
         except OSError:

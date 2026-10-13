@@ -2,6 +2,14 @@
 
 ## Unreleased (2.0 track)
 
+### Copilot CLI and the Copilot app
+
+- Copilot shows the panel, the session summary and failures in its timeline: Copilot has no `systemMessage`, so the hook writes the text as a `{"type": "progress"}` line before its output JSON (checked with CLI 1.0.96).
+- Sessions of the Copilot app on a repository are recorded. The app checks repositories out below `~/.copilot/copilot-worktrees`, and everything below `~/.copilot` was dropped as the harness's own work. Plain app chats (`~/.copilot/chats`) still are.
+- The observer runs `copilot` in a private `COPILOT_HOME` per call, with `--no-custom-instructions --disable-builtin-mcps`. Before, every call was saved as a Copilot session (three per turn, listed in the Copilot app) and ran the user's hooks and MCP servers.
+- `setup`, `uninstall` and `doctor` honour `COPILOT_HOME`.
+- Agent work per turn is measured for Copilot too, from `session.usage_record` in `session-state/<id>/events.jsonl` (input minus cache reads, plus output).
+
 ### Fixed in the tenth review round
 
 - Turns over `observe.daily_limit`, or while the only stage for their harness is paused after a usage limit, were kept raw for good and never got facts. They now wait in the queue until midnight UTC or the end of the pause, without using up an attempt.

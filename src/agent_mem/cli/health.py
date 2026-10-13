@@ -14,14 +14,14 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from agent_mem.cli.install import claude_home, codex_home
+from agent_mem.cli.install import claude_home, codex_home, copilot_home
 from agent_mem.core import db, spool, timeutil
 from agent_mem.core.config import Config
 
 HARNESS_MARKERS = {
     "claude": [claude_home() / "plugins", claude_home() / "settings.json"],
     "codex": [codex_home() / "plugins", codex_home() / "hooks.json", codex_home() / "config.toml"],
-    "copilot": [Path.home() / ".copilot" / "plugins", Path.home() / ".copilot" / "hooks"],
+    "copilot": [copilot_home() / "plugins", copilot_home() / "hooks"],
     "opencode": [Path.home() / ".config" / "opencode"],
 }
 

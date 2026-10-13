@@ -189,3 +189,24 @@ def test_a_growing_transcript_is_read_from_where_the_open_turn_begins(conn) -> N
     )
     assert work.measure(conn) == 1
     assert conn.execute("SELECT work_tokens FROM turns ORDER BY id DESC LIMIT 1").fetchone()[0] == 1
+
+
+def test_copilot_turn_work_counts_input_minus_cache_reads(conn) -> None:
+    turns = _session(conn, "copilot", "19a2", [("2026-10-13T14:30:59.000Z", "2026-10-13T14:31:04.600Z")])
+    conn.execute("UPDATE sessions SET last_event_at = ?", (db.timeutil.iso(),))
+
+    def usage(ts: str, inputs: int, read: int, write: int, output: int) -> dict:
+        record = {"inputTokens": inputs, "cacheReadTokens": read, "cacheWriteTokens": write, "outputTokens": output}
+        return {"type": "session.usage_record", "timestamp": ts, "data": {"usage": record}}
+
+    # Shape and numbers of a real CLI 1.0.96 transcript: inputTokens includes the cache reads and writes.
+    _lines(
+        Path(os.environ["COPILOT_HOME"]) / "session-state" / "19a2" / "events.jsonl",
+        [
+            {"type": "user.message", "timestamp": "2026-10-13T14:30:59.700Z", "data": {"content": "hi"}},
+            usage("2026-10-13T14:31:03.005Z", 14115, 0, 14112, 26),
+            usage("2026-10-13T14:31:04.300Z", 14168, 14112, 53, 5),
+        ],
+    )
+    assert work.measure(conn) == 1
+    assert conn.execute("SELECT work_tokens FROM turns WHERE id = ?", (turns[0],)).fetchone()[0] == 14141 + 61

@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+from pathlib import Path
 
 from agent_mem.core import db, identity
 from agent_mem.core.events import Event
@@ -207,3 +209,18 @@ def test_pre_compaction_context_for_opencode(conn, config, project):
     oc.edit("o1", "scheduler.py")
     output = hook.run("opencode", "session.compacting", json.dumps({"sessionID": "o1", "cwd": str(project)}), config)
     assert "Port the scheduler to asyncio" in json.loads(output)["context"]
+
+
+def test_copilot_app_worktrees_are_captured_but_its_own_chats_are_not(conn, config, tmp_path):
+    """The Copilot app checks repositories out below ~/.copilot/copilot-worktrees; plain chats run in
+    ~/.copilot/chats. Everything else below a harness home stays out (its own background agents)."""
+    copilot = Path(os.environ["HOME"]) / ".copilot"
+    worktree = copilot / "copilot-worktrees" / "demo" / "fix-login"
+    chat = copilot / "chats" / "2026-10-13" / "stunning-doodle"
+    for folder in (worktree, chat):
+        folder.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(worktree)], check=True)
+    Driver(conn, config, worktree, harness="copilot").prompt("w", "Fix the login redirect")
+    Driver(conn, config, chat, harness="copilot").prompt("c", "hi")
+    sessions = {row[0] for row in conn.execute("SELECT native_id FROM sessions")}
+    assert sessions == {"w"}

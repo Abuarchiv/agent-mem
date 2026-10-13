@@ -50,7 +50,8 @@ def codex_home() -> Path:
 
 
 def copilot_home() -> Path:
-    return Path.home() / ".copilot"
+    override = os.environ.get("COPILOT_HOME")
+    return Path(override).expanduser() if override else Path.home() / ".copilot"
 
 
 def opencode_home() -> Path:

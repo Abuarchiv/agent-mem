@@ -373,3 +373,22 @@ def test_migration_008_lets_failure_resolution_read_only_its_session(config: Con
     ).fetchall()
     assert "events_session_ts" in str([tuple(row) for row in plan])
     conn.close()
+
+
+def test_copilot_shows_the_panel_as_progress_lines(config: Config, project: Path):
+    """Copilot has no systemMessage. A {"type": "progress"} line before the output JSON shows in its timeline and
+    is removed before the rest is parsed (CLI 1.0.96)."""
+    start = {"sessionId": "a", "cwd": str(project), "source": "new", "timestamp": 1791902160502}
+    lines = hook.run("copilot", "sessionStart", json.dumps(start), config).splitlines()
+    assert len(lines) == 1  # nothing to recall yet: the panel only, no empty output JSON
+    progress = json.loads(lines[0])
+    assert progress["type"] == "progress" and progress["message"].startswith("agent-mem · ")
+    assert "\x1b[" not in progress["message"]
+
+    hook.run("copilot", "userPromptSubmitted", json.dumps({**start, "prompt": "Build the invoice parser"}), config)
+    stop = {**start, "response": "Parser in invoices/parse.py done."}
+    hook.run("copilot", "agentStop", json.dumps(stop), config)
+    lines = hook.run("copilot", "sessionStart", json.dumps({**start, "sessionId": "b"}), config).splitlines()
+    progress, output = (json.loads(line) for line in lines)
+    assert progress["type"] == "progress" and "Parser" in output["additionalContext"]
+    assert "systemMessage" not in output

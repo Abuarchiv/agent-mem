@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -127,7 +128,7 @@ def test_cheapest_model_falls_back_to_cli_default(monkeypatch) -> None:
 
     calls: list[list[str]] = []
 
-    def run(cmd: list[str], prompt: str) -> str:
+    def run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -> str:
         calls.append(cmd)
         if "--model" in cmd and "auto" not in cmd:
             raise providers.ProviderError(
@@ -138,9 +139,10 @@ def test_cheapest_model_falls_back_to_cli_default(monkeypatch) -> None:
     monkeypatch.setattr(providers, "_run", run)
     msgs = [{"role": "user", "content": "x"}]
     assert providers.make_llm("copilot", "auto").generate_response(msgs) == "ok"
-    assert calls[-1] == ["copilot", "-s", "--model", "auto", "--auto-tier", "efficiency"]
+    copilot = ["copilot", "-s", "--no-custom-instructions", "--disable-builtin-mcps"]
+    assert calls[-1] == [*copilot, "--model", "auto", "--auto-tier", "efficiency"]
     assert providers.make_llm("copilot", "gpt-6-luna").generate_response(msgs) == "ok"
-    assert calls[-2:] == [["copilot", "-s", "--model", "gpt-6-luna"], ["copilot", "-s"]]
+    assert calls[-2:] == [[*copilot, "--model", "gpt-6-luna"], copilot]
     codex_error = (
         "codex exit 1: ...\nERROR: The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account."
     )
@@ -308,7 +310,7 @@ def test_codex_observer_runs_without_hooks_or_memories(monkeypatch) -> None:
 
     calls: list[list[str]] = []
 
-    def run(cmd: list[str], prompt: str) -> str:
+    def run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -> str:
         calls.append(cmd)
         Path(cmd[cmd.index("-o") + 1]).write_text("ok")
         return ""
@@ -431,3 +433,24 @@ def test_a_command_rule_from_what_a_tool_showed_is_not_learned(config: Config, p
     mirror("nimm ab jetzt yarn statt npm", "Use yarn instead of npm", "typed")
     assert [tuple(r) for r in conn.execute("SELECT pattern, evidence FROM rules")] == [("npm", 1)]
     conn.close()
+
+
+def test_copilot_observer_runs_in_a_private_home(monkeypatch) -> None:
+    """In the user's COPILOT_HOME every call would be a saved session listed in the Copilot app, and would run
+    the user's hooks and MCP servers. The login file comes along."""
+    from agent_mem.observe import providers
+
+    own = Path(os.environ["COPILOT_HOME"])
+    own.mkdir(parents=True)
+    (own / "config.json").write_text('{"login": "x"}')
+    seen: list[tuple[str, bool]] = []
+
+    def run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -> str:
+        home = (extra_env or {})["COPILOT_HOME"]
+        seen.append((home, (Path(home) / "config.json").read_text() == '{"login": "x"}'))
+        return "ok"
+
+    monkeypatch.setattr(providers, "_run", run)
+    assert providers.make_llm("copilot", "").generate_response([{"role": "user", "content": "x"}]) == "ok"
+    ((home, copied),) = seen
+    assert copied and Path(home) != own and not Path(home).exists()  # removed after the call

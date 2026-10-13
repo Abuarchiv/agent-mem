@@ -295,7 +295,7 @@ def run(
         if not worker.spooled and harness in TERMINAL:
             text = f"agent-mem cannot save events ({worker.error}). This session is not being recorded."
             if _notice_due(config, text):
-                return json.dumps({"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
+                return _dump(harness, {"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
         # A lock of a few seconds passes unnoticed. Events waiting longer mean the database is unusable: say so,
         # or a broken database would go silent after its first error.
         if harness not in TERMINAL or spool.oldest_age(config.spool_dir) < SPOOL_STUCK_SECONDS:
@@ -303,7 +303,7 @@ def run(
         text = "agent-mem cannot save events: they wait in the spool. Run `agent-mem doctor`."
         if event.kind != "session_start" and not _notice_due(config, text):
             return ""
-        return json.dumps({"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
+        return _dump(harness, {"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
     worker = _Worker(config, event)
     worker.start()
     worker.join(config.hook_deadline_ms / 1000)
@@ -318,12 +318,22 @@ def run(
         message = _terminal(config, event, worker)
         if message:
             output = {**(output or {}), "systemMessage": message}
-    return json.dumps(output, ensure_ascii=False) if output else ""
+    return _dump(harness, output) if output else ""
 
 
-# Harnesses that show a hook's systemMessage to the user: Claude Code in its terminal, Codex as a warning
-# (no ANSI colors there, and no output for SessionEnd). Copilot CLI has no such field.
-TERMINAL = {"claude", "codex"}
+# Harnesses that show a hook's message to the user: Claude Code in its terminal, Codex as a warning (no ANSI
+# colors there, and no output for SessionEnd), Copilot CLI as progress lines in its timeline.
+TERMINAL = {"claude", "codex", "copilot"}
+
+
+def _dump(harness: str, output: dict[str, Any]) -> str:
+    """The hook's stdout. Copilot has no ``systemMessage``: a ``{"type": "progress"}`` line before the output JSON
+    is shown in its timeline and removed before the rest is parsed (checked with CLI 1.0.96)."""
+    if harness != "copilot" or "systemMessage" not in output:
+        return json.dumps(output, ensure_ascii=False)
+    rest = {key: value for key, value in output.items() if key != "systemMessage"}
+    line = json.dumps({"type": "progress", "message": output["systemMessage"]}, ensure_ascii=False)
+    return f"{line}\n{json.dumps(rest, ensure_ascii=False)}" if rest else line
 
 
 def _color(harness: str = "claude") -> bool:
