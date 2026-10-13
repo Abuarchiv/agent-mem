@@ -436,7 +436,10 @@ def files_of(category: str, tool_input: Any) -> list[str]:
                     value = item.get("file_path") or item.get("path")
                     if isinstance(value, str):
                         found.append(value)
-        patch_text = tool_input.get("patch") or tool_input.get("input") or tool_input.get("diff")
+        # Codex sends apply_patch as {"command": "*** Begin Patch …"}.
+        patch_text = (
+            tool_input.get("patch") or tool_input.get("input") or tool_input.get("diff") or tool_input.get("command")
+        )
         if isinstance(patch_text, str):
             found.extend(_PATCH_FILE.findall(patch_text))
             found.extend(_DIFF_FILE.findall(patch_text))

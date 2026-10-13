@@ -168,3 +168,13 @@ def test_a_word_swap_inside_a_long_complaint_is_not_a_command_rule():
     assert signals.preference_pairs("pnpm statt npm") == [("npm", "pnpm")]
     assert signals.preference_pairs(complaint + " Und bitte `pnpm` statt `npm`.") == [("npm", "pnpm")]
     assert signals.preference_pairs(complaint + " Nutze uv statt pip.") == [("pip", "uv")]
+
+
+def test_codex_apply_patch_names_its_files():
+    """Codex 0.162 sends apply_patch as {"command": "*** Begin Patch …"}: 12 of 12 live calls had no files."""
+    patch = (
+        "*** Begin Patch\n*** Update File: /repo/stats.py\n@@\n-    return 1\n+    return 0\n"
+        "*** Add File: docs/new.md\n+hello\n*** End Patch\n"
+    )
+    signal = signals.analyze_tool("apply_patch", {"command": patch})
+    assert signal.category == "edit" and list(signal.files) == ["/repo/stats.py", "docs/new.md"]
