@@ -42,6 +42,13 @@ def test_mcp_tools(conn, config: Config, project: Path, driver: Driver, monkeypa
     assert "B2 bucket" in call("mem_get", {"ids": [memory_id]})
     assert call("mem_forget", {"id": memory_id}).startswith("Deleted")
     assert "not found" in call("mem_get", {"ids": [memory_id]})
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('other', 'other', '/elsewhere', 't')")
+    foreign = conn.execute(
+        "INSERT INTO memories(project_id, kind, title, body, source, trust, valid_from, created_at) "
+        "VALUES ('other', 'fact', 'Other project', 'x', 'agent', 'agent', 't', 't')"
+    ).lastrowid
+    assert "belongs to another project" in call("mem_forget", {"id": f"M{foreign}"})
+    assert conn.execute("SELECT 1 FROM memories WHERE id = ?", (foreign,)).fetchone()
 
     # Agents call tools in parallel; the server runs them in threads on one shared connection.
     async def burst() -> list:

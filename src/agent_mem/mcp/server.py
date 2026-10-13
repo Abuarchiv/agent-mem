@@ -14,7 +14,7 @@ from mcp.server.mcpserver import MCPServer
 from agent_mem import __version__
 from agent_mem.core import db, identity
 from agent_mem.core.config import Config, load
-from agent_mem.memory import semantic, store, views
+from agent_mem.memory import search, semantic, store, views
 
 INSTRUCTIONS = (
     "Local memory shared across coding sessions and agents. Search first (mem_search returns a compact index), "
@@ -140,6 +140,14 @@ def build(config: Config | None = None) -> MCPServer:
         owner = store.parse_owner(id)
         if owner is None:
             return f"{id}: invalid id"
+        table = "memories" if owner[0] == "m" else "turns"
+        row = state.conn.execute(f"SELECT project_id FROM {table} WHERE id = ?", (owner[1],)).fetchone()
+        if row is None:
+            return f"{id}: not found"
+        # Like mem_remember's supersedes: an agent (or text injected into what it read) cannot delete another
+        # project's memory from here.
+        if row[0] is not None and row[0] not in search.scope(state.conn, state.project_id):
+            return f"{id} belongs to another project; the user can delete it with `agent-mem purge --id {id}`."
         with db.transaction(state.conn):
             deleted = store.delete_owner(state.conn, *owner)
         return f"Deleted {id}." if deleted else f"{id}: not found"
