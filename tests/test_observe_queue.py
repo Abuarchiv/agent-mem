@@ -225,8 +225,8 @@ def test_doctor_and_capture_survive_a_database_without_observer_tables(config: C
     assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 1
     conn.close()
     checks = health.doctor(config)
-    bad = [c for c in checks if c.name == "observer queue"]
-    assert bad and not bad[0].ok and "observer tables" in bad[0].detail
+    bad = [c for c in checks if c.name == "facts queue"]
+    assert bad and not bad[0].ok and "facts tables" in bad[0].detail
 
 
 def test_subagent_answer_enters_the_bundle(config: Config, project: Path) -> None:

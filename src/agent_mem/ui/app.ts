@@ -121,7 +121,7 @@ interface GraphController {
   const plural = (count: number, word: string, many = `${word}s`) => `${num(count)} ${count === 1 ? word : many}`;
   const readable = (code: unknown) => String(code ?? "").replace(/_/g, " ");
   // Memory kinds as the reader names them; native notes are the agents' own memory files, read in as they are.
-  const KIND_LABEL: Record<string, string> = { dead_end: "dead end", native_note: "agent note" };
+  const KIND_LABEL: Record<string, string> = { dead_end: "failed attempt", native_note: "agent note" };
   const kindLabel = (kind: string) => KIND_LABEL[kind] ?? readable(kind);
   const ORIGIN_LABEL: Record<string, string> = { "codex-memory": "Codex memory file", "claude-auto-memory": "Claude Code memory file" };
   const firstLine = (text: unknown, limit = 160) => {
@@ -185,7 +185,7 @@ interface GraphController {
   const HARNESS_LABEL: Record<string, string> = { claude: "Claude Code", codex: "Codex", copilot: "Copilot CLI", opencode: "OpenCode" };
   const harnessLabel = (harness: string | null | undefined) => HARNESS_LABEL[harness ?? ""] ?? harness ?? "unknown";
   const hashFor = (view: string, params: Record<string, string> = {}) => { const query = new URLSearchParams(params).toString(); return `#/${view}${query ? `?${query}` : ""}`; };
-  const COMPONENT_LABEL: Record<string, string> = { indexer: "Search index", semantic: "Meaning search", observer: "Fact extraction", consolidation: "Cleanup" };
+  const COMPONENT_LABEL: Record<string, string> = { indexer: "Search index", semantic: "Search by meaning", observer: "Writing facts", consolidation: "Cleanup" };
   const componentLabel = (name: string) => {
     if (name.startsWith("hook:")) return `${harnessLabel(name.slice(5))} hooks`;
     if (name.startsWith("setup:")) return `${harnessLabel(name.slice(6))} setup`;
@@ -235,21 +235,21 @@ interface GraphController {
   function attention() {
     const items: AttentionItem[] = [];
     const health = data.health;
-    if (health.paused_until) items.push({ tone: "warn", text: `<b>Capture is paused</b> ${health.paused_until === "forever" ? "until you resume it" : `until ${h(full(health.paused_until))}`}. Run <code>agent-mem resume</code>.`, view: "health" });
+    if (health.paused_until) items.push({ tone: "warn", text: `<b>Recording is paused</b> ${health.paused_until === "forever" ? "until you resume it" : `until ${h(full(health.paused_until))}`}. Run <code>agent-mem resume</code>.`, view: "health" });
     for (const [component, info] of Object.entries(health.components ?? {})) {
       if (isFailing(info)) items.push({ tone: "bad", text: `<b>${h(componentLabel(component))} is failing:</b> ${h(firstLine(info.last_error, 140))}`, view: "health" });
     }
-    if (health.spool > 0) items.push({ tone: "warn", text: `<b>${plural(health.spool, "event")} waiting in the spool.</b> Run <code>agent-mem index</code>.`, view: "health" });
+    if (health.spool > 0) items.push({ tone: "warn", text: `<b>${plural(health.spool, "event")} not saved yet.</b> Run <code>agent-mem index</code>.`, view: "health" });
     // An old unreadable message stays visible on the health page; the banner is for fresh ones.
     const latest = data.quarantine_latest;
     const fresh = latest?.ts && Date.now() - (date(latest.ts)?.getTime() ?? 0) < 864e5;
     if (health.quarantine > 0 && fresh) items.push({ tone: "warn", text: `<b>${plural(health.quarantine, "hook message")} could not be read</b> and ${health.quarantine === 1 ? "was" : "were"} set aside. Everything else was saved.`, view: "health" });
     for (const agent of data.agents ?? []) {
-      if (agent.connected && agent.paused_until) items.push({ tone: "warn", text: `<b>Fact extraction for ${h(agent.label)} is paused</b> until ${h(clock(agent.paused_until))} (quota or login of <code>${h(agent.stage)}</code>). Requests stay queued.`, view: "health" });
+      if (agent.connected && agent.paused_until) items.push({ tone: "warn", text: `<b>Facts for ${h(agent.label)} are paused</b> until ${h(clock(agent.paused_until))} (usage limit or login of <code>${h(agent.stage)}</code>). Requests wait.`, view: "health" });
     }
     const proposed = data.rules.filter((rule) => !rule.enabled && inProjectOrGlobal(rule.project_id)).length;
-    if (proposed > 0) items.push({ tone: "info", text: `<b>${plural(proposed, "rule")} proposed from your corrections.</b> Review them before enabling.`, view: "learned" });
-    for (const warning of health.config_warnings ?? []) items.push({ tone: "warn", text: `<b>Config:</b> ${h(warning)}`, view: "health" });
+    if (proposed > 0) items.push({ tone: "info", text: `<b>${plural(proposed, "rule")} suggested from your corrections.</b> Check them before you switch them on.`, view: "learned" });
+    for (const warning of health.config_warnings ?? []) items.push({ tone: "warn", text: `<b>Settings:</b> ${h(warning)}`, view: "health" });
     return items;
   }
 
@@ -270,7 +270,7 @@ interface GraphController {
 <aside class="sidebar" aria-label="Viewer navigation">
 <a class="brand" href="${hashFor("overview")}">agent-mem<span class="brand-badge">v${h(String(data.agent_mem).split(".")[0])}</span></a>
 <nav aria-label="Sections">${groups}</nav>
-<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Capture paused" : "Capture active"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.<br>Always on at this address.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}<br>Run <code>agent-mem view</code> for the live viewer</span>`}</div>
+<div class="sidebar-foot"><strong><i class="dot ${paused ? "warn" : "good"}"></i>${paused ? "Recording paused" : "Recording"}</strong>${live() ? `<span><b class="live">Live</b> · updated ${h(clock(data.generated_at))}, every ${num(data.refresh)} s.<br>Always at this address.</span>` : `<span>Snapshot from ${h(full(data.generated_at))}<br>Run <code>agent-mem view</code> for the live viewer</span>`}</div>
 </aside>
 <div class="main">
 <header class="topbar">
@@ -317,7 +317,7 @@ interface GraphController {
       const session = sessionById(sessionId);
       const title = sessionTitle(session);
       return `<div class="session-head">${icon("session", 17)}<b class="session-title">${h(title || harnessLabel(session?.harness))}</b><span class="session-meta">${projectTag(items[0].project_id)}<span class="muted">${h(harnessLabel(session?.harness))} · ${h(sessionRange(session, items))}</span></span></div>` +
-        items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${turn.type ? tag(turn.type) : ""}${h(headline(turn) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
+        items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${turn.type ? tag(turn.type) : ""}${h(headline(turn) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "step")) : ""}</span></a>`).join("");
     }).join("");
   }
 
@@ -333,7 +333,7 @@ interface GraphController {
     const rules = data.rules.filter((rule) => inProjectOrGlobal(rule.project_id));
     const enabled = rules.filter((rule) => rule.enabled).length;
     const lede = [
-      names.length === 0 ? "Nothing captured yet." : `Across ${names.length > 3 ? plural(names.length, "project") : names.join(" and ")}.`,
+      names.length === 0 ? "Nothing recorded yet." : `Across ${names.length > 3 ? plural(names.length, "project") : names.join(" and ")}.`,
       `agent-mem keeps what your coding agents did and learned, and reminds them in the next session.`,
     ].join(" ");
     const alerts = attention().map((item) => `<div class="alert ${item.tone}">${icon("alert", 20)}<p>${item.text}</p><a class="text-link" href="${hashFor(item.view)}">Show</a></div>`).join("");
@@ -347,18 +347,18 @@ interface GraphController {
     const activity = `<section class="block block-yellow"><i class="block-deco deco-tile"></i><h2>Activity</h2><div class="stats">${stat(num(turnCount), `${approx}requests`)}${stat(num(sessionCount), "sessions")}${stat(num(allTurns.filter((t) => t.outcome === "error").length), "with errors")}</div><div class="block-foot"><div class="bars" role="img" aria-label="Requests per day over the last 14 days">${bars}</div><div class="bar-axis"><span>${h(dayLabel(days[0]))}</span><span>Today</span></div></div></section>`;
 
     const byKind = MEMORY_KINDS.map((kind): [string, number] => [kind, valid.filter((memory) => memory.kind === kind).length]).filter(([, count]) => count > 0);
-    const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? valid.length : data.counts.memories)}</b><span>current${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} replaced by newer ones` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(kindLabel(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, dead ends and preferences appear as agents work.</span>`}</div></section>`;
+    const memoryBlock = `<section class="block block-pink"><i class="block-deco deco-circle"></i><h2>Memories <a href="${hashFor("memory")}" aria-label="Open memories">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(scoped ? valid.length : data.counts.memories)}</b><span>current${data.counts.memories_invalid && !scoped ? ` · ${num(data.counts.memories_invalid)} replaced by newer ones` : ""}</span></div><div class="block-foot">${byKind.length ? `<div class="split-bar">${byKind.map(([kind, count]) => `<span class="kind-${kind}" style="flex:${count}"></span>`).join("")}</div><div class="legend-row">${byKind.slice(0, 5).map(([kind, count]) => `<span><i class="kind-${kind}"></i>${h(kindLabel(kind))} ${num(count)}</span>`).join("")}</div>` : `<span class="caption">Decisions, failed attempts and preferences appear as agents work.</span>`}</div></section>`;
 
     const learning = data.learning;
     // claude-mem's token economics: what the injected memories cost to read against the agent's measured work behind them.
     const injected: Partial<Injected> = data.health.injected ?? {};
-    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>${injected.saved_percent != null ? `${num(injected.saved_percent)}%` : "—"}</b><span>${injected.saved_percent != null ? "less to read than to redo, last 7 days" : injected.built_from ? "no injected memory with measured work yet" : "measured once a session ends"}</span></div><div class="block-foot"><div class="stats">${stat(`~${num(injected.tokens)}`, "tokens injected")}${stat(`~${num(injected.work)}`, "tokens of work behind them")}</div><span class="caption">Memory built from ~${num(injected.built_from)} tokens in ${plural(injected.measured_turns ?? 0, "request")}. Fresh tokens from the agents' transcripts; cache reads left out.</span></div></section>`;
+    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>${injected.saved_percent != null ? `${num(injected.saved_percent)}%` : "—"}</b><span>${injected.saved_percent != null ? "fewer tokens than working it out again (last 7 days)" : injected.built_from ? "no numbers yet" : "counted when a session ends"}</span></div><div class="block-foot"><div class="stats">${stat(`~${num(injected.tokens)}`, "tokens given to agents")}${stat(`~${num(injected.work)}`, "tokens it took to work out")}</div><span class="caption">Counted from the agents' own logs over ${plural(injected.measured_turns ?? 0, "request")}, without cached tokens.</span></div></section>`;
     const lessonCount = valid.filter((memory) => memory.kind === "lesson").length;
     const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learned <a href="${hashFor("learned")}" aria-label="Open what was learned">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(lessonCount)}</b><span>${lessonCount === 1 ? "lesson" : "lessons"} from mistakes and fixes</span></div><div class="block-foot"><div class="stats">${stat(num(learning.errors_fixed), learning.errors_fixed === 1 ? "error fix" : "error fixes")}${stat(num(enabled), enabled === 1 ? "rule on" : "rules on")}</div><span class="caption">Given to the next agent so it does not repeat them.</span></div></section>`;
 
 
     const list = filteredTurns().slice(0, 9);
-    const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No requests match" : "Nothing captured yet", allTurns.length ? "Try another search or outcome filter." : "Connect a harness with <code>agent-mem setup claude</code> (or codex, copilot, opencode) and start a session.");
+    const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No requests match" : "Nothing recorded yet", allTurns.length ? "Try another search or outcome filter." : "Connect an agent with <code>agent-mem setup claude --write</code> (or codex, copilot, opencode) and start a session.");
     const latest = valid.slice(0, 5).map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><span class="tag kind-${h(memory.kind)}">${h(kindLabel(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memoryText(memory), 110))}</b><span>M${memory.id} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></a>`).join("");
     const componentRows = Object.entries(data.health.components ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(0, 6).map(([component, info]) => {
       const failing = isFailing(info);
@@ -370,8 +370,8 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
 <div class="columns">
 <section class="panel"><div class="panel-head"><h2>Latest requests</h2><span class="spacer"></span>${outcomePills()}</div>${feed}<div class="panel-foot"><a class="text-link" href="${hashFor("timeline")}">All sessions ${icon("right", 16)}</a></div></section>
 <div class="stack">
-<section class="panel"><div class="panel-head"><h2>Recently learned</h2><span class="spacer"></span>${valid.length ? `<a class="text-link" href="${hashFor("memory")}">All</a>` : ""}</div>${latest || empty("No memories yet", "Agents store them with <code>mem_remember</code>; hooks add decisions, corrections and dead ends.")}</section>
-<section class="panel"><div class="panel-head"><h2>Background jobs</h2><span class="spacer"></span><a class="text-link" href="${hashFor("health")}">Health</a></div>${componentRows || empty("No hooks have run yet", "Run <code>agent-mem doctor</code> after your first session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Recently learned</h2><span class="spacer"></span>${valid.length ? `<a class="text-link" href="${hashFor("memory")}">All</a>` : ""}</div>${latest || empty("No memories yet", "They appear while your agents work: decisions, corrections, failed attempts.")}</section>
+<section class="panel"><div class="panel-head"><h2>Background jobs</h2><span class="spacer"></span><a class="text-link" href="${hashFor("health")}">Health</a></div>${componentRows || empty("Nothing has run yet", "Run <code>agent-mem doctor</code> after your first session.")}</section>
 </div></div>`;
   }
 
@@ -397,14 +397,14 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
     const feedTurns = list.filter((turn) => turn.session_id === active).slice().reverse();
     const head = session ? `<div class="panel-head session-panel-head"><h2>${h(sessionTitle(session) || harnessLabel(session.harness))}</h2><span class="session-meta">${projectTag(session.project_id)}${tag(harnessLabel(session.harness))}${session.branch ? tag(session.branch, "mono") : ""}<small>${h(sessionRange(session, []))}</small></span></div>${sessionSummary(session)}` : `<div class="panel-head"><h2>Requests</h2></div>`;
     const feed = feedTurns.length === 0
-      ? empty(filtering ? "Nothing matches in this session" : "No loaded turns for this session", filtering ? "Clear the search or outcome filter." : `The page holds the latest ${num(data.limits.turns)} turns.`)
+      ? empty(filtering ? "Nothing matches in this session" : "No requests loaded for this session", filtering ? "Clear the search or the filter." : `The page shows the latest ${num(data.limits.turns)} requests.`)
       : `<div class="feed">${feedTurns.map((turn) => {
         const actionCount = (data.actions[turn.id] ?? []).length;
-        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${turn.type ? tag(turn.type) : ""}${turn.outcome === "ok" ? "" : outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "action") : ""].filter(Boolean).join(" · ")}</span></header>${turn.title ? `<p><b>${h(turn.title)}</b></p>` : ""}<p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
+        return `<div class="feed-item"><div class="feed-rail"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}</div><button type="button" class="turn-card ${h(turn.outcome)}" data-action="turn" data-value="${turn.id}" aria-pressed="${String(turn.id) === state.turn}"><header><b>T${turn.id}</b>${turn.type ? tag(turn.type) : ""}${turn.outcome === "ok" ? "" : outcomeTag(turn.outcome)}<span class="muted">${[turn.files.length ? plural(turn.files.length, "file") : "", actionCount ? plural(actionCount, "step") : ""].filter(Boolean).join(" · ")}</span></header>${turn.title ? `<p><b>${h(turn.title)}</b></p>` : ""}<p>${h(plain(request(turn.prompt)) || "(no request text)")}</p>${turn.answer ? `<p class="answer">${h(plain(turn.answer))}</p>` : ""}</button></div>`;
       }).join("")}</div>`;
     return `<div class="page-head"><div><h1>Timeline</h1><p class="lede">Every request you gave an agent: what it did and how it ended. Pick a session on the left, then a request.</p></div>${outcomePills()}</div>
 <div class="timeline">
-<div class="session-list">${cards || empty("No sessions", "Sessions appear after a connected harness runs.")}${hidden ? `<p class="caption">${plural(hidden, "session")} without a request hidden.</p>` : ""}</div>
+<div class="session-list">${cards || empty("No sessions", "Sessions appear once a connected agent runs.")}${hidden ? `<p class="caption">${plural(hidden, "session")} without a request hidden.</p>` : ""}</div>
 <section class="panel">${head}${feed}</section>
 ${turnDetail(selected, session)}
 </div>`;
@@ -434,14 +434,14 @@ ${turnDetail(selected, session)}
   }
 
   function turnDetail(turn: Turn | undefined, session: Session | undefined) {
-    if (!turn) return `<aside class="detail empty-detail" aria-label="Turn detail"><header><h2>Turn</h2></header><p>Select a turn to see the request, every action, the result and what was learned from it.</p><span class="notice">${icon("lock", 16)}Captured text is untrusted and shown as stored. This page makes no network requests.</span></aside>`;
+    if (!turn) return `<aside class="detail empty-detail" aria-label="Request detail"><header><h2>Request</h2></header><p>Pick a request to see what was asked, every step, the result and what was learned from it.</p><span class="notice">${icon("lock", 16)}Shown exactly as recorded. This page loads nothing from the internet.</span></aside>`;
     const actions = data.actions[turn.id] ?? [];
     const learned = data.memories.filter((memory) => memory.turn_id === turn.id);
     const closeHref = hashFor("timeline", session ? { session: session.id } : {});
     // One line per action: what the agent said it does, then the command or file; failures stand out, the rest stays quiet.
-    const actionList = actions.length ? `<span class="section-label">Actions (${actions.length})</span><ul class="actions">${actions.map((action) => `<li class="${action.failed && !action.resolved ? "is-failed" : ""}"><header><b>${h(action.tool ?? "tool")}</b>${action.note ? `<span class="action-note">${h(action.note)}</span>` : ""}${action.failed ? tag(action.resolved ? "failed, fixed later" : `failed${action.exit_code ? ` · exit ${action.exit_code}` : ""}`, action.resolved ? "warn" : "bad") : ""}${action.external ? tag("external content", "warn") : ""}</header>${action.input || action.command ? `<code>${h(firstLine(action.input || action.command, 200))}</code>` : ""}${action.error_line ? `<code class="error-line">${h(action.error_line)}</code>` : ""}</li>`).join("")}</ul>` : "";
-    return `<aside class="detail ${h(turn.outcome)}" aria-label="Turn detail">
-<header><h2>T${turn.id} · ${h(outcomeLabel(turn.outcome))}</h2><a class="round-button" href="${closeHref}" aria-label="Close turn detail">${icon("close", 16)}</a></header>
+    const actionList = actions.length ? `<span class="section-label">Steps (${actions.length})</span><ul class="actions">${actions.map((action) => `<li class="${action.failed && !action.resolved ? "is-failed" : ""}"><header><b>${h(action.tool ?? "tool")}</b>${action.note ? `<span class="action-note">${h(action.note)}</span>` : ""}${action.failed ? tag(action.resolved ? "failed, fixed later" : `failed${action.exit_code ? ` · exit ${action.exit_code}` : ""}`, action.resolved ? "warn" : "bad") : ""}${action.external ? tag("outside content", "warn") : ""}</header>${action.input || action.command ? `<code>${h(firstLine(action.input || action.command, 200))}</code>` : ""}${action.error_line ? `<code class="error-line">${h(action.error_line)}</code>` : ""}</li>`).join("")}</ul>` : "";
+    return `<aside class="detail ${h(turn.outcome)}" aria-label="Request detail">
+<header><h2>T${turn.id} · ${h(outcomeLabel(turn.outcome))}</h2><a class="round-button" href="${closeHref}" aria-label="Close">${icon("close", 16)}</a></header>
 ${turn.title ? `<p class="detail-title">${turn.type ? tag(turn.type) : ""}<b>${h(turn.title)}</b></p>` : ""}
 <div class="pill-group">${projectTag(turn.project_id)}${session ? tag(harnessLabel(session.harness)) : ""}${session?.branch ? tag(session.branch, "mono") : ""}</div>
 <dl class="facts"><dt>Started</dt><dd>${h(full(turn.started_at))}</dd><dt>Ended</dt><dd>${h(turn.ended_at ? full(turn.ended_at) : "still running")}</dd>${turn.work != null ? `<dt>Work</dt><dd>~${num(turn.work)} tokens spent by the agent</dd>` : ""}</dl>
@@ -453,8 +453,8 @@ ${turn.truncated ? `<p class="notice"><span>Long text is shortened on this page.
 ${turn.files.length ? `<span class="section-label">Files</span><div class="file-list">${turn.files.map((file) => tag(file, "mono")).join("")}</div>` : ""}
 ${turn.errors.length ? `<span class="section-label">Errors</span><ul class="actions">${turn.errors.map((error) => `<li><code class="error-line">${h(error)}</code></li>`).join("")}</ul>` : ""}
 ${recallList(turn)}
-${learned.length ? `<span class="section-label">Learned from this turn</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
-<span class="notice">${icon("lock", 16)}Captured text is untrusted and shown as stored. Secrets were redacted at capture.</span>
+${learned.length ? `<span class="section-label">Learned from this request</span><ul class="actions">${learned.map((memory) => `<li><header>${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<a href="${hashFor("memory", { m: String(memory.id) })}"><b>M${memory.id}</b></a></header>${h(memoryText(memory))}</li>`).join("")}</ul>` : ""}
+<span class="notice">${icon("lock", 16)}Shown exactly as recorded. Passwords and keys were removed before saving.</span>
 </aside>`;
   }
 
@@ -463,7 +463,7 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
   // Which harness a memory belongs to: its session's, or for notes and MCP saves the one named in ``origin``.
   const harnessOf = (memory: Memory) => memory.harness || "other";
   const memoryRow = (memory: Memory) => `<a class="memory-row${memory.invalid_at ? " invalid" : ""}${String(memory.id) === state.memory ? " is-selected" : ""}" href="${hashFor("memory", { m: String(memory.id) })}">${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<span class="memory-text">${inline(memoryText(memory))}</span><span class="muted mono">M${memory.id}</span></a>`;
-  const KIND_PLURAL: Record<string, string> = { dead_end: "dead ends", native_note: "agent notes", summary: "summaries", correction: "corrections" };
+  const KIND_PLURAL: Record<string, string> = { dead_end: "failed attempts", native_note: "agent notes", summary: "summaries", correction: "corrections" };
   // "3 decisions · 2 lessons" as coloured dots, so a closed session says what is in it.
   const kindMix = (items: Memory[]) => MEMORY_KINDS.map((kind): [string, number] => [kind, items.filter((memory) => memory.kind === kind).length]).filter(([, count]) => count).map(([kind, count]) => `<span class="mix"><i class="swatch kind-${kind}"></i>${num(count)} ${h(count === 1 ? kindLabel(kind) : KIND_PLURAL[kind] ?? `${kindLabel(kind)}s`)}</span>`).join("");
 
@@ -516,7 +516,7 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
     return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents keep in mind, sorted by agent, then by the session it came from. A closed session shows what is inside; open it to read the memories, click one to see its source or to delete it.</p></div></div>
 <div class="filter-rows">${harnessPills}${kindPills}</div>
 <div class="${selected ? "with-detail" : ""}">
-<div>${blocks || empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search, agent or kind." : "Agents write them with the <code>mem_remember</code> MCP tool; hooks add decisions, corrections and dead ends.")}
+<div>${blocks || empty(all.length ? "No memories match" : "No memories yet", all.length ? "Try another search, agent or kind." : "They appear while your agents work: decisions, corrections, failed attempts.")}
 ${limitReached(data.memories, "memories") ? `<p class="muted">This page holds the latest ${num(data.limits.memories)} memories. <code>agent-mem search</code> finds older ones.</p>` : ""}</div>
 ${selected ? memoryDetail(selected) : ""}
 </div>`;
@@ -533,8 +533,8 @@ ${selected ? memoryDetail(selected) : ""}
   // Where a memory came from, in words: an agent's own memory file, the background extraction, or the agent itself.
   function memorySource(memory: Memory) {
     if (memory.source === "native") return ORIGIN_LABEL[memory.origin ?? ""] ?? "agent memory file";
-    if (memory.kind === "lesson") return "lesson from a turn";
-    if (memory.source === "agent" && memory.turn_id) return `extracted from a ${harnessLabel(memory.origin)} turn`;
+    if (memory.kind === "lesson") return "lesson from a request";
+    if (memory.source === "agent" && memory.turn_id) return `from a ${harnessLabel(memory.origin)} request`;
     return memory.origin ? `saved by ${harnessLabel(memory.origin)}` : "saved by an agent";
   }
 
@@ -547,10 +547,10 @@ ${selected ? memoryDetail(selected) : ""}
 <div class="pill-group">${projectTag(memory.project_id)}${tag(memorySource(memory))}${memory.invalid_at ? tag("replaced", "warn") : ""}</div>
 <div class="text-box">${inline(memoryText(memory))}${memory.body && !memoryText(memory).startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? `\n\n${h(memory.body)}` : ""}</div>
 ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show ${id}</code> prints all of it.</span></p>` : ""}
-<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Invalid since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.work ? `<dt>Work</dt><dd>~${num(memory.work)} tokens to find out, ~${num(Math.ceil((memoryText(memory).length) / 4))} to read</dd>` : ""}${memory.turn_id ? `<dt>From turn</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
+<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Outdated since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.work ? `<dt>Work</dt><dd>~${num(memory.work)} tokens to find out, ~${num(Math.ceil((memoryText(memory).length) / 4))} to read</dd>` : ""}${memory.turn_id ? `<dt>From request</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
 <span class="section-label">Commands</span>
 <div class="copy-list">${copyable(`agent-mem show ${id}`)}${copyable(`agent-mem purge --id ${id}`)}</div>
-<p class="notice">${icon("lock", 16)}<span>Purge deletes the memory with its search keys and vectors and removes this page. An agent can do the same with the <code>mem_forget</code> tool.</span></p>
+<p class="notice">${icon("lock", 16)}<span>The purge command deletes the memory for good, also from search. Agents can do the same with the <code>mem_forget</code> tool.</span></p>
 </aside>`;
   }
 
@@ -569,9 +569,9 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     const recipes = data.recipes.filter((recipe) => inProject(recipe.project_id) && matches([recipe.error_text, recipe.command_key, ...recipe.files]));
     const profile = data.profile.filter((item) => inProject(item.project_id) && matches([item.key, item.value]));
     const sections: [string, string, number, string][] = [
-      ["lessons", "Lessons", lessons.length, "Advice the background model wrote after a turn in which something went wrong and was fixed, or you corrected the agent. The best ones are given to every new session."],
+      ["lessons", "Lessons", lessons.length, "Advice written after a request where something went wrong and was fixed, or where you corrected the agent. The best ones are given to every new session."],
       ["fixes", "Error fixes", recipes.length, "A command failed, files were changed, and the same command passed. When the error comes back, the agent is told what fixed it last time."],
-      ["rules", "Rules", rules.length, "When you correct the same thing several times (for example “pnpm, not npm”), agent-mem proposes a rule. Proposed rules only warn; enabled rules can block the command."],
+      ["rules", "Rules", rules.length, "When you correct the same thing several times (for example “pnpm, not npm”), agent-mem suggests a rule. A suggested rule only warns; a rule you switch on can block the command."],
       ["commands", "Commands", new Set(profile.map((item) => item.key)).size, "The test, lint, build and install commands that worked in a project. Agents get them at session start, so they do not have to guess."],
     ];
     const guide = `<div class="learn-guide">${sections.map(([id, title, count, text]) => `<a class="learn-card" href="#learn-${id}"><b>${num(count)}</b><span class="learn-title">${h(title)}</span><span class="learn-text">${h(text)}</span></a>`).join("")}</div>`;
@@ -582,7 +582,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
       const fix = files.length ? `Changed ${files.slice(0, 4).map((file) => `<code>${h(file)}</code>`).join(", ")}${files.length > 4 ? ` and ${num(files.length - 4)} more` : ""}, then <code>${h(recipe.command_key)}</code> passed.` : `<code>${h(recipe.command_key)}</code> passed again later in the same session.`;
       return `<div class="learn-item"><span class="learn-label">Problem</span><code class="error-line">${h(firstLine(recipe.error_text, 220))}</code><span class="learn-label">What fixed it</span><p>${fix}</p><div class="learn-meta">${recipe.last_turn_id ? `<span>Seen in ${turnLink(recipe.last_turn_id)}</span>` : ""}${projectTag(recipe.project_id)}${tag(`worked ${plural(recipe.successes, "time")}`, "good")}${recipe.recurrences ? tag(`came back ${plural(recipe.recurrences, "time")}`, "warn") : ""}</div></div>`;
     }).join("");
-    const ruleRows = rules.map((rule) => `<div class="learn-item"><p>${inline(rule.message)}</p><div class="learn-meta">${rule.enabled ? tag("enabled: can block", "good") : tag("proposed: only warns", "info")}<span class="muted">matches <code>${h(rule.pattern)}</code></span><span class="muted">from ${plural(rule.evidence, "correction")} · used ${plural(rule.hits, "time")}${rule.overrides ? ` · overridden ${plural(rule.overrides, "time")}` : ""}</span>${projectTag(rule.project_id)}${copyable(`agent-mem rules ${rule.enabled ? "disable" : "enable"} ${rule.id}`)}</div></div>`).join("");
+    const ruleRows = rules.map((rule) => `<div class="learn-item"><p>${inline(rule.message)}</p><div class="learn-meta">${rule.enabled ? tag("on: can block", "good") : tag("suggested: only warns", "info")}<span class="muted">matches <code>${h(rule.pattern)}</code></span><span class="muted">from ${plural(rule.evidence, "correction")} · used ${plural(rule.hits, "time")}${rule.overrides ? ` · overridden ${plural(rule.overrides, "time")}` : ""}</span>${projectTag(rule.project_id)}${copyable(`agent-mem rules ${rule.enabled ? "disable" : "enable"} ${rule.id}`)}</div></div>`).join("");
     const groups = new Map<string, ProfileItem[]>();
     for (const item of profile) groups.set(item.key, [...(groups.get(item.key) ?? []), item]);
     const profileRows = [...groups.entries()].map(([key, items]) => {
@@ -593,9 +593,9 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
     const panel = (id: string, title: string, intro: string, body: string, emptyTitle: string, emptyText: string) => `<section class="panel" id="learn-${id}"><div class="panel-head"><h2>${h(title)}</h2></div><p class="panel-intro">${intro}</p>${body || empty(emptyTitle, emptyText)}</section>`;
     return `<div class="page-head"><div><h1>Learned</h1><p class="lede">What agent-mem worked out by watching your sessions, so the next agent does not repeat a mistake. You do not need to do anything here; only rules can be switched on.</p></div></div>
 ${guide}
-${panel("lessons", "Lessons", sections[0][3], lessonRows, "No lessons yet", "They appear after a turn in which something went wrong and was fixed, or you corrected the agent.")}
+${panel("lessons", "Lessons", sections[0][3], lessonRows, "No lessons yet", "They appear after a request where something went wrong and was fixed, or where you corrected the agent.")}
 ${panel("fixes", "Error fixes", sections[1][3], recipeRows, "No fixes learned yet", "They appear after a failing command passes again in the same session.")}
-${panel("rules", "Rules", sections[2][3], ruleRows, "No rules yet", "Say “pnpm instead of npm” a few times and a rule is proposed.")}
+${panel("rules", "Rules", sections[2][3], ruleRows, "No rules yet", "Say “pnpm instead of npm” a few times and a rule is suggested.")}
 ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No commands yet", "Test, lint and build commands show up after they ran successfully.")}`;
   }
 
@@ -851,7 +851,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
 
   function agentRow(agent: Agent) {
     const recording = agent.connected ? '<i class="dot good"></i> Connected' : agent.cli ? '<i class="dot warn"></i> Not connected' : '<span class="muted">Not installed</span>';
-    let facts = '<span class="muted">kept as written (no model)</span>';
+    let facts = '<span class="muted">saved word for word (no AI model)</span>';
     if (!agent.enabled) facts = '<span class="muted">off in config</span>';
     else if (agent.stage) facts = `<code>${h(agent.model)}</code> <span class="muted">via ${h(agent.stage)}</span>${agent.paused_until ? ` ${tag(`paused until ${clock(agent.paused_until)}`, "warn")}` : ""}`;
     const today = agent.facts_ok_today || agent.facts_failed_today ? `${num(agent.facts_ok_today)} runs${agent.facts_failed_today ? ` · ${num(agent.facts_failed_today)} failed` : ""}` : '<span class="muted">—</span>';
@@ -873,24 +873,24 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     const agentRows = (data.agents ?? []).filter((agent) => matches([agent.label, agent.stage, agent.model])).map(agentRow).join("");
     return `<div class="page-head"><div><h1>Health &amp; privacy</h1><p class="lede">Is everything working? Green means yes. This is the state when the page was written; <code>agent-mem doctor</code> checks it right now.</p></div></div>
 <div class="state-grid">
-<section class="block ${paused ? "block-yellow" : "block-green"}"><i class="block-deco deco-triangle"></i><h2>Capture</h2><div class="big-number"><b>${paused ? "Paused" : "Active"}</b></div><span class="caption">${paused ? "Resume with <code>agent-mem resume</code>" : "Pause with <code>agent-mem pause --for 1h</code>"}</span></section>
-<section class="block block-blue"><h2>Meaning search</h2><div class="big-number"><b>${semantic === "unavailable" || semantic === "not indexed yet" ? "Off" : "On"}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Word search works. For search by meaning run <code>agent-mem models install</code>." : `Finds memories with other words, too. Model: ${h(semantic.split("/").pop())}`}</span></section>
-<section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and retires outdated facts.</span></section>
+<section class="block ${paused ? "block-yellow" : "block-green"}"><i class="block-deco deco-triangle"></i><h2>Recording</h2><div class="big-number"><b>${paused ? "Paused" : "On"}</b></div><span class="caption">${paused ? "Resume with <code>agent-mem resume</code>" : "Pause with <code>agent-mem pause --for 1h</code>"}</span></section>
+<section class="block block-blue"><h2>Search by meaning</h2><div class="big-number"><b>${semantic === "unavailable" || semantic === "not indexed yet" ? "Off" : "On"}</b></div><span class="caption">${semantic === "unavailable" || semantic === "not indexed yet" ? "Search by words works. To also search by meaning, run <code>agent-mem models install</code>." : `Finds memories with other words, too. Model: ${h(semantic.split("/").pop())}`}</span></section>
+<section class="block block-yellow"><h2>Cleanup</h2><div class="big-number"><b style="font-size:26px">${h(ago(health.consolidated_at))}</b></div><span class="caption">Merges duplicates and removes outdated facts.</span></section>
 </div>
 <section class="panel"><div class="panel-head"><h2>Agents</h2><small>which agents are recorded and which model turns their requests into facts</small></div><div class="table-wrap"><table class="agents"><thead><tr><th>Agent</th><th>Recording</th><th>Facts by</th><th>Today</th><th>Next step</th></tr></thead><tbody>${agentRows}</tbody></table></div></section>
 <div class="columns">
-<section class="panel"><div class="panel-head"><h2>Background jobs</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Hooks report here after the first captured session.")}</section>
+<section class="panel"><div class="panel-head"><h2>Background jobs</h2><small>green = working</small></div>${rows ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Last worked</th><th>Runs</th><th>Errors</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Nothing has run yet", "Shows up after your first recorded session.")}</section>
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
-<div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB · schema v${h(health.schema)}</span></div>
-<div class="row"><span class="grow wrap"><b>Tokens, last 7 days</b><span>~${num(health.injected?.tokens)} injected, ~${num(health.injected?.work)} tokens of agent work behind them</span></span><span class="value">${health.injected?.saved_percent != null ? `${num(health.injected.saved_percent)}% less` : "—"}</span></div>
+<div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB</span></div>
+<div class="row"><span class="grow wrap"><b>Tokens, last 7 days</b><span>~${num(health.injected?.tokens)} given to agents, ~${num(health.injected?.work)} it took to work them out</span></span><span class="value">${health.injected?.saved_percent != null ? `${num(health.injected.saved_percent)}% fewer` : "—"}</span></div>
 <div class="row"><b>Waiting to be saved</b><span class="value">${plural(health.spool, "event")}</span></div>
 <div class="row"><span class="grow wrap"><b>Could not be read</b>${data.quarantine_latest ? `<span>Latest ${h(when(data.quarantine_latest.ts))}: ${h(data.quarantine_latest.reason)}</span>` : ""}</span><span class="value">${plural(health.quarantine, "file")}</span></div>
-<div class="row"><b>Data directory</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
+<div class="row"><b>Data folder</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
 <section class="panel"><div class="panel-head"><h2>Privacy</h2></div>
-<div class="row"><span class="grow wrap"><b>Not encrypted at rest</b><span>Anyone who can read the data directory can read your memory.</span></span></div>
+<div class="row"><span class="grow wrap"><b>Not encrypted</b><span>Anyone who can open the data folder can read your memory.</span></span></div>
 <div class="row"><span class="grow wrap"><b>Only on this computer</b><span>The viewer listens on 127.0.0.1 and makes no requests to the internet. Pages saved with <code>agent-mem view --output</code> hold a copy of recent data.</span></span></div>
-<div class="row"><span class="grow wrap"><b>Redaction</b><span>Secrets are redacted and private sections dropped before anything is stored.</span></span></div></section>
+<div class="row"><span class="grow wrap"><b>Passwords and keys removed</b><span>Secrets and &lt;private&gt; sections are removed before anything is saved.</span></span></div></section>
 </div></div>`;
   }
 

@@ -271,7 +271,7 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
     if claude is None:
         if add:  # the hooks are written anyway; without this line the summary claimed the MCP server too
             print(
-                f"  MCP server not registered (`claude` not on PATH). Run: claude mcp add --scope user {MARK} -- {exe} mcp",
+                f"  MCP server not registered (`claude` is not installed). Run: claude mcp add --scope user {MARK} -- {exe} mcp",
                 file=sys.stderr,
             )
         return

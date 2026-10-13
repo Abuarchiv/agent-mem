@@ -101,7 +101,7 @@ def test_next_session_starts_with_the_summary(driver: Driver, conn, config: Conf
     view = inject.terminal(block.text, "proj", color=False, recent=inject.recent_work(conn, "claude:s2"))
     lines = view.splitlines()
     assert "Recent work" in lines and any("● Parser-Absturz behoben" in line for line in lines)
-    assert "Last session · claude" in lines
+    assert "Last session · Claude Code" in lines
     assert any("→ next steps Import prüfen" in line for line in lines)
 
     snapshot = ui.build_snapshot(conn, config)
@@ -326,7 +326,7 @@ def test_the_model_gets_the_work_log_and_the_terminal_shows_it_from_there(driver
     assert f"[T{first} · " in block.text and "· work, bugfix] Parser-Absturz behoben" in block.text
     assert block.text.count("Rename the invoice module") == 1  # shown as the last session, not twice
     lines = inject.terminal(block.text, "proj", color=False).splitlines()
-    assert lines.index("Last session · claude") < lines.index("Recent work")
+    assert lines.index("Last session · Claude Code") < lines.index("Recent work")
     assert any("● Parser-Absturz behoben" in line for line in lines)
 
 
@@ -364,4 +364,4 @@ def test_the_panel_counts_in_singular_for_one(driver: Driver, conn):
     driver.stop("s1", "Behoben.")
     project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
     store.add_memory(conn, project_id=project_id, kind="fact", title="t", body="b", source="agent", trust="observer")
-    assert inject.overview(conn, "claude:s1")[0] == "1 memory (1 new today) · 1 session · 1 turn in this project"
+    assert inject.overview(conn, "claude:s1")[0] == "This project: 1 memory (1 new today) · 1 session · 1 request"

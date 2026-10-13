@@ -2,64 +2,64 @@
 
 One local memory for **Claude Code, Codex, GitHub Copilot CLI and OpenCode**.
 
-Agent Mem records what your coding agents do through their native hooks, turns it into facts in the background, and gives every agent the relevant part of that history at the right moment. No telemetry, no cloud, no API key: one SQLite file plus a small vector index on your machine, and a read-only viewer at `http://localhost:37778`. Model calls for fact extraction go through the harness CLI you are already logged into.
+Agent Mem records what your coding agents do, writes short facts from it in the background, and reminds every agent of what matters at the right moment. Nothing leaves your computer: no telemetry, no cloud, no API key. Everything sits in one database file on your machine, and you can browse it at `http://localhost:37778`. To write facts, Agent Mem uses the agent's own command-line tool you are already logged into.
 
 ## Install
 
 ```sh
 uv tool install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
-agent-mem setup all --write                         # every harness on PATH; or one: claude, codex, copilot, opencode
+agent-mem setup all --write                         # every agent installed here; or one: claude, codex, copilot, opencode
 agent-mem doctor
 ```
 
 agent-mem is not on PyPI; install it from the repository, never by its bare name (a package registered there under that name would not be ours). `pipx install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"` works too.
 
-`setup --write` registers the hooks and the MCP server with the **absolute path** of the binary, so sessions started from an IDE find it too. It downloads the embedding model (about 220 MB) and prints what it detected: harnesses, providers, extras. Start a session, finish one turn, and the next session begins with the facts from the first.
+`setup --write` connects each agent (hooks and MCP server) with the **full path** of the `agent-mem` command, so sessions started from an editor find it too. It downloads the search model (about 220 MB) and prints what it found. Start a session, send one request, and the next session begins with what the first one learned.
 
-Alternatives: `curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh` (installs uv first; on Windows in PowerShell: `irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1 | iex`), the Claude Code marketplace (`/plugin marketplace add Abuarchiv/agent-mem`, `/plugin install agent-mem@agent-mem`; the plugin only registers the hooks, so install the `agent-mem` command first with the `uv tool install` line above and skip `setup --write`, or every hook fails with "command not found"), or `agent-mem setup <harness>` without `--write` to see the manual steps.
+Alternatives: `curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh` (installs uv first; on Windows in PowerShell: `irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1 | iex`), the Claude Code marketplace (`/plugin marketplace add Abuarchiv/agent-mem`, `/plugin install agent-mem@agent-mem`; the plugin only registers the hooks, so install the `agent-mem` command first with the `uv tool install` line above and skip `setup --write`, or every hook fails with "command not found"), or `agent-mem setup <agent>` without `--write` to see the steps to do by hand.
 
 Three sizes:
 
 | Install | Size | You get |
 | --- | --- | --- |
-| `agent-mem` | about 10 MB | capture, full-text search, context injection, MCP server, raw turn summaries |
-| `agent-mem[semantic]` | plus 220 MB model | vector search (`paraphrase-multilingual-MiniLM-L12-v2`, ONNX, no PyTorch) |
+| `agent-mem` | about 10 MB | recording, search by words, reminders for the agent, MCP server, requests saved word for word |
+| `agent-mem[semantic]` | plus 220 MB model | search by meaning (`paraphrase-multilingual-MiniLM-L12-v2`, ONNX, no PyTorch) |
 | `agent-mem[semantic,observer]` | plus about 400 MB | background facts, work log, lessons, daily review of duplicates and outdated facts (mem0, Qdrant local mode, spaCy) |
 
-Update with `agent-mem upgrade` (`--extras observer` adds an extra): it installs the newest commit of the source you installed from (extras kept), downloads a model the new release needs, then runs `agent-mem doctor --fix`, which migrates the database and rewrites hooks that an older release wrote (Codex asks you to trust changed hooks once more with `/hooks`). Running the install script again does the same. On a fresh machine the script also runs `agent-mem setup all --write` (every harness on PATH; `agent-mem uninstall all` undoes it). Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no binary.
+Update with `agent-mem upgrade` (`--extras observer` adds an extra): it installs the newest commit of the source you installed from (extras kept), downloads a model the new release needs, then runs `agent-mem doctor --fix`, which migrates the database and rewrites hooks that an older release wrote (Codex asks you to trust changed hooks once more with `/hooks`). Running the install script again does the same. On a fresh machine the script also runs `agent-mem setup all --write` (every agent installed here; `agent-mem uninstall all` undoes it). Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no binary.
 
-Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data). To remove everything, run `agent-mem uninstall all`, then `agent-mem purge --all`, then `uv tool uninstall agent-mem`; removing the tool first leaves hooks that call a missing binary on every event.
+Uninstall with `agent-mem uninstall <agent>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data). To remove everything, run `agent-mem uninstall all`, then `agent-mem purge --all`, then `uv tool uninstall agent-mem`; removing the tool first leaves hooks that call a missing binary on every event.
 
 ## What it does
 
 | Moment | What happens |
 | --- | --- |
-| Session start | A short briefing: facts about this project, commands that work, decisions, dead ends, preferences, and the last session with what was done and what is still open, oldest first so an update reads as one. Claude Code and Codex show a panel in your terminal: the project's memory size, which model turns your requests into facts (or why none does), the recent work (time, type, title), what was injected (grouped by day, with ids), anything that needs your attention, and the viewer address. Copilot CLI and the Copilot app show the same panel, uncoloured, as progress lines in their timeline, and a short summary when a session ends. |
-| You send a prompt | Up to three matching memories, only when the match is strong (lexical, no model call; question words do not count). The terminal stays quiet. |
+| Session start | A short briefing: facts about this project, commands that work, decisions, failed attempts, preferences, and the last session with what was done and what is still open, oldest first so an update reads as one. Claude Code and Codex show a panel in your terminal: the project's memory size, which model turns your requests into facts (or why none does), the recent work (time, type, title), what the agent was given (grouped by day, with ids), anything that needs your attention, and the viewer address. Copilot CLI and the Copilot app show the same panel, uncoloured, as progress lines in their timeline, and a short summary when a session ends. |
+| You send a request | Matching memories, only when the match is strong (search by words, no model call; question words do not count). The terminal stays quiet. |
 | Before a command or edit | A warning if it matches something you corrected before or a change that was reverted. Optional hard block (opt-in rules). |
 | A command fails | If this error was fixed before, the agent sees how. |
-| Turn ends | The turn is stored. A detached worker extracts facts from it in the background, gives the turn a type and a title, updates the session summary (learned, done, next steps), writes a lesson when the turn shows a mistake and its fix or a correction of yours, and exits when the queue is empty. |
-| Once a day | The worker reads all facts and lessons of a project and retires duplicates and facts that a newer one replaced. Your own notes are never touched. A newer fact and an older one it contradicts are both shown with dates until then; the agent reads the newer one as current. |
-| Context compaction | Session goal, decisions and open problems are re-injected (Claude Code, Codex) or added to the compaction prompt (OpenCode). Claude Code shows the panel again. |
-| Session ends | Claude Code shows what was saved: turns, files, errors. |
+| The agent finishes a request | The request is saved. A background process writes facts from it, gives it a type and a title, updates the session summary (learned, done, next steps), writes a lesson when something went wrong and was fixed or you corrected the agent, and stops when nothing is left to do. |
+| Once a day | The background process reads all facts and lessons of a project and removes duplicates and facts that a newer one replaced. Your own notes are never touched. A newer fact and an older one it contradicts are both shown with dates until then; the agent reads the newer one as current. |
+| Context compaction | Session goal, decisions and open problems are given to the agent again (Claude Code, Codex) or added to the compaction prompt (OpenCode). Claude Code shows the panel again. |
+| Session ends | Claude Code and Copilot show what was saved: requests, files, errors. |
 | Something breaks | Claude Code and Codex show it in the terminal right away (at most every ten minutes per failure) with the command that helps, usually `agent-mem doctor`. |
 
-All harnesses write into the same memory. What Claude Code learned is available to Codex and vice versa.
+All agents write into the same memory. What Claude Code learned is available to Codex and vice versa.
 
 ### Facts, without an API key
 
-After each turn the Stop hook starts `agent-mem observe` as a detached process. The worker bundles up to five turns of a session, runs mem0's extraction with a prompt tuned for coding work (conventions, decisions, dead ends, preferences; no generic knowledge, no secrets, in your language), and stores the facts in SQLite with a mirror in a local Qdrant index. Each fact is tagged as decision, rule, dead end or fact; a rule written as "Use pnpm instead of npm" becomes the same rule as a typed correction. Final answers of subagents are part of the bundle. For every new fact it checks similar old facts once per bundle and asks the model: KEEP, SUPERSEDE or DUPLICATE. A correction such as "we switched from pytest to nox" invalidates the old fact and removes it from the index.
+After each request the Stop hook starts `agent-mem observe` in the background. It takes up to five requests of a session at a time, runs mem0's extraction with a prompt tuned for coding work (conventions, decisions, failed attempts, preferences; no generic knowledge, no secrets, in your language), and stores the facts in SQLite with a mirror in a local Qdrant index. Each fact is tagged as decision, rule, failed attempt or fact; a rule written as "Use pnpm instead of npm" becomes the same rule as a typed correction. Final answers of subagents are part of the bundle. For every new fact it checks similar old facts once per bundle and asks the model: KEEP, SUPERSEDE or DUPLICATE. A correction such as "we switched from pytest to nox" invalidates the old fact and removes it from the index.
 
 The model is the CLI you already pay for, started under your login with no tools, no MCP servers and no settings:
 
-| Turn came from | Model stage | Command |
+| Request came from | Model | Command |
 | --- | --- | --- |
 | Claude Code | Claude Haiku | `claude -p --restricted --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --model haiku` |
 | Codex | GPT-6-Luna, low effort | `codex exec --ephemeral --ignore-user-config -s read-only -m gpt-6-luna -c model_reasoning_effort=low` |
 | Copilot CLI | Auto, efficiency tier (resolves to GPT-6-Luna) | `copilot -s --model auto --auto-tier efficiency` |
-| OpenCode, or no CLI found | none | the turn is kept as a raw summary |
+| OpenCode, or no CLI found | none | the request is saved word for word |
 
-A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Each stage uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, the stage retries once with the CLI's own default. With only one CLI installed, its turns get facts and the others stay raw; with all three, each turn goes to the CLI it came from. Quota or login errors pause the stage for an hour; the turn stays queued. Ollama can be added as a local fallback stage (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95 (see `docs/PLAN.md`, appendix B).
+A request never leaves its vendor (a Claude request is not sent to OpenAI). Each uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer that model, it tries once more with the CLI's own default. With only one CLI installed, its requests get facts and the others are saved word for word; with all three, each request goes to the CLI it came from. A usage limit or a missing login pauses facts for an hour; the request waits. Ollama can be added as a local fallback (`"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`); it is off by default because local models load the machine. Measured on this project's fixtures: 9 of 10 corrections resolved, 1.9 model calls per bundle, hook overhead with the worker spawn 63 ms p95 (see `docs/PLAN.md`, appendix B).
 
 ### How ranking learns (no model needed)
 
@@ -67,17 +67,17 @@ A turn never leaves its vendor (a Claude turn is not sent to OpenAI). Each stage
 - **Implicit feedback:** a recalled memory counts as useful when the agent opens it, edits its files or cites its id.
 - **Error to fix recipes:** a failing command, edits, the same command passing: that becomes a recipe.
 - **Corrections to rules:** "use pnpm instead of npm" (typed, or extracted by the worker) becomes a proposed rule: a note before the next `npm` command; enabled, it blocks `npm` with the reason shown to the agent.
-- **Dead ends:** reverted changes become warnings for the same files.
+- **Failed attempts:** reverted changes become warnings for the same files.
 - **Association graph:** files, commands, errors and packages that occur together are linked and searched with Personalized PageRank.
-- **Consolidation:** daily, in the background: decay, global preferences, superseding, stale anchors.
+- **Cleanup:** daily, in the background: old unused memories rank lower, preferences that hold everywhere become global, replaced facts are retired.
 
-Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the turns of that time first.
+Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the requests of that time first.
 
 ### Tokens: what reading costs against what finding out took
 
-Like claude-mem, Agent Mem compares what an injected memory costs to read with the work behind it. The work is measured, not estimated: after a turn ends, the indexer reads the harness's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that turn: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its turn's share (the turn's work divided by the memories it produced), so a block that names several memories of one turn counts that turn once. Copilot turns are measured from `~/.copilot/session-state/<id>/events.jsonl`; OpenCode turns stay unmeasured.
+Like claude-mem, Agent Mem compares what a memory costs the agent to read with the work it took to find it out. The work is measured, not estimated: after a request ends, the indexer reads the agent's own transcript (Claude Code's message `usage`, subagents included; Codex's `token_count` events) and stores the fresh tokens the agent spent on that request: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context. A memory carries its request's share (the request's work divided by the memories it produced), so several memories of one request count that request once. Copilot requests are measured from `~/.copilot/session-state/<id>/events.jsonl`; OpenCode requests stay unmeasured.
 
-- Terminal (session start): `Read ~1,240 tokens · built from ~86,000 tokens of agent work · 99% less to read than to redo`, shown only when measured work stands behind the block.
+- Terminal (session start): `Reading this: ~1,240 tokens · working it out again: ~86,000 tokens`, shown only when measured work stands behind it.
 - `agent-mem status`: the same for the last 7 days, plus the total work the memory was built from.
 - Viewer: a Tokens block on the overview, a line on the Health page, and `Work` in every request and memory detail.
 
@@ -87,7 +87,7 @@ This is a comparison, not a measured saving: nobody knows how much of that work 
 
 ```
 agent-mem status [--json] | doctor [--fix] [--json] | paths
-agent-mem setup all|<harness> [--write] [--no-models] | uninstall all|<harness> | upgrade [--extras ...]
+agent-mem setup all|<agent> [--write] [--no-models] | uninstall all|<agent> | upgrade [--extras ...]
 agent-mem observe [--drain] [--once] [--status] [--retry-failed] [--reprocess-raw] [--reindex]
 agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
 agent-mem show T12 M3 | view [--project DIR] [--output FILE|FOLDER] [--no-open]
@@ -107,7 +107,7 @@ MCP tools for agents: `mem_search`, `mem_timeline`, `mem_get`, `mem_remember`, `
 
 Open **http://localhost:37778** (or run `agent-mem view`). It runs in the background, starts with every agent session, and `setup --write` also registers it as a login item (macOS LaunchAgent, systemd user service, Windows Startup folder), so it is reachable after a restart. The page is built fresh on every reload; an open tab reloads itself every ten seconds.
 
-**Overview** shows activity and the latest requests. **Timeline** lists every session under its title with its summary (done, learned, next steps) and its requests; a request shows each action with the agent's own description, and failed commands stand out. **Memories** is sorted by agent, then by session, preferences and lessons first; the agents' own memory files get their own group. **Learned** explains lessons, error fixes, rules and commands and links each to the turn it came from. **Graph** shows how your files, tools, libraries, settings and errors relate ("search.py uses SQLite FTS5"), read from the memories by the background model; click a thing to read each relation and the memory it comes from. **Health** shows the hooks and background jobs. mem0 reads facts with a spaCy model for its entity linking and lemmatisation: set `observe.entity_model` to a spaCy model in the language of your facts, for example `de_core_news_sm` (mem0's default is `en_core_web_sm`), then run `agent-mem models install`: it downloads the model from spaCy's releases into agent-mem's model directory (checksum pinned for the German and English models), so updating or reinstalling the tool keeps it. `agent-mem doctor` says when it is missing.
+**Overview** shows activity and the latest requests. **Timeline** lists every session under its title with its summary (done, learned, next steps) and its requests; a request shows each step with the agent's own description, and failed commands stand out. **Memories** is sorted by agent, then by session, preferences and lessons first; the agents' own memory files get their own group. **Learned** explains lessons, error fixes, rules and commands and links each to the request it came from. **Graph** shows how your files, tools, libraries, settings and errors relate ("search.py uses SQLite FTS5"), read from the memories by the background model; click a thing to read each relation and the memory it comes from. **Health** shows whether the hooks and background jobs work. Facts are linked by topic with a spaCy model: set `observe.entity_model` to a spaCy model in the language of your facts, for example `de_core_news_sm` (mem0's default is `en_core_web_sm`), then run `agent-mem models install`: it downloads the model from spaCy's releases into agent-mem's model directory (checksum pinned for the German and English models), so updating or reinstalling the tool keeps it. `agent-mem doctor` says when it is missing.
 
 It listens on this machine only (no login; turn it off on shared machines). `agent-mem view --output FILE` writes an offline snapshot instead. Change the port with `"viewer": {"port": 37778}`, turn it off with `"viewer": {"enabled": false}`, remove the login item with `agent-mem serve --no-autostart`.
 
@@ -116,15 +116,15 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 | You see | Do |
 | --- | --- |
 | `agent-mem: the database is damaged` | `agent-mem index` moves it aside as `memory.db.corrupt-<time>` (with its WAL) and starts a new database |
-| `semantic: unavailable` in `status` | `agent-mem upgrade --extras semantic` (installs the extra and downloads the model) |
-| facts never appear | `agent-mem observe --status`; the harness CLI (`claude`, `codex`, `copilot`) must be on PATH and logged in |
-| Codex captures nothing | start `codex`, run `/hooks` and trust the agent-mem hooks once |
+| `Search by meaning: unavailable` in `status` | `agent-mem upgrade --extras semantic` (installs it and downloads the model) |
+| facts never appear | `agent-mem observe --status`; the agent's command (`claude`, `codex`, `copilot`) must be installed and logged in |
+| Codex records nothing | start `codex`, run `/hooks` and trust the agent-mem hooks once |
 | `Cannot start the viewer on 127.0.0.1:37778` | another program uses the port; set `"viewer": {"port": <free port>}` |
 | any other error | `agent-mem doctor`; `AGENT_MEM_DEBUG=1 agent-mem <command>` prints the full traceback |
 
 ## Configuration
 
-`config.json` in the data directory (`agent-mem paths`). Invalid values fall back to defaults and show up in `agent-mem doctor`.
+`config.json` in the data folder (`agent-mem paths`). Invalid values fall back to defaults and show up in `agent-mem doctor`.
 
 ```json
 {
@@ -150,16 +150,16 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 }
 ```
 
-`observe.enabled: false` stops all model calls; turns are still captured and searchable. Budgets are tokens per hook output; each harness is cut to what it passes to the model in one piece (Claude Code 10,000 characters, Codex 8,000 tokens). `native_notes: false` stops reading the notes Claude Code (`~/.claude/projects/*/memory/*.md`) and Codex (`~/.codex/memories/rollout_summaries/`) keep themselves; each harness is shown only the other one's notes. `cross_vendor: true` lets any installed stage handle any turn. Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
+`observe.enabled: false` stops all model calls; requests are still recorded and searchable. Budgets are tokens per hook output; each agent is cut to what it passes to the model in one piece (Claude Code 10,000 characters, Codex 8,000 tokens). `native_notes: false` stops reading the notes Claude Code (`~/.claude/projects/*/memory/*.md`) and Codex (`~/.codex/memories/rollout_summaries/`) keep themselves; each agent is shown only the other one's notes. `cross_vendor: true` lets any installed CLI write facts for any request. Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
 
 ## Privacy and security
 
-- **No network except model downloads.** No telemetry; mem0's telemetry is switched off and verified by a test. The only outbound traffic is your harness CLI talking to its own provider, under your login.
-- Secrets are redacted before storage (API keys, tokens, private keys, passwords in assignments and URLs). `<private>…</private>` is never stored. Excluded files are recorded by path only. Output of web tools and third-party MCP servers never enters a bundle.
-- The extraction process runs in an empty temporary directory with `AGENT_MEM_INTERNAL=1`, so its own session is never captured.
+- **No network except model downloads.** No telemetry; mem0's telemetry is switched off and verified by a test. The only outbound traffic is your agent's own CLI talking to its own provider, under your login.
+- Secrets are removed before storage (API keys, tokens, private keys, passwords in assignments and URLs). `<private>…</private>` is never stored. Excluded files are recorded by path only. Output of web tools and third-party MCP servers never enters a bundle.
+- The extraction process runs in an empty temporary directory with `AGENT_MEM_INTERNAL=1`, so its own session is never recorded.
 - Recalled text is framed as data, not instructions. Facts never become rules or preferences by themselves.
-- The database is **not encrypted at rest**. The data directory is created with owner-only permissions on macOS and Linux.
-- `purge` deletes matching data from SQLite, the vector index and the spool.
+- The database is **not encrypted**. The data folder is created with owner-only permissions on macOS and Linux.
+- `purge` deletes matching data from the database, the search index and events not saved yet.
 
 See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -168,11 +168,11 @@ See [SECURITY.md](SECURITY.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 | | Status |
 | --- | --- |
 | Python | 3.11 to 3.14 |
-| OS | Ubuntu, macOS arm64, macOS Intel (no fastembed wheels: lexical and graph search only), Windows |
-| Harnesses tested | Claude Code 2.x, Codex CLI 0.x, Copilot CLI 1.0.96 and the Copilot app 1.1.29 (macOS), OpenCode 1.18 |
+| OS | Ubuntu, macOS arm64, macOS Intel (no fastembed wheels: search by words and graph only), Windows |
+| Agents tested | Claude Code 2.x, Codex CLI 0.x, Copilot CLI 1.0.96 and the Copilot app 1.1.29 (macOS), OpenCode 1.18 |
 | CI | lint, types, tests, wheel smoke test on all four OS |
 
-Harness notes: Codex asks you to trust plugin hooks once (`/hooks`). Copilot CLI and the Copilot app read the hooks `agent-mem setup copilot --write` puts in `~/.copilot/hooks`; plugin-defined `preToolUse` hooks do not fire there ([copilot-cli#2540](https://github.com/github/copilot-cli/issues/2540)), so use `setup` rather than a Copilot plugin. Sessions the app runs in its worktrees (`~/.copilot/copilot-worktrees`) count for their repository; plain app chats are not recorded. Run OpenCode sessions serially per repository.
+Agent notes: Codex asks you to trust plugin hooks once (`/hooks`). Copilot CLI and the Copilot app read the hooks `agent-mem setup copilot --write` puts in `~/.copilot/hooks`; plugin-defined `preToolUse` hooks do not fire there ([copilot-cli#2540](https://github.com/github/copilot-cli/issues/2540)), so use `setup` rather than a Copilot plugin. Sessions the app runs in its worktrees (`~/.copilot/copilot-worktrees`) count for their repository; plain app chats are not recorded. Run OpenCode sessions serially per repository.
 
 ## Development
 

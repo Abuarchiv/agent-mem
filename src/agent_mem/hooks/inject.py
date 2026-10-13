@@ -567,13 +567,14 @@ _RULE = "─" * 64
 # The terminal shows the newest rows per group; the rest stays one `agent-mem view` away.
 WORK_ROWS = 5
 KIND_ROWS = 3
+AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex", "copilot": "Copilot CLI", "opencode": "OpenCode"}
 _KIND_ORDER = ["preference", "rule", "correction", "lesson", "dead_end", "decision", "fact", "summary", "native_note"]
 _KIND_NAME = {
     "preference": "Preferences",
     "rule": "Rules",
     "correction": "Corrections",
     "lesson": "Lessons",
-    "dead_end": "Dead ends",
+    "dead_end": "Failed attempts",
     "decision": "Decisions",
     "fact": "Facts",
     "summary": "Summaries",
@@ -601,19 +602,19 @@ def overview(conn: sqlite3.Connection, session_id: str, config: Config | None = 
     turns = conn.execute("SELECT COUNT(*) FROM turns WHERE project_id = ?", (project_id,)).fetchone()[0]
     memory = "memory" if memories == 1 else "memories"
     lines = [
-        f"{memories} {memory} ({new} new today) · {sessions} session{'s' * (sessions != 1)}"
-        f" · {turns} turn{'s' * (turns != 1)} in this project"
+        f"This project: {memories} {memory} ({new} new today) · {sessions} session{'s' * (sessions != 1)}"
+        f" · {turns} request{'s' * (turns != 1)}"
     ]
     with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
         waiting = conn.execute("SELECT COUNT(*) FROM observe_queue WHERE state = 'pending'").fetchone()[0]
         line = _facts_line(conn, config, row[1]) if config is not None else None
         if waiting:
-            line = f"{line + ' · ' if line else ''}{waiting} turn{'s' * (waiting != 1)} waiting"
+            line = f"{line + ' · ' if line else ''}{waiting} request{'s' * (waiting != 1)} waiting for facts"
         if line:
             lines.append(line)
     paused = conn.execute("SELECT value FROM meta WHERE key = 'paused_until'").fetchone()
     if paused:
-        lines.append(f"capture paused until {paused[0]} (`agent-mem resume` turns it back on)")
+        lines.append(f"Recording paused until {paused[0]}. `agent-mem resume` turns it back on.")
     return lines
 
 
@@ -623,16 +624,16 @@ def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str |
         return None
     found = config.observe.stage_for(harness)
     if found is None:
-        return f"facts: no model for {harness} turns (`{harness}` CLI not found); requests are kept as written"
+        return f"Facts: off, `{harness}` is not installed. Requests are saved word for word."
     paused = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause.{found[0]}",)).fetchone()
     if paused and paused[0] > timeutil.iso():
         when = timeutil.parse(paused[0])
         until = when.astimezone().strftime("%H:%M") if when else paused[0]
         kind = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause_kind.{found[0]}",)).fetchone()
         if kind and kind[0] == "login":
-            return f"facts: `{found[0]}` is not logged in; log in there once. Requests stay queued (retry at {until})"
-        return f"facts: {found[0]} paused until {until} after a usage limit; requests stay queued"
-    return f"facts by {found[1]} via {found[0]}"
+            return f"Facts: paused, `{found[0]}` is not logged in. Log in there once; requests wait (next try {until})."
+        return f"Facts: paused until {until}, the usage limit of {found[0]} is reached. Requests wait."
+    return f"Facts written by {found[1]} ({found[0]})"
 
 
 def session_summary(conn: sqlite3.Connection, session_id: str, color: bool = True) -> str | None:
@@ -648,8 +649,8 @@ def session_summary(conn: sqlite3.Connection, session_id: str, color: bool = Tru
             files.update(item for item in json.loads(row["files_json"] or "[]") if isinstance(item, str))
     failed = sum(row["outcome"] == "error" for row in rows)
     summary = (
-        f"session saved · {len(rows)} turn{'s' * (len(rows) != 1)} · {len(files)} file{'s' * (len(files) != 1)}"
-        f"{f' · {failed} ended with an error' if failed else ''} · facts follow in the background"
+        f"session saved · {len(rows)} request{'s' * (len(rows) != 1)} · {len(files)} file{'s' * (len(files) != 1)}"
+        f"{f' · {failed} ended with an error' if failed else ''} · facts are added in the background"
     )
     return f"\x1b[1;36magent-mem\x1b[0m \x1b[2m{summary}\x1b[0m" if color else f"agent-mem {summary}"
 
@@ -708,7 +709,8 @@ def _read_entry(panel: _Panel, kind: str, text: str, ident: str) -> None:
         panel.errors.append((ident, "!", "31", text, ""))
     elif kind.startswith("last session"):
         if ", " in kind:
-            panel.last_heading = f"Last session · {kind.split(', ', 1)[1]}"
+            agent = kind.split(", ", 1)[1]
+            panel.last_heading = f"Last session · {AGENT_NAMES.get(agent, agent)}"
         panel.last.insert(0, (ident, "›", "1", text, ""))
     else:
         panel.kinds.setdefault(kind, []).append((ident, text))
@@ -746,8 +748,9 @@ def terminal(
         return [paint("2", f"        … {hidden} more")] if hidden > 0 else []
 
     panel = _read_panel(context)
+    entries = "1 entry" if panel.count == 1 else f"{panel.count} entries"
     out = [
-        f"{paint('1;36', 'agent-mem')} {paint('2', f'· {heading} · {panel.count} item{chr(115) * (panel.count != 1)} · ~{tokens(context)} tokens')}",
+        f"{paint('1;36', 'agent-mem')} {paint('2', f'· {heading} · {entries} loaded (~{tokens(context)} tokens)')}",
         *(paint("2", f"  {line}") for line in facts or []),
         paint("2", _RULE),
         *(paint("31", line) for line in panel.warnings),
@@ -758,7 +761,7 @@ def terminal(
     if panel.last:
         out += [paint("1", panel.last_heading), *map(row, panel.last)]
     if panel.errors:
-        out += [paint("1;31", "Open errors"), *map(row, panel.errors[:3]), *more(len(panel.errors) - 3)]
+        out += [paint("1;31", "Still failing"), *map(row, panel.errors[:3]), *more(len(panel.errors) - 3)]
     if panel.work:  # from the context, newest first
         out += [paint("1", "Recent work"), *map(row, panel.work[:WORK_ROWS]), *more(len(panel.work) - WORK_ROWS)]
     elif recent:  # after compaction the block has no work log; the hook passes it for the terminal only
@@ -782,7 +785,9 @@ def terminal(
         out += more(len(items) - KIND_ROWS)
     if not (panel.goal or panel.last or panel.errors or panel.work or recent or panel.kinds):
         out.append(
-            paint("2", "Nothing to recall here yet" + ("; this session is being recorded." if recording else "."))
+            paint(
+                "2", "Nothing saved for this project yet" + ("; this session is being recorded." if recording else ".")
+            )
         )
     if panel.commands:
         out.append(f"{paint('1', 'Commands')}  {_clip(panel.commands, 100)}")
@@ -790,13 +795,12 @@ def terminal(
         out.append(f"{paint('1', 'Files')}  {_clip(panel.files, 100)}")
     shown = re.findall(r"\b[MT]\d+\b", re.sub(r"\x1b\[[\d;]*m", " ", "\n".join(out[3:])))
     hint = f"agent-mem show {shown[0]}" if shown else "agent-mem search <words>"
-    browse = f"everything: {viewer}" if viewer else "everything: agent-mem view"
+    browse = f"everything in the browser: {viewer}" if viewer else "everything in the browser: agent-mem view"
     out.append(paint("2", _RULE))
     read = tokens(context)
     if spent > read:  # claude-mem's footer: what loading costs against what finding it out took
         out.append(
-            paint("2", f"Read ~{read:,} tokens · built from ~{spent:,} tokens of agent work · ")
-            + paint("32", f"{(spent - read) * 100 // spent}% less to read than to redo")  # floor: 99.9 is not 100
+            paint("2", f"Reading this: ~{read:,} tokens · ") + paint("32", f"working it out again: ~{spent:,} tokens")
         )
-    out.append(paint("2", f"Details: {hint} · {browse}"))
+    out.append(paint("2", f"More: {hint} · {browse}"))
     return "\n".join(out)

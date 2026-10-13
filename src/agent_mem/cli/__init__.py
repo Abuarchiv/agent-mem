@@ -88,14 +88,14 @@ def _parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(prog="agent-mem", description="Local, self-learning memory for coding agents.")
     parser.add_argument(
-        "--data-dir", type=Path, help="data directory (default: platform data dir or AGENT_MEM_DATA_DIR)"
+        "--data-dir", type=Path, help="data folder (default: the usual one for this system, or AGENT_MEM_DATA_DIR)"
     )
     parser.add_argument("--version", action="version", version=f"agent-mem {version()}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("status", help="counts, learning metrics and component health")
+    p = sub.add_parser("status", help="what is saved, what was learned, which jobs work")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("doctor", help="check installation, database and harnesses")
+    p = sub.add_parser("doctor", help="check that everything is set up and working")
     p.add_argument("--fix", action="store_true", help="fix what is safe to fix")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("search", help="search memory")
@@ -104,42 +104,48 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--all-projects", action="store_true")
     p.add_argument("--limit", type=int, default=8)
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("show", help="details for ids such as T12 or M3")
+    p = sub.add_parser("show", help="show entries by id, e.g. T12 (a request) or M3 (a memory)")
     p.add_argument("ids", nargs="+")
-    p = sub.add_parser("pause", help="stop capturing")
+    p = sub.add_parser("pause", help="stop recording")
     p.add_argument("--for", dest="duration", help="e.g. 30m, 2h, 1d (default: until resume)")
-    sub.add_parser("resume", help="resume capturing")
+    sub.add_parser("resume", help="start recording again")
     p = sub.add_parser("export", help="export memory as JSON")
     p.add_argument("--project", help="project directory")
     p.add_argument("--output", type=Path)
-    p = sub.add_parser("purge", help="permanently delete data (also from the spool)")
+    p = sub.add_parser("purge", help="delete data for good")
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--id")
     group.add_argument("--project", help="project directory")
-    group.add_argument("--before", help="ISO date; delete sessions that ended before it")
+    group.add_argument("--before", help="date like 2026-01-31; delete sessions that ended before it")
     group.add_argument("--all", action="store_true")
     p.add_argument("--yes", action="store_true")
-    p = sub.add_parser("observe", help="run the background observer (extract facts from closed turns)")
-    p.add_argument("--drain", action="store_true", help="process the queue, wait observe.idle_seconds for more, exit")
+    p = sub.add_parser("observe", help="write facts from recorded requests now (runs by itself after each request)")
+    p.add_argument(
+        "--drain",
+        action="store_true",
+        help="work through the waiting requests, wait observe.idle_seconds for more, exit",
+    )
     p.add_argument("--once", action="store_true", help="process what is due and exit without waiting")
-    p.add_argument("--status", action="store_true", help="show queue, errors and today's model calls")
+    p.add_argument("--status", action="store_true", help="show waiting requests, errors and today's model calls")
     p.add_argument("--retry-failed", action="store_true")
-    p.add_argument("--reprocess-raw", action="store_true", help="re-queue turns that were stored without a model")
+    p.add_argument(
+        "--reprocess-raw", action="store_true", help="write facts for requests that were saved word for word"
+    )
     p.add_argument(
         "--reindex", action="store_true", help="rebuild the mem0 index from the facts in SQLite (no model call)"
     )
     p.add_argument("--quiet", action="store_true")
-    p = sub.add_parser("index", help="run the background indexer once")
+    p = sub.add_parser("index", help="update the search index now (runs by itself)")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--no-download", action="store_true")
-    sub.add_parser("consolidate", help="run consolidation now")
-    p = sub.add_parser("rules", help="learned rules (avoid a command after repeated corrections)")
+    sub.add_parser("consolidate", help="merge duplicates and remove outdated memories now (runs by itself)")
+    p = sub.add_parser("rules", help="rules learned from your corrections, e.g. pnpm instead of npm")
     p.add_argument("action", choices=["list", "enable", "disable", "delete"], nargs="?", default="list")
     p.add_argument("rule_id", nargs="?", type=_rule_id)
-    sub.add_parser("lessons", help="suggest lines for AGENTS.md / CLAUDE.md from repeated lessons")
-    p = sub.add_parser("models", help="embedding and concept model status or download")
+    sub.add_parser("lessons", help="suggest lines for AGENTS.md / CLAUDE.md from lessons that keep coming up")
+    p = sub.add_parser("models", help="show or download the models for search by meaning and topics")
     p.add_argument("action", choices=["status", "install"], nargs="?", default="status")
-    p = sub.add_parser("eval", help="retrieval evaluation (LongMemEval-S format)")
+    p = sub.add_parser("eval", help="measure search quality (for developers, LongMemEval-S format)")
     p.add_argument("dataset", type=Path, nargs="?", help="LongMemEval-S JSON (omit with --fixture)")
     p.add_argument("--limit", type=int)
     p.add_argument("--no-semantic", action="store_true")
@@ -158,19 +164,17 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--embedder", help="fastembed model name (E2), default from config")
     p.add_argument("--vector-floor", type=float, help="override retrieval.min_vector_score (sqlite backend)")
     p.add_argument("--progress", type=Path, help="JSONL with one line per finished question; resumes on rerun")
-    p = sub.add_parser("setup", help="connect a harness (Claude Code, Codex, Copilot CLI, OpenCode)")
+    p = sub.add_parser("setup", help="connect an agent (Claude Code, Codex, Copilot CLI, OpenCode)")
     p.add_argument(
-        "harness", choices=["all", "claude", "codex", "copilot", "opencode"], help="all: every harness on PATH"
+        "harness", choices=["all", "claude", "codex", "copilot", "opencode"], help="all: every agent installed here"
     )
     p.add_argument(
         "--write",
         action="store_true",
-        help="register hooks and the MCP server with the absolute path of this binary (otherwise print the steps)",
+        help="make the changes (without it, only print the steps)",
     )
-    p.add_argument(
-        "--no-models", action="store_true", help="with --write: skip the embedding and concept model downloads"
-    )
-    p = sub.add_parser("uninstall", help="remove hooks and MCP entries written by `setup --write`; data stays")
+    p.add_argument("--no-models", action="store_true", help="with --write: do not download the search and topic models")
+    p = sub.add_parser("uninstall", help="disconnect an agent; your data stays")
     p.add_argument("harness", choices=["all", "claude", "codex", "copilot", "opencode"])
     p = sub.add_parser("view", help="open the viewer in the browser (starts it if needed)")
     p.add_argument("--project", help="only this project directory (default: all projects)")
@@ -178,15 +182,15 @@ def _parser() -> argparse.ArgumentParser:
         "--output", type=Path, help="write an offline snapshot page here (a file, or a folder for agent-mem.html)"
     )
     p.add_argument("--no-open", action="store_true", help="write the snapshot page and print its path, open nothing")
-    p = sub.add_parser("serve", help="run the viewer on 127.0.0.1 (the hooks and `view` start it for you)")
+    p = sub.add_parser("serve", help="run the viewer on this computer only (starts by itself)")
     p.add_argument("--quiet", action="store_true")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--autostart", action="store_true", help="start the viewer at every login, and now")
     group.add_argument("--no-autostart", action="store_true", help="remove the login item")
-    p = sub.add_parser("upgrade", help="install the newest version from where this one came from, then `doctor --fix`")
+    p = sub.add_parser("upgrade", help="update to the newest version, then run `doctor --fix`")
     p.add_argument("--extras", nargs="+", default=[], choices=["semantic", "observer"], help="also install these")
-    sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
-    sub.add_parser("paths", help="show data locations")
+    sub.add_parser("mcp", help="run the MCP server (your agent starts it)")
+    sub.add_parser("paths", help="show where the data is stored")
 
     return parser
 

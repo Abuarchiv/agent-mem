@@ -25,7 +25,7 @@ def test_hook_run_end_to_end(config: Config, project: Path, conn):
     start = json.dumps({"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"})
     data = json.loads(hook.run("claude", None, start, config))
     assert "hookSpecificOutput" not in data  # nothing to inject yet, but the user sees the panel
-    assert "Nothing to recall here yet" in data["systemMessage"] and "1 session ·" in data["systemMessage"]
+    assert "Nothing saved for this project yet" in data["systemMessage"] and "1 session ·" in data["systemMessage"]
     hook.run("claude", None, _prompt_payload(project, "s", "Build the parser for invoices"), config)
     hook.run(
         "claude",
@@ -65,15 +65,15 @@ def test_panel_names_the_fact_model_or_why_there_is_none(config: Config, project
     start = {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(project), "source": "startup"}
     monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}" if name == "claude" else None)
     panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
-    assert "facts by haiku via claude" in panel
+    assert "Facts written by haiku (claude)" in panel
     conn = db.connect(config)
     db.set_meta(conn, "observe.pause.claude", "2999-01-01T10:00:00.000Z")
     conn.close()
     panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
-    assert "facts: claude paused until" in panel and "stay queued" in panel
+    assert "Facts: paused until" in panel and "Requests wait" in panel
     monkeypatch.setattr(shutil, "which", lambda name: None)
     panel = json.loads(hook.run("claude", None, json.dumps(start), config))["systemMessage"]
-    assert "facts: no model for claude turns" in panel
+    assert "Facts: off, `claude` is not installed" in panel
 
 
 def test_prompt_injection_stays_out_of_the_terminal(config: Config, project: Path):
@@ -91,7 +91,7 @@ def test_session_end_and_failures_reach_the_terminal(config: Config, project: Pa
     hook.run("claude", None, _prompt_payload(project, "s", "Build the parser"), config)
     end = {"hook_event_name": "SessionEnd", "session_id": "s", "cwd": str(project), "reason": "exit"}
     message = json.loads(hook.run("claude", None, json.dumps(end), config))["systemMessage"]
-    assert "session saved · 1 turn · 0 files" in message
+    assert "session saved · 1 request · 0 files" in message
 
     config.db_path.write_bytes(b"not a database" * 100)
     first = json.loads(hook.run("claude", None, _prompt_payload(project, "s", "again"), config))
@@ -311,13 +311,13 @@ def test_terminal_view_groups_what_the_model_got():
     )
     view = inject.terminal(context, "shop", color=False)
     lines = view.splitlines()
-    assert lines[0] == f"agent-mem · shop · 4 items · ~{inject.tokens(context)} tokens"
+    assert lines[0] == f"agent-mem · shop · 4 entries loaded (~{inject.tokens(context)} tokens)"
     # The last session leads, memories are grouped by kind (newest first, at most three per kind shown).
-    assert lines.index("Last session · codex") < lines.index("Open errors") < lines.index("◆ Decisions 1")
+    assert lines.index("Last session · Codex") < lines.index("Still failing") < lines.index("◆ Decisions 1")
     assert "  T7    › fix parser → done, tests pass" in lines and "  M3      use uv, not pip" in lines
-    assert "✗ Dead ends 1" in lines and "  M4      pip install broke the venv" in lines
+    assert "✗ Failed attempts 1" in lines and "  M4      pip install broke the venv" in lines
     assert "claude hooks failing" in view and "Commands  test: `uv run pytest`" in view
-    assert lines[-1] == "Details: agent-mem show T7 · everything: agent-mem view"
+    assert lines[-1] == "More: agent-mem show T7 · everything in the browser: agent-mem view"
     assert "\x1b[" not in view and "\x1b[" in inject.terminal(context, "shop")
 
 
@@ -395,5 +395,5 @@ def test_copilot_shows_the_panel_as_progress_lines(config: Config, project: Path
     (end,) = hook.run("copilot", "sessionEnd", json.dumps({**start, "reason": "complete"}), config).splitlines()
     assert json.loads(end) == {
         "type": "progress",
-        "message": "agent-mem session saved · 1 turn · 0 files · facts follow in the background",
+        "message": "agent-mem session saved · 1 request · 0 files · facts are added in the background",
     }

@@ -32,7 +32,7 @@ def test_a_full_disk_says_the_session_is_not_recorded(config: Config, project: P
             path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     out = start["systemMessage"]
     assert "not being recorded" in out and "No space left" in out
-    assert "wait in the spool" not in out and "is being recorded" not in out
+    assert "saved later" not in out and "is being recorded" not in out
 
 
 def test_an_event_queued_behind_the_spool_on_a_full_disk_is_reported_lost(

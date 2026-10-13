@@ -272,7 +272,7 @@ def test_odd_ids_and_durations_are_rejected(config: Config, capsys):
 def test_export_of_an_unknown_project_fails(config: Config, tmp_path: Path, capsys):
     base = ["--data-dir", str(config.data_dir)]
     assert cli.main([*base, "export", "--project", str(tmp_path / "missing")]) == 2
-    assert "No captured project" in capsys.readouterr().err
+    assert "No recorded project" in capsys.readouterr().err
 
 
 def test_purge_removes_quarantine_and_replaced_database(driver: Driver, config: Config, project: Path):

@@ -61,7 +61,7 @@ def _project(conn: sqlite3.Connection, directory: str | None) -> identity.Projec
 
 
 def _unknown_project(directory: str) -> int:
-    print(f"No captured project at {os.path.abspath(directory)}.", file=sys.stderr)
+    print(f"No recorded project at {os.path.abspath(directory)}.", file=sys.stderr)
     return 2
 
 
@@ -73,38 +73,41 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
     if ns.json:
         print(json.dumps(data, indent=2, default=str))
         return 0
+    from agent_mem.hooks.hook import job_name
+
+    def count(n: int, word: str, many: str = "") -> str:
+        return f"{n} {word if n == 1 else many or word + 's'}"
+
     learning = data["learning"]
-    print(f"agent-mem · {data['data_dir']} · {data['db_mb']} MB · schema v{data['schema']}")
+    print(f"agent-mem · {data['data_dir']} · {data['db_mb']} MB")
     print(
-        f"projects {data['projects']} · sessions {data['sessions']} · turns {data['turns']} · memories {data['memories']} · vectors {data['vectors']}"
+        f"Saved: {count(data['projects'], 'project')} · {count(data['sessions'], 'session')}"
+        f" · {count(data['turns'], 'request')} · {count(data['memories'], 'memory', 'memories')}"
     )
-    print(f"recipes {data['recipes']} · rules enabled {data['rules_enabled']} / proposed {data['rules_proposed']}")
     print(
-        f"learning: errors fixed {learning['errors_fixed']} · known errors recurred {learning['known_errors_recurred']}"
-        f" · repetition rate {learning['repetition_rate'] if learning['repetition_rate'] is not None else '-'}"
+        f"Learned: {count(data['recipes'], 'error fix', 'error fixes')} · rules: {data['rules_enabled']} on,"
+        f" {data['rules_proposed']} suggested · fixed errors that came back: {learning['known_errors_recurred']}"
     )
-    print(f"semantic: {data['semantic']} · spool {data['spool']} · quarantine {data['quarantine']}")
+    print(f"Search by meaning: {data['semantic']} ({count(data['vectors'], 'entry', 'entries')} indexed)")
+    if data["spool"] or data["quarantine"]:
+        print(
+            f"Not saved yet: {count(data['spool'], 'event')} · could not be read: {count(data['quarantine'], 'file')}"
+        )
     injected = data["injected"]
     print(
-        f"injected: today ~{injected['today_tokens']} tokens · last {injected['days']} days {injected['blocks']} blocks,"
-        f" ~{injected['tokens']} tokens, ~{injected['tokens_per_session'] or '-'} per session"
+        f"Given to agents: today ~{injected['today_tokens']} tokens · last {injected['days']} days"
+        f" ~{injected['tokens']} tokens, {count(injected['blocks'], 'time')}"
+        f" (~{injected['tokens_per_session'] or '-'} per session)"
     )
-    if injected["built_from"]:
-        drew = (
-            f"those blocks stand for ~{injected['work']:,} tokens of agent work (-{injected['saved_percent']}% to read)"
-            if injected["saved_percent"] is not None
-            else "no injected memory has measured work yet"
-        )
-        print(
-            f"work: {drew} · memory built from ~{injected['built_from']:,} tokens in {injected['measured_turns']}"
-            " turns (fresh tokens from the transcripts, cache reads left out)"
-        )
-    print(f"last consolidation {data['consolidated_at'] or 'never'}")
+    if injected["saved_percent"] is not None:
+        print(f"  working that out took the agents ~{injected['work']:,} tokens")
+    print(f"Last cleanup: {data['consolidated_at'] or 'never'}")
     if data["paused_until"]:
-        print(f"capture paused until {data['paused_until']}")
+        print(f"Recording paused until {data['paused_until']}")
+    print("Background jobs:")
     for component, info in sorted(data["components"].items()):
         print(
-            f"  {component}: ok {info['ok_count']} (last {info['last_ok_at'] or '-'}), errors {info['error_count']}"
+            f"  {job_name(component)}: ok {info['ok_count']} (last {info['last_ok_at'] or '-'}), errors {info['error_count']}"
             + (f" (last: {info['last_error']})" if info["error_count"] else "")
         )
     for warning in data["config_warnings"]:
@@ -171,14 +174,14 @@ def cmd_pause(ns: argparse.Namespace, config: Config) -> int:
     until = timeutil.iso(timeutil.now() + _duration(ns.duration)) if ns.duration else "forever"
     with _conn(config) as conn, db.transaction(conn):
         db.set_meta(conn, "paused_until", until)
-    print(f"Capture paused until {until}.")
+    print(f"Recording paused until {until}.")
     return 0
 
 
 def cmd_resume(ns: argparse.Namespace, config: Config) -> int:
     with _conn(config) as conn, db.transaction(conn):
         conn.execute("DELETE FROM meta WHERE key = 'paused_until'")
-    print("Capture resumed.")
+    print("Recording again.")
     return 0
 
 
@@ -323,7 +326,7 @@ def _purge_project(ns: argparse.Namespace, config: Config, conn: sqlite3.Connect
         config,
         lambda r: bool((r.get("event") or {}).get("cwd")) and identity.is_within(str(r["event"]["cwd"]), project.root),
     )
-    print(f"Deleted project {project.name} ({len(owners)} items, {removed} spooled events).")
+    print(f"Deleted project {project.name} ({len(owners)} items, {removed} events not saved yet).")
     return 0
 
 
@@ -343,7 +346,7 @@ def _purge_before(ns: argparse.Namespace, config: Config, conn: sqlite3.Connecti
         conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
         conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
     removed = _purge_spooled(config, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp)
-    print(f"Deleted {len(owners)} items and {removed} spooled events before {ns.before}.")
+    print(f"Deleted {len(owners)} items and {removed} unsaved events from before {ns.before}.")
     return 0
 
 
@@ -423,7 +426,7 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
 
     embedder, reason = semantic.load_embedder_verbose(config, allow_download=ns.action == "install")
     if embedder is None:
-        print(f"Semantic search unavailable: {reason}. Lexical search keeps working.")
+        print(f"Search by meaning is not available: {reason}. Search by words keeps working.")
         return 1 if ns.action == "install" else 0
     print(f"Model ready: {embedder.model} (cache {config.model_dir}).")
     from agent_mem.cli import install
@@ -438,10 +441,10 @@ def cmd_models(ns: argparse.Namespace, config: Config) -> int:
         try:
             path = spacy_model.download_model(config)
         except (OSError, ValueError) as error:
-            print(f"Concept model {name} not downloaded: {error}. Facts work without mem0's entity linking.")
+            print(f"Topic model {name} not downloaded: {error}. Facts still work, they are just not linked by topic.")
             return 1
     print(
-        f"Concept model {'ready: ' + name + f' ({path})' if path else name + ' missing: run `agent-mem models install`'}."
+        f"Topic model {'ready: ' + name + f' ({path})' if path else name + ' missing: run `agent-mem models install`'}."
     )
     return 0
 
@@ -525,16 +528,16 @@ SETUP = {
 def _detect_table(found: dict[str, Any]) -> str:
     rows = [f"  agent-mem binary: {found['binary']}"]
     for name, path in found["harnesses"].items():
-        rows.append(f"  harness {name:9s} {'found ' + path if path else 'not on PATH'}")
+        rows.append(f"  agent {name:9s} {'found ' + path if path else 'not installed'}")
     for name, path in found["providers"].items():
         if name == "ollama":
-            state = "found (opt-in: add 'ollama' to observe.providers)" if path else "not installed (optional)"
+            state = "found (to use it, add 'ollama' to observe.providers)" if path else "not installed (optional)"
         else:
-            state = "found, uses your existing login" if path else "not on PATH"
-        rows.append(f"  provider {name:8s} {state}")
+            state = "found, uses your existing login" if path else "not installed"
+        rows.append(f"  facts by {name:8s} {state}")
     extras = found["extras"]
-    rows.append(f"  extra semantic: {'installed' if extras['semantic'] else 'missing (lexical search only)'}")
-    rows.append(f"  extra observer: {'installed' if extras['observer'] else 'missing (turns are kept raw, no facts)'}")
+    rows.append(f"  search by meaning: {'installed' if extras['semantic'] else 'missing (search by words only)'}")
+    rows.append(f"  facts: {'installed' if extras['observer'] else 'missing (requests are saved word for word)'}")
     return "\n".join(rows)
 
 
@@ -553,7 +556,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
     targets = _targets(ns.harness, found)
     if not targets:
         print(
-            "No harness on PATH (claude, codex, copilot, opencode). Install one, or name it: `agent-mem setup codex`."
+            "No agent installed here (claude, codex, copilot, opencode). Install one, or name it: `agent-mem setup codex`."
         )
         print("\nDetected:\n" + _detect_table(found))
         return 1
@@ -575,26 +578,26 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
         if not found["extras"]["observer"]:
             continue
         if name == "opencode":
-            print('  facts: OpenCode turns are kept raw unless you add "ollama" to observe.providers.')
+            print('  facts: OpenCode requests are saved word for word unless you add "ollama" to observe.providers.')
         elif found["providers"].get(name):
             model = getattr(config.observe, f"{name}_model") or "the CLI default"
-            print(f"  facts: extracted in the background through `{name}` ({model}) under your existing login.")
+            print(f"  facts: written in the background by `{name}` ({model}), with your existing login.")
         else:
-            print(f"  facts: `{name}` is not on PATH; turns of this harness are kept raw until it is.")
+            print(f"  facts: `{name}` is not installed; its requests are saved word for word until it is.")
     if found["extras"]["semantic"] and not ns.no_models:
         from agent_mem.memory import semantic
 
         embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
-        print(f"embedding model {embedder.model} ready." if embedder else f"embedding model not available: {reason}")
+        print(f"search model {embedder.model} ready." if embedder else f"search model not available: {reason}")
     if found["extras"]["observer"] and not ns.no_models:
-        # Without it doctor is yellow right after setup ("entity linking: spaCy model missing"), about 13 MB.
+        # Without it doctor is yellow right after setup ("topic links: spaCy model missing"), about 13 MB.
         from agent_mem.observe import spacy_model
 
         if spacy_model.model_path(config) is None:
             try:
-                print(f"concept model {config.observe.entity_model} ready ({spacy_model.download_model(config)}).")
+                print(f"topic model {config.observe.entity_model} ready ({spacy_model.download_model(config)}).")
             except (OSError, ValueError) as error:
-                print(f"concept model not downloaded: {error}. Facts work without mem0's entity linking.")
+                print(f"topic model not downloaded: {error}. Facts still work, they are just not linked by topic.")
     if config.viewer.enabled:
         print(server.install_autostart(config))
     print("\nDetected:\n" + _detect_table(found))
@@ -618,7 +621,7 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
     if not any(harness_installed(name) for name in ("claude", "codex", "copilot", "opencode")):
         removed = server.remove_autostart()
         if removed:
-            print(f"  removed the viewer login item {removed} (no harness left)")
+            print(f"  removed the viewer login item {removed} (no agent left)")
     print(f"Data stays in {config.data_dir}; `agent-mem purge --all` deletes it.")
     return 0
 

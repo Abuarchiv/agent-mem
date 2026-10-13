@@ -117,7 +117,7 @@ def test_setup_all_writes_only_harnesses_on_path(homes: Path, config, monkeypatc
 
     monkeypatch.setattr(install.shutil, "which", lambda name: None)
     assert commands.cmd_setup(ns, config) == 1
-    assert "No harness on PATH" in capsys.readouterr().out
+    assert "No agent installed here" in capsys.readouterr().out
 
 
 def test_setup_never_rewrites_a_config_it_cannot_parse(homes: Path) -> None:
@@ -167,7 +167,7 @@ def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, mon
     assert "MCP server not registered (boom)" in err and "claude mcp add --scope user agent-mem" in err
     monkeypatch.setattr(install.shutil, "which", lambda name: None)
     install.write("claude", PLUGINS, EXE)  # "hooks and MCP server registered" without a word that MCP was not
-    assert "MCP server not registered (`claude` not on PATH)" in capsys.readouterr().err
+    assert "MCP server not registered (`claude` is not installed)" in capsys.readouterr().err
 
 
 def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes: Path) -> None:
@@ -196,11 +196,11 @@ def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes:
     assert all(install.stale(harness) for harness in install.HARNESSES)
 
     shown = {c.name: c for c in _hook_checks(fix=False)}
-    assert not shown["claude hooks current"].ok and "older" in shown["claude hooks current"].detail
+    assert not shown["claude hooks up to date"].ok and "older" in shown["claude hooks up to date"].detail
 
     fixed = {c.name: c for c in _hook_checks(fix=True)}
-    assert all(fixed[f"{h} hooks current"].ok for h in install.HARNESSES)
-    assert "/hooks" in fixed["codex hooks current"].detail
+    assert all(fixed[f"{h} hooks up to date"].ok for h in install.HARNESSES)
+    assert "/hooks" in fixed["codex hooks up to date"].detail
     assert not any(install.stale(harness) for harness in install.HARNESSES)
     assert install.hook_commands("claude") == [f"{exe} hook claude"]  # the path they used, not this test's binary
     assert "other-tool notify" in _hooks_commands(json.loads(settings.read_text())["hooks"])
@@ -251,7 +251,7 @@ def test_plugin_and_setup_write_together_are_reported(homes: Path) -> None:
     data["enabledPlugins"] = {"agent-mem@agent-mem": True, "other@x": True}
     settings.write_text(json.dumps(data))
     assert install.claude_plugin_enabled()
-    assert not {c.name: c for c in _hook_checks(fix=False)}["claude registered once"].ok
+    assert not {c.name: c for c in _hook_checks(fix=False)}["claude connected once"].ok
 
 
 def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch, capsys) -> None:
@@ -298,14 +298,14 @@ def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Pa
     conn = db.connect(config)
     try:
         shown = problems(conn)
-        assert any("setup:claude" in line and "doctor --fix" in line for line in shown)
+        assert any("Claude Code setup" in line and "doctor --fix" in line for line in shown)
     finally:
         conn.close()
 
     assert main([*data_dir, "doctor", "--fix"]) in (0, 1)
     conn = db.connect(config)
     try:
-        assert not any("setup:claude" in line for line in problems(conn))
+        assert not any("Claude Code setup" in line for line in problems(conn))
     finally:
         conn.close()
 

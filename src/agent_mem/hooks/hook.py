@@ -133,6 +133,23 @@ def spawn_viewer(config: Config, *, force: bool = False) -> bool:
     return _spawn([sys.executable, "-m", "agent_mem", "serve", "--quiet"], config)
 
 
+# The background jobs as the viewer names them (ui/app.ts COMPONENT_LABEL).
+_JOB_NAME = {
+    "indexer": "Search index",
+    "semantic": "Search by meaning",
+    "observer": "Writing facts",
+    "consolidation": "Cleanup",
+}
+
+
+def job_name(component: str) -> str:
+    """``hook:claude`` reads "Claude Code hooks", ``observer`` "Writing facts"."""
+    kind, _, harness = component.partition(":")
+    if not harness:
+        return _JOB_NAME.get(component, component)
+    return f"{inject.AGENT_NAMES.get(harness, harness)} {'hooks' if kind == 'hook' else kind}"
+
+
 def problems(conn: sqlite3.Connection) -> list[str]:
     """Failures the user has to act on, shown in the terminal at session start (never to the model)."""
     lines: list[str] = []
@@ -140,12 +157,14 @@ def problems(conn: sqlite3.Connection) -> list[str]:
         "SELECT component, last_error FROM health WHERE last_error_at IS NOT NULL "
         "AND last_error_at > COALESCE(last_ok_at, '') ORDER BY last_error_at DESC LIMIT 2"
     ):
-        lines.append(f"{row['component']} fails: {str(row['last_error'])[:160]}. Run `agent-mem doctor`.")
+        lines.append(
+            f"{job_name(str(row['component']))} is failing: {str(row['last_error'])[:160]}. Run `agent-mem doctor`."
+        )
     with contextlib.suppress(sqlite3.OperationalError):  # observer tables come with migration 002
         failed = conn.execute("SELECT COUNT(*), MAX(last_error) FROM observe_queue WHERE state = 'failed'").fetchone()
         if failed and failed[0]:
             lines.append(
-                f"{failed[0]} turn(s) failed fact extraction (last: {str(failed[1] or '-')[:160]}). "
+                f"No facts for {failed[0]} request(s) (last error: {str(failed[1] or '-')[:160]}). "
                 "Run `agent-mem observe --status`, then `agent-mem observe --retry-failed`."
             )
     return lines
@@ -355,7 +374,7 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
     if worker.error and not worker.error.startswith(routine):
         # Without a database nothing is recalled or recorded live; say so instead of failing silently.
         # The spool fails too on a full disk: then nothing waits, and saying so is the only honest notice.
-        lost = "Events wait in the spool." if worker.spooled else "This session is not being recorded."
+        lost = "What happens now is kept and saved later." if worker.spooled else "This session is not being recorded."
         failure = f"agent-mem cannot use its database ({worker.error[:200]}). {lost} Run `agent-mem doctor`."
     if event.kind == "session_start":
         heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
@@ -412,7 +431,7 @@ def main(argv: list[str], stdin_bytes: bytes | None = None) -> int:
     event_name = argv[1] if len(argv) > 1 else None
     if harness in {"", "-h", "--help"}:  # typed by a person: explain instead of waiting on stdin
         print("usage: agent-mem hook {claude,codex,copilot,opencode} [event]\n")
-        print("Called by the harness hooks with the event JSON on stdin. Set up with `agent-mem setup all --write`.")
+        print("Called by your agent's hooks with the event JSON on stdin. Set up with `agent-mem setup all --write`.")
         return 0
     try:
         text = run(harness, event_name, stdin_bytes=stdin_bytes)

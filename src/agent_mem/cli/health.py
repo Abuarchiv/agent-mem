@@ -245,7 +245,7 @@ def _install_checks(config: Config, fix: bool) -> list[Check]:
     on_path = shutil.which("agent-mem")
     checks.append(
         Check(
-            "agent-mem on PATH",
+            "agent-mem command",
             on_path is not None,
             on_path or "not found",
             'Install with the install script or `uv tool install "agent-mem[semantic] @ git+https://github.com/Abuarchiv/agent-mem"` so hooks can call it.',
@@ -261,10 +261,10 @@ def _install_checks(config: Config, fix: bool) -> list[Check]:
         mode = stat.S_IMODE(config.data_dir.stat().st_mode)
         checks.append(
             Check(
-                "data dir private",
+                "data folder private",
                 mode & 0o077 == 0,
                 f"{config.data_dir} ({oct(mode)})",
-                "Run `agent-mem doctor --fix` or chmod 700 the data directory.",
+                "Run `agent-mem doctor --fix` or chmod 700 the data folder.",
             )
         )
     free_mb = shutil.disk_usage(config.data_dir).free / 1_000_000
@@ -288,18 +288,18 @@ def _database_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     )
     try:
         conn.execute("SELECT count(*) FROM search_fts").fetchone()
-        checks.append(Check("full-text search (FTS5 trigram)", True, "available"))
+        checks.append(Check("word search", True, "available"))
     except sqlite3.Error as error:
-        checks.append(Check("full-text search (FTS5 trigram)", False, str(error), "Use a Python with SQLite ≥ 3.34."))
+        checks.append(Check("word search", False, str(error), "Use a Python with SQLite 3.34 or newer."))
     from agent_mem.memory import semantic
 
     embedder, reason = semantic.load_embedder_verbose(config)
     checks.append(
         Check(
-            "semantic search",
+            "search by meaning",
             embedder is not None,
             f"model {embedder.model} ready" if embedder else str(reason),
-            "Run `agent-mem models install`. Lexical search works without it.",
+            "Run `agent-mem models install`. Word search works without it.",
             warn_only=True,
         )
     )
@@ -307,7 +307,7 @@ def _database_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
 
 
 def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
-    """Whether each harness that is installed here has delivered events, and its last error."""
+    """Whether each agent that is installed here has delivered events, and its last error."""
     checks: list[Check] = []
     for harness in ("claude", "codex", "copilot", "opencode"):
         installed_here = harness_installed(harness)
@@ -318,20 +318,18 @@ def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
             hint = (
                 "Start a session. For Codex, trust the hooks with /hooks."
                 if harness == "codex"
-                else "Start a session in this harness."
+                else f"Start a session in {LABELS.get(harness, harness)}."
             )
-            checks.append(
-                Check(f"{harness} capture", False, "plugin found, nothing captured yet", hint, warn_only=True)
-            )
+            checks.append(Check(f"{harness} recording", False, "connected, nothing recorded yet", hint, warn_only=True))
             continue
         failing = row["last_error_at"] and (not row["last_ok_at"] or row["last_error_at"] > row["last_ok_at"])
         checks.append(
             Check(
-                f"{harness} capture",
+                f"{harness} recording",
                 not failing,
                 f"last ok {row['last_ok_at'] or 'never'}; errors {row['error_count']}"
                 + (f" (last: {row['last_error']})" if failing else ""),
-                "See logs in the data dir (logs/hook.log).",
+                "See logs/hook.log in the data folder (`agent-mem paths`).",
             )
         )
     return checks
@@ -343,9 +341,9 @@ def _housekeeping_checks(conn: sqlite3.Connection, config: Config, fix: bool) ->
     backlog = spool.count(config.spool_dir)
     checks.append(
         Check(
-            "spool",
+            "events not saved yet",
             backlog == 0,
-            f"{backlog} pending",
+            str(backlog),
             "Run `agent-mem index` (or doctor --fix).",
             warn_only=backlog < 1000,
         )
@@ -366,9 +364,9 @@ def _housekeeping_checks(conn: sqlite3.Connection, config: Config, fix: bool) ->
     indexer = conn.execute("SELECT last_ok_at, last_error FROM health WHERE component = 'indexer'").fetchone()
     checks.append(
         Check(
-            "indexer",
+            "search index",
             indexer is not None and indexer["last_ok_at"] is not None,
-            f"last run {indexer['last_ok_at'] if indexer else 'never'}",
+            f"last update {indexer['last_ok_at'] if indexer else 'never'}",
             "Run `agent-mem index`.",
             warn_only=True,
         )
@@ -414,15 +412,15 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
     if not install.extras()["observer"]:
         return [
             Check(
-                "observer",
+                "facts",
                 False,
-                "extra not installed; turns are stored raw, no facts",
-                "Install `agent-mem[observer]` for background fact extraction.",
+                "not installed; requests are saved word for word, no facts are written",
+                "Install `agent-mem[observer]` to get facts from your requests.",
                 warn_only=True,
             )
         ]
     if not config.observe.enabled:
-        return [Check("observer", True, "disabled in config.json")]
+        return [Check("facts", True, "off in config.json")]
     try:
         queue = _observer_queue_check(conn)
     except sqlite3.OperationalError as error:
@@ -435,9 +433,9 @@ def _observer_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
 def _missing_queue_check(conn: sqlite3.Connection, error: sqlite3.Error) -> Check:
     # The schema says current but the table is missing: a foreign or hand-edited database.
     return Check(
-        "observer queue",
+        "facts queue",
         False,
-        f"{error}; schema v{db.user_version(conn)} without the observer tables",
+        f"{error}; database version {db.user_version(conn)} without the facts tables",
         "Move the data directory aside (`agent-mem paths`); a new one gets the queue table from migration 002.",
     )
 
@@ -446,10 +444,12 @@ def _observer_queue_check(conn: sqlite3.Connection) -> Check:
     states = dict(conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall())
     pending, failed = int(states.get("pending", 0)), int(states.get("failed", 0))
     last = conn.execute("SELECT ts, provider, ok FROM observe_calls ORDER BY id DESC LIMIT 1").fetchone()
-    detail = f"queue pending {pending}, done {states.get('done', 0)}, raw {states.get('raw', 0)}, failed {failed}"
-    detail += f"; last call {last['ts']} via {last['provider']}" if last else "; no model call yet"
+    detail = (
+        f"waiting {pending}, done {states.get('done', 0)}, saved word for word {states.get('raw', 0)}, failed {failed}"
+    )
+    detail += f"; last model call {last['ts']} via {last['provider']}" if last else "; no model call yet"
     return Check(
-        "observer queue",
+        "facts queue",
         failed == 0 and pending < 200,
         detail,
         "Run `agent-mem observe --status`, then `agent-mem observe --retry-failed`.",
@@ -473,13 +473,13 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
             paused = f", not logged in, retry at {until}" if login else f", usage limit, paused until {until}"
             logged_out += [name] if login else []
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
-    remedy = 'Install a harness CLI (claude, codex, copilot) or add "ollama" to observe.providers.'
+    remedy = 'Install Claude Code, Codex or Copilot CLI, or add "ollama" to observe.providers.'
     if logged_out:
         remedy = f"Start {' and '.join(f'`{name}`' for name in logged_out)} once and log in."
     return Check(
-        "observer providers",
+        "facts model",
         bool(stages) and not logged_out,
-        ", ".join(shown) if stages else f"none of {config.observe.providers} on PATH",
+        ", ".join(shown) if stages else f"none installed of {', '.join(config.observe.providers)}",
         remedy,
         warn_only=True,
     )
@@ -491,11 +491,11 @@ def _entity_model_check(config: Config) -> Check:
     model = config.observe.entity_model
     present = spacy_model.model_path(config) is not None or mem0_adapter.spacy_model_available(model)
     return Check(
-        "entity linking",
+        "topic links",
         present,
-        f"spaCy model {model} present; mem0 links facts to the concepts they name"
+        f"spaCy model {model} present; facts are linked by the topics they name"
         if present
-        else f"spaCy model {model} missing; facts and search work without mem0's entity linking",
+        else f"spaCy model {model} missing; facts and search still work, facts are just not linked by topic",
         "Run `agent-mem models install`. Set `observe.entity_model` to the language of your facts "
         "(de_core_news_sm, en_core_web_sm, ...).",
         warn_only=True,
@@ -552,19 +552,19 @@ def _hook_checks(fix: bool) -> list[Check]:
         if harness == "claude" and install.claude_plugin_enabled():
             checks.append(
                 Check(
-                    "claude registered once",
+                    "claude connected once",
                     False,
                     "hooks in settings.json and the agent-mem plugin both run on every event",
                     "Keep one: `agent-mem uninstall claude`, or `/plugin uninstall agent-mem@agent-mem` in Claude Code.",
                 )
             )
         stale = install.stale(harness)
-        detail = "match this release" + (", rewritten" if fixed else "")
+        detail = "yes" + (", rewritten" if fixed else "")
         if fixed and harness == "codex":
             detail += "; trust them again in Codex with /hooks"
         checks.append(
             Check(
-                f"{harness} hooks current",
+                f"{harness} hooks up to date",
                 not stale,
                 "from an older agent-mem release (events, matchers or timeouts changed)" if stale else detail,
                 "Run `agent-mem doctor --fix`.",

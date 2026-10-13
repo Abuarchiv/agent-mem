@@ -97,7 +97,7 @@ def test_cli_commands(config: Config, project: Path, driver: Driver, capsys, mon
     capsys.readouterr()
     cli.main([*base, "doctor"])
     report = capsys.readouterr().out
-    assert "database integrity" in report and "claude capture" in report
+    assert "database integrity" in report and "claude recording" in report
 
 
 def test_eval_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
