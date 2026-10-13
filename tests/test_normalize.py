@@ -258,3 +258,17 @@ def test_codex_without_exit_code_infers_failure_only_from_clear_signs():
         "Warning: truncated output (original token count: 14267)\nTotal output lines: 314\n\nsrc/x.py:12: error handling"
     )
     assert not failed("tests/test_errors.py::test_assert_raises PASSED\n0 failed")
+
+
+def test_claude_piped_test_run_without_exit_code_counts_as_failed():
+    """Claude Code ran `uv run … pytest -q 2>&1 | tail -30`: `tail` hid the exit code, the output said "1 failed",
+    and the failure, its fix and the lesson were never recorded."""
+
+    def failed(stdout: str) -> bool:
+        payload = {"hook_event_name": "PostToolUse", "session_id": "s", "tool_name": "Bash", "tool_use_id": "t",
+                   "tool_input": {"command": "uv run --with pytest python3 -m pytest -q 2>&1 | tail -30"},
+                   "tool_response": {"stdout": stdout, "stderr": "", "interrupted": False}}  # fmt: skip
+        return normalize("claude", payload).tool_failed
+
+    assert failed("..F\n=================== 1 failed, 2 passed in 0.04s ===================")
+    assert not failed("...\n3 passed in 0.02s")

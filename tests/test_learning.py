@@ -260,3 +260,31 @@ def test_a_session_in_the_home_folder_does_not_see_the_projects_below_it(conn):
         )
     assert search.scope(conn, "home") == ["home"]
     assert search.scope(conn, "client") == ["client"]  # the home folder is not around it either
+
+
+def test_a_piped_test_run_that_failed_and_then_passed_teaches_the_fix(config, project):
+    """Claude Code ran `… pytest -q 2>&1 | tail -30` twice, failing then passing after an edit. Without an exit code
+    neither run counted, so no fix was learned and the turn looked like it had gone smoothly."""
+    import json
+
+    from agent_mem.core import db
+    from agent_mem.hooks import hook
+
+    def send(**fields):
+        hook.run("claude", None, json.dumps({"session_id": "s", "cwd": str(project), **fields}), config)
+
+    run = "uv run --with pytest python3 -m pytest -q 2>&1 | tail -30"
+    send(hook_event_name="UserPromptSubmit", prompt="Run the tests and fix what fails")
+    send(hook_event_name="PostToolUse", tool_name="Bash", tool_use_id="t1", tool_input={"command": run},
+         tool_response={"stdout": "F\nFAILED test_parser.py::test_count - assert 3 == 2\n1 failed in 0.03s", "stderr": ""})  # fmt: skip
+    send(hook_event_name="PostToolUse", tool_name="Edit", tool_use_id="t2",
+         tool_input={"file_path": str(project / "parser.py"), "old_string": "+ 1", "new_string": ""}, tool_response={})  # fmt: skip
+    send(hook_event_name="PostToolUse", tool_name="Bash", tool_use_id="t3", tool_input={"command": run},
+         tool_response={"stdout": "...\n3 passed in 0.02s", "stderr": ""})  # fmt: skip
+    send(hook_event_name="Stop", last_assistant_message="Fixed count(); all tests pass.")
+    conn = db.connect(config)
+    assert conn.execute("SELECT outcome FROM turns").fetchone()[0] == "ok"
+    assert [tuple(r) for r in conn.execute("SELECT command_key, files_json FROM recipes")] == [
+        ("uv run pytest", '["parser.py"]')
+    ]
+    conn.close()

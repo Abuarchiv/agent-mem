@@ -153,6 +153,19 @@ def exit_code_of(value: Any, text: str | None, depth: int = 0) -> int | None:
     return None
 
 
+# Signs that a shell command failed, for when no exit code says so: a traceback, a test summary with failures, a
+# line that starts with an error, a missing command. Words like "error" or "failed" inside ordinary output are not.
+_FAILED_OUTPUT = re.compile(
+    r"(?m)^Traceback \(most recent call last\):|^=*\s*[1-9]\d* failed\b|^(?:error|fatal|npm ERR!)\b[:!\[ ]"
+    r"|command not found\s*$"
+)
+
+
+def failed_by_output(event: Event) -> bool:
+    text = shell_text(event)
+    return bool(text and _FAILED_OUTPUT.search(text))
+
+
 def shell_text(event: Event) -> str | None:
     """The output text to read an exit code from: only a shell prints one. A Write echoes the file it wrote, and
     "exit 1" inside a script must not mark the write as failed."""

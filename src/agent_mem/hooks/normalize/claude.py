@@ -12,6 +12,7 @@ from agent_mem.core.events import (
     Event,
     PayloadError,
     exit_code_of,
+    failed_by_output,
     get,
     output_text,
     require_session,
@@ -77,6 +78,9 @@ def normalize(payload: dict[str, Any], event_name: str | None = None, harness: s
             elif isinstance(response, dict) and response.get("interrupted") is True:
                 event.tool_failed = True
                 event.error = "interrupted"
+            elif event.exit_code is None and failed_by_output(event):
+                # No exit code: Codex sends none, and `pytest | tail` hides the test run's.
+                event.tool_failed = True
     elif kind in {"stop", "subagent_stop"}:
         event.answer = text_of(get(payload, "last_assistant_message"))
     elif kind == "compact":
