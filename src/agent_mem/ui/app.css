@@ -18,7 +18,7 @@
   --blue: #AFC1F0; --blue-deep: #8FA6E6; --on-blue: #26345A;
   --green: #B3C177; --green-deep: #96A55A; --on-green: #39401F;
   --sand: #E2D9C3; --coral: #F6A38F; --amber: #E9A15B; --lilac: #C9B8F0;
-  --pink-soft: #FBE3EF; --blue-soft: #DCE4FA; --green-soft: #E3E9C6; --yellow-soft: #FBF1C8; --sand-soft: #EDE6D4; --coral-soft: #FBDAD1;
+  --blue-soft: #DCE4FA; --green-soft: #E3E9C6; --sand-soft: #EDE6D4; --coral-soft: #FBDAD1;
   --good: #3F7A24; --warn: #A26B00; --bad: #B3261E; --off: #9A9384;
   --display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -38,7 +38,7 @@
     --side: #0A0908;
     --side-raised: #22201C;
     --graph-bg: #1E1C19;
-    --pink-soft: #3A2430; --blue-soft: #222B42; --green-soft: #2A2F1C; --yellow-soft: #3A331A; --sand-soft: #2B2822; --coral-soft: #3F241E;
+    --blue-soft: #222B42; --green-soft: #2A2F1C; --sand-soft: #2B2822; --coral-soft: #3F241E;
     --good: #8CCB67; --warn: #E3B341; --bad: #FF8A7A; --off: #7D776B;
   }
 }
