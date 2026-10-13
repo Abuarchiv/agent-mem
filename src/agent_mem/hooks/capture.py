@@ -261,10 +261,24 @@ def _new_turn(conn: sqlite3.Connection, session_id: str, project_id: str | None,
     return int(cursor.lastrowid or 0)
 
 
+def _failed_project_command(tool: str | None, payload: str) -> bool:
+    """A failed test, build, lint or install: a failed `cat`, `grep` or MCP call is looking around."""
+    with contextlib.suppress(ValueError, TypeError, AttributeError):
+        tool_input = json.loads(json.loads(payload).get("input") or "null")
+        return signals.analyze_tool(tool or "", tool_input).command_kind in PROJECT_COMMANDS
+    return False
+
+
 def _close_turn(conn: sqlite3.Connection, config: Config, turn_id: int, outcome: str, ts: str) -> None:
-    unresolved = conn.execute(
-        "SELECT COUNT(*) FROM events WHERE turn_id = ? AND error_sig IS NOT NULL AND resolved = 0", (turn_id,)
-    ).fetchone()[0]
+    # Only the project's own commands still failing make a turn an error. Every failure counted, 4 of 7 turns of a
+    # real session that ended well were `error` (a missing file read, a wrong query), and the work log then
+    # titled one "test errors still open" after its tests had passed.
+    unresolved = any(
+        _failed_project_command(row[0], row[1])
+        for row in conn.execute(
+            "SELECT tool, payload FROM events WHERE turn_id = ? AND error_sig IS NOT NULL AND resolved = 0", (turn_id,)
+        )
+    )
     final = "error" if outcome == "ok" and unresolved else outcome
     conn.execute("UPDATE turns SET outcome = ?, ended_at = ? WHERE id = ?", (final, ts, turn_id))
     store.index_turn(conn, turn_id)

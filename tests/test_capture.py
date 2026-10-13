@@ -242,3 +242,16 @@ def test_a_stated_rule_is_kept_once_as_its_decision_and_never_echoed_back(conn, 
     assert "pytest" not in echoed and "pytest" not in started.split("\n", 1)[-1]
     later = hook.run("copilot", "sessionStart", _json.dumps({**base, "sessionId": "c2", "source": "new"}), config)
     assert "never unittest" in later
+
+
+def test_only_a_failing_project_command_makes_a_turn_an_error(driver: Driver, conn):
+    """Real session: 4 of 7 turns that ended well were `error` because a `cat` of a missing file or a wrong
+    query failed along the way."""
+    driver.prompt("s1", "Find where the parser lives")
+    driver.bash("s1", "cat docs/parser.md", "cat: docs/parser.md: No such file or directory", failed=True)
+    driver.bash("s1", "ls src", "parse.py")
+    driver.stop("s1", "The parser is in src/parse.py.")
+    driver.prompt("s1", "Fix the parser")
+    driver.bash("s1", "pytest -q", "FAILED tests/test_parse.py::test_empty - IndexError", failed=True)
+    driver.stop("s1", "I could not fix it yet.")
+    assert [r[0] for r in conn.execute("SELECT outcome FROM turns ORDER BY id")] == ["ok", "error"]
