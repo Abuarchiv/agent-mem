@@ -17,7 +17,7 @@ from typing import Any
 
 from filelock import FileLock, Timeout
 
-from agent_mem.core import db, logutil, paths, spool, timeutil
+from agent_mem.core import db, identity, logutil, paths, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
@@ -179,6 +179,8 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     stats["native_notes"] = notes.ingest(conn, config)
     with db.transaction(conn):
         stats["retired_unindexed"] = store.drop_retired_keys(conn)
+    # Outside the transaction: it runs git (about 25 ms per repository), and hooks wait 150 ms for the write lock.
+    stats["identity_aliases"] = identity.record_aliases(conn)
     _mark_guards(conn, config)
 
     embedder = _semantic(conn, config, allow_download, stats)

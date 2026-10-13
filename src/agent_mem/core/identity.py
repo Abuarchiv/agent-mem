@@ -120,6 +120,8 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
     root = Path(toplevel) if toplevel else path
     remote_raw = _git(root, "config", "--get", "remote.origin.url") if toplevel else None
     remote = normalize_remote(remote_raw) if remote_raw else None
+    common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir") if toplevel else None
+    path_source = f"path:{_canonical(Path(common).parent if common else root)}"
     if remote:
         identity_source = f"remote:{remote}"
     elif toplevel and (first := _git(root, "rev-list", "--max-parents=0", "HEAD")):
@@ -127,18 +129,61 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
         # The first commit stays the same across moves, renames, clones and worktrees.
         # ponytail: in a huge history the walk can pass git's 2 s timeout and the path names it, as before.
         identity_source = f"root:{min(first.split())}"
-    elif toplevel:
-        common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-        main_root = Path(common).parent if common else root
-        identity_source = f"path:{_canonical(main_root)}"
     else:
-        identity_source = f"path:{_canonical(root)}"
-    project_id = hashlib.sha256(identity_source.encode("utf-8")).hexdigest()[:16]
+        identity_source = path_source
+    project_id = _alias(conn, identity_source) or _hash(identity_source)
+    if identity_source.startswith("root:") and _held_by_other_repo(conn, project_id, common):
+        # Two copies of a template share their root commit; a move leaves no repository behind at the old root.
+        project_id = _hash(path_source)
     name = (remote.rsplit("/", 1)[-1] if remote else root.name) or "project"
     project = Project(id=project_id, root=root, name=name, remote=remote)
     if register:
         register_project(conn, project)
     return project
+
+
+def _hash(source: str) -> str:
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+
+
+def _alias(conn: sqlite3.Connection, source: str) -> str | None:
+    """The project an identity was recorded for after the fact (``record_aliases``)."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (f"identity:{source}",)).fetchone()
+    return str(row[0]) if row else None
+
+
+def _held_by_other_repo(conn: sqlite3.Connection, project_id: str, common: str | None) -> bool:
+    """The project with this id lives in a repository that still exists and is not this one (worktrees of one
+    repository share its git directory)."""
+    row = conn.execute("SELECT root FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if row is None or not (Path(row[0]) / ".git").exists():
+        return False
+    other = _git(Path(row[0]), "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return other is not None and common is not None and _canonical(Path(other)) != _canonical(Path(common))
+
+
+def record_aliases(conn: sqlite3.Connection) -> int:
+    """For the indexer, outside the hook path: a project first seen before its first commit or before its remote
+    was named by its path; after a move it would have started over. Record its root commit and remote as names of
+    the same project. Two git calls per repository. Returns the aliases written."""
+    written = 0
+    for project_id, root, remote in conn.execute("SELECT id, root, remote FROM projects").fetchall():
+        path = Path(root)
+        if not (path / ".git").exists():
+            continue
+        first = _git(path, "rev-list", "--max-parents=0", "HEAD")
+        found = _git(path, "config", "--get", "remote.origin.url")
+        sources = [f"root:{min(first.split())}"] if first else []
+        sources += [f"remote:{normalize_remote(found)}"] if found and not remote else []
+        for source in sources:
+            natural = _hash(source)
+            if natural == project_id or _alias(conn, source) is not None:
+                continue
+            if conn.execute("SELECT 1 FROM projects WHERE id = ?", (natural,)).fetchone():
+                continue  # that name belongs to a project of its own
+            conn.execute("INSERT INTO meta(key, value) VALUES (?, ?)", (f"identity:{source}", project_id))
+            written += 1
+    return written
 
 
 def register_project(conn: sqlite3.Connection, project: Project, cwd: str | Path | None = None) -> None:
