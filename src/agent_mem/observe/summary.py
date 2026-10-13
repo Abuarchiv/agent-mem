@@ -74,18 +74,26 @@ def _items(value: Any) -> list[str]:
     return [privacy.clean_text(str(item), 200) for item in value if str(item).strip()][:4]
 
 
+def _bundle_turn(value: Any, turn_ids: list[int]) -> int | None:
+    """The bundle turn an answer item names. A one-turn bundle owns every item: models copy the example's id."""
+    if len(turn_ids) == 1:
+        return turn_ids[0]
+    try:
+        turn_id = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return turn_id if turn_id in turn_ids else None
+
+
 def lessons(data: dict[str, Any], turn_ids: list[int]) -> list[tuple[int, str]]:
     """(evidence turn, text). A lesson without a turn of this bundle as evidence is dropped."""
     found = []
     for item in data.get("lessons") or []:
         if not isinstance(item, dict):
             continue
-        try:
-            turn_id = int(item.get("turn") or 0)
-        except (TypeError, ValueError):
-            continue
+        turn_id = _bundle_turn(item.get("turn"), turn_ids)
         text = privacy.clean_text(str(item.get("text") or ""), 400).strip()
-        if turn_id in turn_ids and len(text) >= 20:
+        if turn_id is not None and len(text) >= 20:
             found.append((turn_id, text))
     return found[:2]
 
@@ -97,13 +105,10 @@ def parse(text: str, turn_ids: list[int]) -> tuple[dict[int, tuple[str, str]], d
     for item in data.get("turns") or []:
         if not isinstance(item, dict):
             continue
-        try:
-            turn_id = int(item.get("id") or 0)
-        except (TypeError, ValueError):
-            continue
+        turn_id = _bundle_turn(item.get("id"), turn_ids)
         kind = str(item.get("type") or "").lower()
         title = privacy.clean_text(str(item.get("title") or ""), 120).strip()
-        if turn_id in turn_ids and title:
+        if turn_id is not None and title:
             turns[turn_id] = (kind if kind in TYPES else "change", title)
     session = data.get("session")
     summary: dict[str, Any] | None = None

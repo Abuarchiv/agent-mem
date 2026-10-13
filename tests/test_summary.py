@@ -78,6 +78,21 @@ def test_garbage_answers_change_nothing(driver: Driver, conn):
     assert conn.execute("SELECT COUNT(*) FROM turns WHERE title IS NOT NULL").fetchone()[0] == 0
 
 
+def test_a_one_turn_bundle_keeps_its_title_when_the_model_copies_the_example_id(driver: Driver, conn):
+    """gpt-6-luna answered a one-turn bundle with the prompt example's id 12 instead of 2 (1 of 2 real calls): the
+    title and the lesson were dropped, and the turn stayed untitled in the work log."""
+    session_id, (first, _second) = _session(driver, conn)
+    lesson = (
+        "When the default uv cache is blocked by a sandbox, set UV_CACHE_DIR to a writable folder, because uv aborts."
+    )
+    llm = Answer(
+        {"turns": [{"id": 12, "type": "bugfix", "title": "Parser fixed"}], "lessons": [{"turn": 12, "text": lesson}]}
+    )
+    assert summary.summarize(conn, llm, session_id, [first])[:2] == (1, 1)
+    assert conn.execute("SELECT title FROM turns WHERE id = ?", (first,)).fetchone()[0] == "Parser fixed"
+    assert conn.execute("SELECT turn_id FROM memories WHERE kind = 'lesson'").fetchone()[0] == first
+
+
 def test_next_session_starts_with_the_summary(driver: Driver, conn, config: Config):
     session_id, turn_ids = _session(driver, conn)
     summary.summarize(
