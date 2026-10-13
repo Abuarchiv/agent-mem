@@ -154,3 +154,17 @@ def test_not_x_verb_but_y_is_a_preference():
     assert signals.preference_pairs("Nicht pip benutzen, sondern uv.") == [("pip", "uv")]
     assert signals.preference_pairs("Bitte nicht npm verwenden, sondern pnpm") == [("npm", "pnpm")]
     assert signals.preference_pairs("nicht so machen, sondern anders") == []
+
+
+def test_a_word_swap_inside_a_long_complaint_is_not_a_command_rule():
+    """A complaint about wording ("Redo anstatt Reuse zu nennen", "wirklich anstatt einfach") became two command
+    rules. "X statt Y" without a verb is a tool swap only in a short correction or with names in backticks."""
+    complaint = (
+        "Also es gibt viele Stellen, wo wirklich sprachlich bzw. einfach ein User verwirren. Zum Beispiel, also ich "
+        "kann dir das viele Beispiele nennen, zum Beispiel Redo anstatt Reuse zu nennen oder View gibt es so viele "
+        "Sachen, die einfach wirklich anstatt einfach einfacher auszudrücken, machst du komplexer"
+    )
+    assert signals.preference_pairs(complaint) == []
+    assert signals.preference_pairs("pnpm statt npm") == [("npm", "pnpm")]
+    assert signals.preference_pairs(complaint + " Und bitte `pnpm` statt `npm`.") == [("npm", "pnpm")]
+    assert signals.preference_pairs(complaint + " Nutze uv statt pip.") == [("pip", "uv")]

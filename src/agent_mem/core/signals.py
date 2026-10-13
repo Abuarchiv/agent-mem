@@ -666,6 +666,10 @@ _FILLER = frozenset(
 )
 
 
+# Up to this length a prompt is a typed correction ("pnpm statt npm, bitte"), not a paragraph.
+BARE_SWAP_CHARS = 160
+
+
 def _pair(avoid: str, prefer: str | None) -> tuple[str, str | None] | None:
     names = [avoid] if prefer is None else [avoid, prefer]
     if avoid == prefer or any(len(n) < 2 or n in _FILLER or n.isdigit() for n in names):
@@ -679,6 +683,9 @@ def preference_pairs(text: str) -> list[tuple[str, str | None]]:
     sample = text[:1000]
     for index, pattern in enumerate(_INSTEAD):
         for match in pattern.finditer(sample):
+            # Bare "X statt Y" in running prose is any word swap ("Redo anstatt Reuse zu nennen" learned a rule).
+            if index == 1 and len(sample) > BARE_SWAP_CHARS and "`" not in match.group(0):
+                continue
             first, second = _name(match.group(1)), _name(match.group(2))
             prefer, avoid = (second, first) if index == 2 else (first, second)
             pair = _pair(avoid, prefer)
