@@ -140,3 +140,33 @@ def test_tags_become_kinds_and_rules(observe_config: Config, project: Path, tmp_
     rule = conn.execute("SELECT pattern, message FROM rules").fetchone()
     assert (rule["pattern"], rule["message"]) == ("npm", "Use `pnpm` instead of `npm`")
     conn.close()
+
+
+def test_a_bundle_yields_facts_only_from_its_own_turns(
+    observe_config: Config, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mem0 put the project's last 10 bundle messages into every extraction prompt; Haiku extracted from them again,
+    so a session about 'master -> main' also returned the nox, port and pnpm facts of four earlier sessions, filed
+    under its own turn (and out of reach of `purge --id` on the turn they came from)."""
+    from agent_mem.observe import providers
+
+    prompts: list[str] = []
+    real = providers.FakeLLM.generate_response
+
+    def record(self, messages, *args, **kwargs):
+        prompts.append("\n".join(str(m.get("content", "")) for m in messages))
+        return real(self, messages, *args, **kwargs)
+
+    monkeypatch.setattr(providers.FakeLLM, "generate_response", record)
+    _turn(observe_config, project, "s1", "Tests laufen jetzt über nox.", "noxfile.py angelegt.")
+    conn = db.connect(observe_config)
+    worker = _worker(observe_config, conn)
+    worker.run(drain=False)
+    _turn(observe_config, project, "s2", "Der Hauptbranch heißt jetzt main.", "Umbenannt.")
+    worker.run(drain=False)
+    worker.close()
+    extraction = [p for p in prompts if "Hauptbranch" in p and "## New Messages" in p]
+    assert extraction
+    history = extraction[0].split("## Last k Messages")[-1].split("## Recently Extracted Memories")[0]
+    assert "nox" not in history  # another session's dialogue is no context for this bundle
+    conn.close()

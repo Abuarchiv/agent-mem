@@ -155,3 +155,19 @@ def test_review_comes_early_after_many_new_facts(conn):
     extra = _facts(conn, ["One more fact"])[0]
     conn.execute("UPDATE memories SET created_at = ? WHERE id = ?", (after, extra))
     assert review.due_projects(conn) == ["p1"]
+
+
+def test_a_stated_replacement_brings_the_review_forward_at_most_hourly(conn):
+    """Right after ten corrections none was resolved: the review waited 20 hours or 50 facts, and the agent saw the
+    old and the new version side by side until then."""
+    _project(conn)
+    _facts(conn, TEXTS)
+    db.set_meta(conn, "reviewed_at:p1", "2026-10-20T10:00:00.000Z")
+    plain = _facts(conn, ["Logs go to stdout"])[0]
+    conn.execute("UPDATE memories SET created_at = '2026-10-20T10:30:00.000Z' WHERE id = ?", (plain,))
+    now = timeutil.parse("2026-10-20T11:30:00.000Z")
+    assert review.due_projects(conn, now=now) == []  # nothing replaced
+    switch = _facts(conn, ["Tests run with nox instead of pytest"])[0]
+    conn.execute("UPDATE memories SET created_at = '2026-10-20T10:40:00.000Z' WHERE id = ?", (switch,))
+    assert review.due_projects(conn, now=now) == ["p1"]
+    assert review.due_projects(conn, now=timeutil.parse("2026-10-20T10:50:00.000Z")) == []  # within the hour

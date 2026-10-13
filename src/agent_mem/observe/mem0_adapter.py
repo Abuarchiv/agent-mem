@@ -188,6 +188,11 @@ class Mem0Adapter:
     def extract(
         self, messages: list[dict[str, str]], namespace: str, metadata: dict[str, Any] | None = None
     ) -> list[Fact]:
+        # mem0 puts the namespace's last 10 messages into the prompt as context. The namespace is the project, so
+        # they are earlier bundles of other sessions, and Haiku extracted from them again: a bundle about one change
+        # returned the facts of four earlier sessions, filed under its own turn. The bundle carries its session's
+        # context; the facts already stored reach the prompt as "Existing Memories" for deduplication.
+        self.scrub(messages=True)
         result: Any = self.memory.add(messages, user_id=namespace, metadata=metadata or {})
         return [
             Fact(id=str(r["id"]), text=str(r["memory"]), metadata=dict(r.get("metadata") or {}))

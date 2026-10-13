@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from agent_mem.core import db, timeutil
@@ -90,9 +90,23 @@ def _facts(conn: sqlite3.Connection, project_id: str) -> list[sqlite3.Row]:
     return [*recent, *older]
 
 
-def due_projects(conn: sqlite3.Connection) -> list[str]:
-    """Projects with enough facts whose last review is older than ``EVERY_HOURS`` or ``NEW_FACTS`` facts ago."""
-    since = timeutil.iso(timeutil.now() - timedelta(hours=EVERY_HOURS))
+# How the extraction words a change ("Use pnpm instead of npm", "nicht mehr", "umgestellt"): it matched a fact of
+# each of the ten correction pairs (tests/fixtures/memory_cases.json), and 21 % of a day's real facts.
+REPLACES = re.compile(
+    r"\b(instead of|no longer|not any ?more|anymore|replaced|replaces|switched|moved from|from \S+ to|renamed|"
+    r"dropped|statt|anstelle|nicht mehr|kein\w* \S+ mehr|ersetzt|umgestellt|gewechselt|umbenannt|abgelöst|"
+    r"von \S+ (?:auf|zu) )",
+    re.IGNORECASE,
+)
+REPLACED_GAP_HOURS = 1  # a correction waits at most about an hour; at most one extra review per hour
+
+
+def due_projects(conn: sqlite3.Connection, now: datetime | None = None) -> list[str]:
+    """Projects with enough facts whose last review is older than ``EVERY_HOURS``, ``NEW_FACTS`` facts ago, or older
+    than ``REPLACED_GAP_HOURS`` with a new fact since that states a replacement."""
+    now = now or timeutil.now()
+    since = timeutil.iso(now - timedelta(hours=EVERY_HOURS))
+    gap = timeutil.iso(now - timedelta(hours=REPLACED_GAP_HOURS))
     due = []
     for row in conn.execute(
         "SELECT project_id, COUNT(*) FROM memories WHERE project_id IS NOT NULL AND invalid_at IS NULL "
@@ -103,12 +117,15 @@ def due_projects(conn: sqlite3.Connection) -> list[str]:
         if last is None or last < since:
             due.append(str(row[0]))
             continue
-        new = conn.execute(
-            "SELECT COUNT(*) FROM memories WHERE project_id = ? AND invalid_at IS NULL "
-            "AND trust IN ('observer', 'agent') AND created_at > ?",
-            (row[0], last),
-        ).fetchone()[0]
-        if new >= NEW_FACTS:
+        new = [
+            str(body)
+            for (body,) in conn.execute(
+                "SELECT body FROM memories WHERE project_id = ? AND invalid_at IS NULL "
+                "AND trust IN ('observer', 'agent') AND created_at > ?",
+                (row[0], last),
+            )
+        ]
+        if len(new) >= NEW_FACTS or (last < gap and any(REPLACES.search(body) for body in new)):
             due.append(str(row[0]))
     return due
 
