@@ -556,6 +556,48 @@ class Query:
     exclude_origins: set[str] = field(default_factory=set)
 
 
+def _time_candidates(
+    conn: sqlite3.Connection, projects: list[str | None], window: tuple[datetime, datetime]
+) -> list[Owner]:
+    """ "What did we do on 8 April?" names a time, not a topic: every turn in the window is a candidate."""
+    where, params = _in("project_id", projects)
+    return [
+        ("t", int(row[0]))
+        for row in conn.execute(
+            f"SELECT id FROM turns WHERE {where} AND started_at >= ? AND started_at < ? "
+            "ORDER BY started_at DESC LIMIT 40",
+            (*params, timeutil.iso(window[0]), timeutil.iso(window[1])),
+        )
+    ]
+
+
+def _admissible(hit: Hit, query: Query, projects: list[str | None]) -> bool:
+    """The query's filters: not this session, this project or a global memory, the asked kinds and origins."""
+    if query.exclude_session and hit.session_id == query.exclude_session:
+        return False
+    if not (hit.project_id in projects or hit.project_id is None or query.include_other_projects):
+        return False
+    if query.kinds and hit.kind not in query.kinds:
+        return False
+    return not (hit.origin and hit.origin in query.exclude_origins)
+
+
+def _capped(candidates: list[Hit], limit: int, max_per_session: int) -> list[Hit]:
+    """The first ``limit`` hits with at most ``max_per_session`` turns per session, so one long session cannot fill
+    the list; facts from that session are separate things (a day of work leaves dozens) and are not capped."""
+    per_session: dict[str | None, int] = {}
+    results: list[Hit] = []
+    for hit in candidates:
+        if hit.session_id is not None and hit.owner[0] == "t":
+            per_session[hit.session_id] = per_session.get(hit.session_id, 0) + 1
+            if per_session[hit.session_id] > max_per_session:
+                continue
+        results.append(hit)
+        if len(results) >= limit:
+            break
+    return results
+
+
 def search(
     conn: sqlite3.Connection,
     config: Config,
@@ -577,16 +619,7 @@ def search(
     if vector_source is not None:
         lists["vector"] = vector_source(query.text, 60)
     if query.window:
-        # "What did we do on 8 April?" names a time, not a topic: every turn in the window is a candidate.
-        where, params = _in("project_id", projects)
-        lists["time"] = [
-            ("t", int(row[0]))
-            for row in conn.execute(
-                f"SELECT id FROM turns WHERE {where} AND started_at >= ? AND started_at < ? "
-                "ORDER BY started_at DESC LIMIT 40",
-                (*params, timeutil.iso(query.window[0]), timeutil.iso(query.window[1])),
-            )
-        ]
+        lists["time"] = _time_candidates(conn, projects, query.window)
     fused = rrf(lists, config.retrieval.rrf_k)
     if not fused:
         return []
@@ -597,15 +630,7 @@ def search(
         hit = hits.get(owner)
         if hit is None:
             continue
-        if query.exclude_session and hit.session_id == query.exclude_session:
-            continue
-        same_project = hit.project_id in projects
-        is_global = hit.project_id is None
-        if not (same_project or is_global or query.include_other_projects):
-            continue
-        if query.kinds and hit.kind not in query.kinds:
-            continue
-        if hit.origin and hit.origin in query.exclude_origins:
+        if not _admissible(hit, query, projects):
             continue
         hit.rrf = score / max_rrf if max_rrf else 0.0
         hit.sources = sources
@@ -632,18 +657,7 @@ def search(
         ),
         reverse=True,
     )
-    per_session: dict[str | None, int] = {}
-    results: list[Hit] = []
-    for hit in candidates:
-        # The cap keeps one long session's turns from filling the list; facts from that session are separate
-        # things (a day of work leaves dozens), so they are not capped.
-        if hit.session_id is not None and hit.owner[0] == "t":
-            per_session[hit.session_id] = per_session.get(hit.session_id, 0) + 1
-            if per_session[hit.session_id] > config.retrieval.max_per_session:
-                continue
-        results.append(hit)
-        if len(results) >= query.limit:
-            break
+    results = _capped(candidates, query.limit, config.retrieval.max_per_session)
     if record_shown and results:
         learn.record_access(conn, [h.owner for h in results], "shown", query.exclude_session)
     return results
