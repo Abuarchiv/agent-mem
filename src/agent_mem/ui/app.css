@@ -355,16 +355,13 @@ code.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector h2 { font-size: 20px; overflow-wrap: anywhere; }
 .inspector .mono-title { font-family: var(--mono); font-size: 17px; }
 .inspector p { font-size: 14px; line-height: 1.5; color: var(--muted); }
-.inspector .memory-quote { color: var(--ink); font-size: 15px; }
 .node-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .node-list li { display: flex; flex-direction: column; gap: 2px; }
-.node-list a, .node-list .link-button { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
-.node-list a:hover, .node-list .link-button:hover { background: var(--surface-strong); }
+.node-list .link-button { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.node-list .link-button:hover { background: var(--surface-strong); }
 .node-list i { flex-shrink: 0; width: 11px; height: 11px; margin-top: 4px; border-radius: 50%; border: 1.5px solid var(--ink); }
-.node-list i.square { border-radius: 3px; background: var(--surface-strong); }
 .node-list .wrap { flex: 1; min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
 .node-list .muted { margin-left: auto; white-space: nowrap; font-size: 12px; }
-.node-list .small { padding-left: 27px; font-size: 11px; }
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; border: 1px solid rgba(26, 24, 20, .5); }
 @media (max-width: 1100px) { .graph-layout { grid-template-columns: minmax(0, 1fr); } .inspector { min-height: 0; max-height: none; } .graph-stage { height: 460px; min-height: 0; } .graph-hint { display: none; } }
 

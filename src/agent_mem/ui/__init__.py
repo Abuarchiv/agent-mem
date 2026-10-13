@@ -16,7 +16,6 @@ import re
 import shutil
 import sqlite3
 import sys
-from datetime import timedelta
 from importlib import resources
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -35,7 +34,6 @@ LIMITS = {
     "recipes": 200,
     "rules": 200,
     "profile": 200,
-    "days": 14,
     "recalls": 1500,
 }
 TEXT_CHARS = 4000
@@ -122,7 +120,7 @@ def _sessions(conn: sqlite3.Connection, scope: _Scope) -> tuple[list[dict[str, A
     scoped, params = scope.scoped, scope.params
     sessions = _rows(
         conn,
-        "SELECT s.id, s.harness, s.project_id, s.branch, s.started_at, s.ended_at, s.last_event_at, s.summarized_at, "
+        "SELECT s.id, s.harness, s.project_id, s.branch, s.started_at, s.ended_at, s.last_event_at, "
         "s.title, s.summary_json, "
         "(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id) AS turns "
         f"FROM sessions s {'WHERE s.project_id = ?' if scoped else ''} ORDER BY s.last_event_at DESC LIMIT ?",
@@ -153,7 +151,7 @@ def _turns(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
     where, params = scope.where, scope.params
     turns: list[dict[str, Any]] = []
     for row in conn.execute(
-        "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, importance, trust, title, type, "
+        "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, title, type, "
         f"files_json, commands_json, errors_json, work_tokens FROM turns {where} ORDER BY started_at DESC, id DESC LIMIT ?",
         (*params, LIMITS["turns"]),
     ):
@@ -172,8 +170,6 @@ def _turns(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
                 "outcome": row["outcome"],
                 "title": row["title"],
                 "type": row["type"],
-                "importance": row["importance"],
-                "trust": row["trust"],
                 "files": _json_list(row["files_json"])[:20],
                 "commands": _json_list(row["commands_json"])[:10],
                 "errors": _json_list(row["errors_json"])[:10],
@@ -189,7 +185,7 @@ def _actions(conn: sqlite3.Connection, turns: list[dict[str, Any]]) -> dict[str,
     for turn in turns:
         items = []
         for event in conn.execute(
-            "SELECT ts, tool, command_key, exit_code, error_sig, resolved, payload FROM events "
+            "SELECT tool, command_key, exit_code, error_sig, resolved, payload FROM events "
             "WHERE turn_id = ? AND kind = 'tool' ORDER BY id LIMIT ?",
             (turn["id"], LIMITS["actions_per_turn"]),
         ):
@@ -203,9 +199,7 @@ def _actions(conn: sqlite3.Connection, turns: list[dict[str, Any]]) -> dict[str,
             text, _ = _cap(target, INPUT_CHARS)
             items.append(
                 {
-                    "ts": event["ts"],
                     "tool": event["tool"],
-                    "category": payload.get("category"),
                     "command": event["command_key"],
                     "input": text,
                     "note": note[:INPUT_CHARS],
@@ -227,7 +221,7 @@ def _memories(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
     where, params = scope.where, scope.params
     memories: list[dict[str, Any]] = []
     for row in conn.execute(
-        "SELECT id, project_id, kind, title, body, source, trust, importance, turn_id, origin, valid_from, invalid_at, "
+        "SELECT id, project_id, kind, title, body, source, turn_id, origin, valid_from, invalid_at, "
         "superseded_by, created_at, (SELECT session_id FROM turns t WHERE t.id = memories.turn_id) AS session_id, "
         "(SELECT s.harness FROM turns t JOIN sessions s ON s.id = t.session_id WHERE t.id = memories.turn_id) "
         "AS harness, "
@@ -245,7 +239,6 @@ def _memories(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
     stats = learn.owner_stats(conn, [("m", int(memory["id"])) for memory in memories])
     for memory in memories:
         entry = stats[("m", int(memory["id"]))]
-        memory["activation"] = round(entry.activation_factor, 3)
         memory["used"] = entry.used
         memory["shown"] = entry.shown
 
@@ -259,67 +252,39 @@ def _learned(
     scoped, where, params = scope.scoped, scope.where, scope.params
     recipes = _rows(
         conn,
-        "SELECT id, project_id, error_sig, error_text, command_key, files_json, successes, recurrences, last_turn_id, "
-        f"updated_at FROM recipes {where} ORDER BY successes DESC, updated_at DESC LIMIT ?",
+        "SELECT project_id, error_text, command_key, files_json, successes, recurrences, last_turn_id "
+        f"FROM recipes {where} ORDER BY successes DESC, updated_at DESC LIMIT ?",
         (*params, LIMITS["recipes"]),
     )
     for recipe in recipes:
         recipe["files"] = _json_list(recipe.pop("files_json"))[:10]
     rules = _rows(
         conn,
-        "SELECT id, project_id, kind, pattern, message, evidence, enabled, hits, overrides, created_at, last_hit_at "
+        "SELECT id, project_id, pattern, message, evidence, enabled, hits, overrides "
         f"FROM rules {'WHERE project_id = ? OR project_id IS NULL' if scoped else ''} "
         "ORDER BY enabled DESC, evidence DESC LIMIT ?",
         (*params, LIMITS["rules"]),
     )
     profile = _rows(
         conn,
-        f"SELECT project_id, key, value, count, updated_at FROM profile {where} ORDER BY count DESC, updated_at DESC LIMIT ?",
+        f"SELECT project_id, key, value, count FROM profile {where} ORDER BY count DESC, updated_at DESC LIMIT ?",
         (*params, LIMITS["profile"]),
     )
 
     return recipes, rules, profile
 
 
-def _daily(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
-    """Requests and errors per day for the activity chart."""
-    and_scope, params = scope.and_scope, scope.params
-    days = LIMITS["days"]
-    since = timeutil.iso(timeutil.now() - timedelta(days=days))
-    daily = _rows(
-        conn,
-        "SELECT substr(started_at, 1, 10) AS day, COUNT(*) AS turns, SUM(outcome = 'error') AS errors FROM turns "
-        f"WHERE started_at >= ? {and_scope} GROUP BY day ORDER BY day",
-        (since, *params),
-    )
-
-    return daily
-
-
 def _counts(conn: sqlite3.Connection, scope: _Scope) -> dict[str, Any]:
     """Totals for the overview, beyond the capped lists."""
-    scoped, where, and_scope, params = scope.scoped, scope.where, scope.and_scope, scope.params
-    counts = {
+    where, and_scope, params = scope.where, scope.and_scope, scope.params
+    return {
         "sessions": _count(conn, f"SELECT COUNT(*) FROM sessions {where}", params),
         "turns": _count(conn, f"SELECT COUNT(*) FROM turns {where}", params),
-        "turns_error": _count(conn, f"SELECT COUNT(*) FROM turns WHERE outcome = 'error' {and_scope}", params),
         "memories": _count(conn, f"SELECT COUNT(*) FROM memories WHERE invalid_at IS NULL {and_scope}", params),
         "memories_invalid": _count(
             conn, f"SELECT COUNT(*) FROM memories WHERE invalid_at IS NOT NULL {and_scope}", params
         ),
-        "recipes": _count(conn, f"SELECT COUNT(*) FROM recipes {where}", params),
-        "rules_enabled": _count(
-            conn,
-            f"SELECT COUNT(*) FROM rules WHERE enabled = 1 {'AND (project_id = ? OR project_id IS NULL)' if scoped else ''}",
-            params,
-        ),
-        "rules_proposed": _count(
-            conn,
-            f"SELECT COUNT(*) FROM rules WHERE enabled = 0 {'AND (project_id = ? OR project_id IS NULL)' if scoped else ''}",
-            params,
-        ),
     }
-    return counts
 
 
 def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | None = None) -> dict[str, Any]:
@@ -329,34 +294,25 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
     scope = _scope(project_id)
     where, params = scope.where, scope.params
     projects = _rows(
-        conn, f"SELECT id, name, root, remote FROM projects {where.replace('project_id', 'id')} ORDER BY name", params
+        conn, f"SELECT id, name, root FROM projects {where.replace('project_id', 'id')} ORDER BY name", params
     )
     sessions, recalls = _sessions(conn, scope)
     turns = _turns(conn, scope)
     actions = _actions(conn, turns)
     memories = _memories(conn, scope)
     recipes, rules, profile = _learned(conn, scope)
-    daily = _daily(conn, scope)
     counts = _counts(conn, scope)
     counts = {"projects": len(projects), **counts}
     health = status(conn, config)
-    learning_row = conn.execute(
-        f"SELECT COALESCE(SUM(successes), 0), COALESCE(SUM(recurrences), 0) FROM recipes {where}", params
-    ).fetchone()
-    fixes, recurrences = int(learning_row[0]), int(learning_row[1])
+    fixes = _count(conn, f"SELECT COALESCE(SUM(successes), 0) FROM recipes {where}", params)
     return {
-        "version": 1,
         "agent_mem": __version__,
         "generated_at": timeutil.iso(),
         "project_id": project_id,
         "projects": projects,
         "limits": LIMITS,
         "counts": counts,
-        "learning": {
-            "errors_fixed": fixes,
-            "known_errors_recurred": recurrences,
-            "repetition_rate": round(recurrences / (recurrences + fixes), 3) if recurrences + fixes else None,
-        },
+        "learning": {"errors_fixed": fixes},
         "health": {
             key: health[key]
             for key in (
@@ -383,7 +339,6 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         "recipes": recipes,
         "rules": rules,
         "profile": profile,
-        "daily": daily,
         "graph": memory_graph(conn, project_id),
     }
 

@@ -130,6 +130,10 @@
     const outcomeLabel = (outcome) => OUTCOME_LABEL[outcome] ?? outcome;
     const outcomeTag = (outcome) => tag(outcomeLabel(outcome), outcome === "ok" ? "good" : outcome === "error" ? "bad" : outcome === "open" ? "warn" : "");
     const outcomeBadge = (outcome) => `<span class="badge ${h(outcome)}" title="${h(outcomeLabel(outcome))}">${icon(outcome === "ok" ? "check" : outcome === "error" ? "alert" : "dots", 15, 2.2)}</span>`;
+    // A job is failing when its last error is newer than its last success.
+    const isFailing = (info) => Boolean(info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at));
+    // The session's earliest loaded turn.
+    const firstTurn = (sessionId) => data.turns.filter((turn) => turn.session_id === sessionId).reduce((a, b) => (a && a.started_at <= b.started_at ? a : b), null);
     const limitReached = (list, key) => list.length >= (data.limits[key] ?? Infinity);
     // `agent-mem serve` builds the page fresh on every request; the page reloads itself every `refresh` seconds.
     const live = () => Boolean(data.served);
@@ -144,7 +148,7 @@
             return "";
         if (session.title)
             return session.title;
-        const first = data.turns.filter((turn) => turn.session_id === session.id).reduce((a, b) => (a && a.started_at <= b.started_at ? a : b), null);
+        const first = firstTurn(session.id);
         return first ? headline(first) : "";
     };
     const sessionSummary = (session) => {
@@ -166,8 +170,7 @@
         if (health.paused_until)
             items.push({ tone: "warn", text: `<b>Capture is paused</b> ${health.paused_until === "forever" ? "until you resume it" : `until ${h(full(health.paused_until))}`}. Run <code>agent-mem resume</code>.`, view: "health" });
         for (const [component, info] of Object.entries(health.components ?? {})) {
-            const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
-            if (failing)
+            if (isFailing(info))
                 items.push({ tone: "bad", text: `<b>${h(componentLabel(component))} is failing:</b> ${h(firstLine(info.last_error, 140))}`, view: "health" });
         }
         if (health.spool > 0)
@@ -216,7 +219,7 @@
 <main id="view" tabindex="-1"></main>
 </div>
 </div>
-<nav class="bottom-nav" aria-label="Sections">${NAV.map((item) => `<a href="${hashFor(item.id)}" data-nav="${item.id}">${icon(item.icon, 20)}<span>${h(item.short ?? item.label)}</span></a>`).join("")}</nav>`;
+<nav class="bottom-nav" aria-label="Sections">${NAV.map((item) => `<a href="${hashFor(item.id)}" data-nav="${item.id}">${icon(item.icon, 20)}<span>${h(item.label)}</span></a>`).join("")}</nav>`;
     }
     function syncChrome() {
         document.querySelectorAll("[data-nav]").forEach((link) => {
@@ -266,7 +269,6 @@
         const approx = scoped && (limitReached(data.turns, "turns") || limitReached(data.sessions, "sessions")) ? "latest " : "";
         const names = scoped ? [projectName(state.project)] : data.projects.map((project) => project.name);
         const valid = memories().filter((memory) => !memory.invalid_at);
-        const recipes = data.recipes.filter((recipe) => inProject(recipe.project_id));
         const rules = data.rules.filter((rule) => inProjectOrGlobal(rule.project_id));
         const enabled = rules.filter((rule) => rule.enabled).length;
         const lede = [
@@ -304,7 +306,7 @@
         const feed = list.length ? turnRows(list) : empty(allTurns.length ? "No requests match" : "Nothing captured yet", allTurns.length ? "Try another search or outcome filter." : "Connect a harness with <code>agent-mem setup claude</code> (or codex, copilot, opencode) and start a session.");
         const latest = valid.slice(0, 5).map((memory) => `<a class="row row-link" href="${hashFor("memory", { m: String(memory.id) })}"><span class="tag kind-${h(memory.kind)}">${h(kindLabel(memory.kind))}</span><div class="grow"><b>${inline(firstLine(memoryText(memory), 110))}</b><span>M${memory.id} · ${h(projectName(memory.project_id))} · ${h(when(memory.created_at))}</span></div></a>`).join("");
         const componentRows = Object.entries(data.health.components ?? {}).sort(([a], [b]) => a.localeCompare(b)).slice(0, 6).map(([component, info]) => {
-            const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
+            const failing = isFailing(info);
             return `<div class="row"><i class="dot ${failing ? "bad" : "good"}"></i><b>${h(componentLabel(component))}</b><span class="value">${failing ? "failing" : `ok ${h(ago(info.last_ok_at))}`}</span></div>`;
         }).join("");
         return `<div class="page-head"><div><h1>${num(turnCount)} ${turnCount === 1 ? "request" : "requests"} in ${plural(sessionCount, "session")}</h1><p class="lede">${h(lede)}</p></div></div>
@@ -353,7 +355,7 @@ ${turnDetail(selected, session)}
     // Memories the hooks gave the agent during this turn; the first turn also gets the session-start briefing.
     function recallList(turn) {
         const all = (data.recalls ?? []).filter((recall) => recall.session_id === turn.session_id);
-        const first = data.turns.filter((other) => other.session_id === turn.session_id).reduce((a, b) => (a && a.started_at <= b.started_at ? a : b), null);
+        const first = firstTurn(turn.session_id);
         const end = turn.ended_at ?? "9999";
         const seen = new Set();
         const items = all.filter((recall) => (recall.ts >= turn.started_at && recall.ts <= end) || (first?.id === turn.id && recall.ts < turn.started_at))
@@ -856,7 +858,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
         const paused = Boolean(health.paused_until);
         const components = Object.entries(health.components ?? {}).filter(([name]) => matches([name, componentLabel(name)])).sort(([a], [b]) => a.localeCompare(b));
         const rows = components.map(([name, info]) => {
-            const failing = info.last_error_at && (!info.last_ok_at || info.last_error_at > info.last_ok_at);
+            const failing = isFailing(info);
             return `<tr><td><i class="dot ${failing ? "bad" : "good"}" style="display:inline-block;margin-right:8px"></i><b>${h(componentLabel(name))}</b></td><td>${h(info.last_ok_at ? when(info.last_ok_at) : "never")}</td><td class="num">${num(info.ok_count)}</td><td class="num">${num(info.error_count)}</td><td>${failing ? `<code>${h(firstLine(info.last_error, 160))}</code>` : info.last_error ? `<span class="muted">earlier: ${h(firstLine(info.last_error, 80))} (${h(when(info.last_error_at))})</span>` : '<span class="muted">—</span>'}</td></tr>`;
         }).join("");
         const semantic = String(health.semantic ?? "not indexed yet");
