@@ -98,3 +98,16 @@ def test_passwords_given_as_command_line_options_are_redacted():
     ]
     for command in untouched:
         assert clean_text(command, 500) == command
+
+
+def test_quoted_passphrases_cookies_basic_auth_and_azure_keys_are_redacted():
+    cases = {
+        '{"password": "correct horse battery staple"}': "horse",
+        "Cookie: session=8f14e45fceea167a5a36dedd4bea2543; theme=dark": "8f14e45f",
+        "Authorization: Basic dXNlcjpzdXBlcnNlY3JldA==": "dXNlcjpz",
+        "DefaultEndpointsProtocol=https;AccountName=x;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IF==": "Eby8",
+    }
+    for text, secret in cases.items():
+        assert secret not in privacy.clean_text(text, 1000), text
+    for prose in ("the basic idea is simple", "cookie handling in browsers is tricky", '"password": "${DB_PASS}"'):
+        assert privacy.clean_text(prose, 1000) == prose

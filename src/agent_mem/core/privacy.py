@@ -43,12 +43,17 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("cli_password", re.compile(r"(?i)(\b(?:docker|podman|helm)\s+(?:registry\s+)?login\b[^\n|;&]*?\s-p\s+)(\S+)")),
     ("cli_password", re.compile(r"(?i)(\bredis-cli\b[^\n|;&]*?\s-a\s+)(\S+)")),
     ("cli_password", re.compile(r"((?:^|\s)(?:-u|--user)\s+[A-Za-z0-9][A-Za-z0-9._-]*:)([^\s@]+)")),
+    # Headers that carry credentials: the whole value goes (a cookie line holds several, Basic is user:password).
+    ("header", re.compile(r"(?im)(\b(?:set-)?cookie\s*:\s*)([^\r\n]+)")),
+    ("header", re.compile(r"(?i)(\bauthorization\s*:\s*(?:basic|digest|token)\s+)(\S+)")),
     (
         "assignment",
         re.compile(
             r"(?i)\b([A-Za-z0-9_]*(?:api[_-]?key|secret|token|password|passwd|pwd|passphrase|"
-            r"client[_-]?secret|private[_-]?key|access[_-]?key|auth[_-]?token|credential)[A-Za-z0-9_]*)"
-            r"(\s*[:=]\s*|\"\s*:\s*\")(\"[^\"\r\n]{4,}\"|'[^'\r\n]{4,}'|[^\s,;\"'}\]]{6,})"
+            r"client[_-]?secret|private[_-]?key|access[_-]?key|account[_-]?key|auth[_-]?token|credential)"
+            r"[A-Za-z0-9_]*)"
+            # A JSON value runs to its closing quote: "correct horse battery" is one password, not "correct".
+            r"(\s*[:=]\s*|\"\s*:\s*\")(\"[^\"\r\n]{4,}\"|'[^'\r\n]{4,}'|(?<=\")[^\"\r\n]{4,}(?=\")|[^\s,;\"'}\]]{6,})"
         ),
     ),
 ]
@@ -78,7 +83,7 @@ def redact(text: str) -> tuple[str, int]:
     for kind, pattern in _SECRET_PATTERNS:
         if kind == "url_credentials":
             text, n = pattern.subn(lambda m, k=kind: f"{m.group(1)}{REDACTED.format(kind=k)}@", text)
-        elif kind == "cli_password":
+        elif kind in {"cli_password", "header"}:
             text, n = pattern.subn(lambda m: f"{m.group(1)}{REDACTED.format(kind='secret')}", text)
         elif kind == "assignment":
             text, n = pattern.subn(_redact_assignment, text)
