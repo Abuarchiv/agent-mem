@@ -24,10 +24,10 @@ The provider `fake` answers from a JSON file named in `AGENT_MEM_FAKE_LLM` (a li
 
 ## Changing the viewer
 
-The page script is `src/agent_mem/ui/app.ts`. The package ships the built `app.js` next to it, so installs need no Node. After an edit, type-check and rebuild, and commit both files (CI fails if they differ):
+The page script is `src/agent_mem/ui/app.ts`. The package ships the built `app.js` next to it, so installs need no Node. After an edit, type-check and rebuild, and commit both files (CI fails if they differ). The compiler version is pinned so the same source always builds the same file:
 
 ```sh
-npm install --no-save typescript@^7
+npm install --no-save typescript@7.0.2
 npx tsc -p src/agent_mem/ui
 ```
 

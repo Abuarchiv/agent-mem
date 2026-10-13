@@ -45,7 +45,7 @@ interface GraphNode { id: number; label: string; type: string; project_id: strin
 interface GraphEdge { a: number; b: number; type: string; memory_ids: number[] }
 interface Snapshot {
   agent_mem: string; generated_at: string; project_id: string | null; projects: Project[]; limits: Record<string, number>;
-  counts: Record<string, number>; learning: { errors_fixed: number }; health: Health; agents?: Agent[]; recalls?: Recall[];
+  counts: { projects: number; sessions: number; turns: number; memories: number; memories_invalid: number }; learning: { errors_fixed: number }; health: Health; agents?: Agent[]; recalls?: Recall[];
   quarantine_latest: { ts: string | null; reason: string } | null; sessions: Session[]; turns: Turn[];
   actions: Record<string, Action[]>; memories: Memory[]; recipes: Recipe[]; rules: Rule[]; profile: ProfileItem[];
   graph: { nodes: GraphNode[]; edges: GraphEdge[]; read: number; total: number };
@@ -186,6 +186,9 @@ declare const d3: {
     return `${Math.round(hours / 24)} days ago`;
   };
 
+  const sessionById = (id: string | undefined) => data.sessions.find((session) => session.id === id);
+  const turnById = (id: number | string | undefined) => data.turns.find((turn) => String(turn.id) === String(id));
+  const memoryById = (id: number | string | null | undefined) => data.memories.find((memory) => String(memory.id) === String(id));
   const projectIndex = (id: string) => data.projects.findIndex((project) => project.id === id);
   const projectName = (id: string | null) => {
     if (!id) return "global";
@@ -327,7 +330,7 @@ declare const d3: {
       groups.set(turn.session_id, group);
     }
     return [...groups.entries()].map(([sessionId, items]) => {
-      const session = data.sessions.find((item) => item.id === sessionId);
+      const session = sessionById(sessionId);
       const title = sessionTitle(session);
       return `<div class="session-head">${icon("session", 17)}<b class="session-title">${h(title || harnessLabel(session?.harness))}</b><span class="session-meta">${projectTag(items[0].project_id)}<span class="muted">${h(harnessLabel(session?.harness))} · ${h(sessionRange(session, items))}</span></span></div>` +
         items.map((turn) => `<a class="turn-row" href="${hashFor("timeline", { turn: String(turn.id) })}"><span class="time">${h(clock(turn.started_at))}</span>${outcomeBadge(turn.outcome)}<span class="preview">${turn.type ? tag(turn.type) : ""}${h(headline(turn) || "(no request text)")}</span><span class="tags">${turn.files.length ? tag(plural(turn.files.length, "file")) : ""}${(data.actions[turn.id] ?? []).length ? tag(plural(data.actions[turn.id].length, "action")) : ""}</span></a>`).join("");
@@ -392,7 +395,7 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
 
   function timelineView() {
     const list = filteredTurns();
-    const selected = state.turn === undefined ? undefined : data.turns.find((turn) => String(turn.id) === state.turn);
+    const selected = turnById(state.turn);
     const filtering = state.query.trim() !== "" || state.outcome !== "all";
     const active = state.session ?? selected?.session_id ?? list[0]?.session_id ?? sessions().find((item) => item.turns > 0)?.id;
     const matching = new Set(list.map((turn) => turn.session_id));
@@ -406,7 +409,7 @@ ${alerts ? `<div class="alerts">${alerts}</div>` : ""}
       lastDay = key;
       return `${label}<button type="button" class="session-card" data-action="session" data-value="${h(session.id)}" aria-pressed="${session.id === active}"><b class="session-title">${h(sessionTitle(session) || "(no request yet)")}</b><span class="meta">${projectTag(session.project_id)}<span class="muted">${h(harnessLabel(session.harness))}</span></span><span class="meta muted"><span>${h(sessionRange(session, []))}</span><span>${plural(session.turns, "request")}</span></span></button>`;
     }).join("");
-    const session = data.sessions.find((item) => item.id === active);
+    const session = sessionById(active);
     const feedTurns = list.filter((turn) => turn.session_id === active).slice().reverse();
     const head = session ? `<div class="panel-head session-panel-head"><h2>${h(sessionTitle(session) || harnessLabel(session.harness))}</h2><span class="session-meta">${projectTag(session.project_id)}${tag(harnessLabel(session.harness))}${session.branch ? tag(session.branch, "mono") : ""}<small>${h(sessionRange(session, []))}</small></span></div>${sessionSummary(session)}` : `<div class="panel-head"><h2>Requests</h2></div>`;
     const feed = feedTurns.length === 0
@@ -436,8 +439,8 @@ ${turnDetail(selected, session)}
     const row = (recall: Recall) => {
       const isMemory = recall.owner_type === "m";
       const label = `${isMemory ? "M" : "T"}${recall.owner_id}`;
-      const memory = isMemory ? data.memories.find((item) => item.id === recall.owner_id) : undefined;
-      const other = isMemory ? undefined : data.turns.find((item) => item.id === recall.owner_id);
+      const memory = isMemory ? memoryById(recall.owner_id) : undefined;
+      const other = isMemory ? undefined : turnById(recall.owner_id);
       const text = memory ? memoryText(memory) : other ? headline(other) : "";
       const href = isMemory ? hashFor("memory", { m: String(recall.owner_id) }) : hashFor("timeline", { turn: String(recall.owner_id) });
       const when = recall.ts < turn.started_at ? "at session start" : clock(recall.ts);
@@ -476,9 +479,9 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
   // Which harness a memory belongs to: its session's, or for notes and MCP saves the one named in ``origin``.
   const harnessOf = (memory: Memory) => memory.harness || "other";
   const memoryRow = (memory: Memory) => `<a class="memory-row${memory.invalid_at ? " invalid" : ""}${String(memory.id) === state.memory ? " is-selected" : ""}" href="${hashFor("memory", { m: String(memory.id) })}">${tag(kindLabel(memory.kind), `kind-${memory.kind}`)}<span class="memory-text">${inline(memoryText(memory))}</span><span class="muted mono">M${memory.id}</span></a>`;
+  const KIND_PLURAL: Record<string, string> = { dead_end: "dead ends", native_note: "agent notes", summary: "summaries", correction: "corrections" };
   // "3 decisions · 2 lessons" as coloured dots, so a closed session says what is in it.
   const kindMix = (items: Memory[]) => MEMORY_KINDS.map((kind): [string, number] => [kind, items.filter((memory) => memory.kind === kind).length]).filter(([, count]) => count).map(([kind, count]) => `<span class="mix"><i class="swatch kind-${kind}"></i>${num(count)} ${h(count === 1 ? kindLabel(kind) : KIND_PLURAL[kind] ?? `${kindLabel(kind)}s`)}</span>`).join("");
-  const KIND_PLURAL: Record<string, string> = { dead_end: "dead ends", native_note: "agent notes", summary: "summaries", correction: "corrections" };
 
   function memoryView() {
     const all = memories();
@@ -513,7 +516,7 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
         return `<details class="memory-group"${open ? " open" : ""}><summary><span class="group-title">${h(title)}</span><span class="group-meta">${meta}</span><span class="group-mix">${kindMix(list)}</span></summary><div class="memory-rows">${sorted.map(memoryRow).join("")}</div></details>`;
       };
       const sessionGroups = order.slice(0, limit).map(([sessionId, list], index) => {
-        const session = data.sessions.find((item) => item.id === sessionId);
+        const session = sessionById(sessionId);
         const started = session?.started_at ?? list[list.length - 1].created_at;
         const meta = `${projectTag(list[0].project_id)}<span class="muted">${h(when(started))}</span>`;
         const open = searching || index === 0 || list.some((memory) => String(memory.id) === state.memory);
@@ -525,7 +528,7 @@ ${learned.length ? `<span class="section-label">Learned from this turn</span><ul
       const looseGroup = loose.length ? group("Saved outside a session", `<span class="muted">stored with the <code>mem_remember</code> tool or by hand</span>`, loose, searching) : "";
       return `<section class="harness-block"><header class="harness-head">${icon("session", 20)}<h2>${h(harnessLabel(name))}</h2><span class="muted">${plural(order.length, "session")} · ${plural(items.length, "memory", "memories")}</span></header><div class="memory-groups">${sessionGroups}${more}${noteGroup}${looseGroup}</div></section>`;
     }).join("");
-    const selected = state.memory === undefined ? undefined : data.memories.find((memory) => String(memory.id) === state.memory);
+    const selected = memoryById(state.memory);
     return `<div class="page-head"><div><h1>Memories</h1><p class="lede">What your agents keep in mind, sorted by agent, then by the session it came from. A closed session shows what is inside; open it to read the memories, click one to see its source or to delete it.</p></div></div>
 <div class="filter-rows">${harnessPills}${kindPills}</div>
 <div class="${selected ? "with-detail" : ""}">
@@ -553,7 +556,7 @@ ${selected ? memoryDetail(selected) : ""}
 
   function memoryDetail(memory: Memory) {
     const id = `M${memory.id}`;
-    const successor = memory.superseded_by ? data.memories.find((item) => item.id === memory.superseded_by) : undefined;
+    const successor = memoryById(memory.superseded_by);
     const usage = memory.shown ? `shown ${plural(memory.shown, "time")}, used ${plural(memory.used, "time")}` : memory.used ? `used ${plural(memory.used, "time")}` : "not yet";
     return `<aside class="detail memory-detail kind-${h(memory.kind)}" aria-label="Memory detail">
 <header><h2>${id} · ${h(kindLabel(memory.kind))}</h2><a class="round-button" href="${hashFor("memory")}" aria-label="Close memory detail">${icon("close", 16)}</a></header>
@@ -572,7 +575,7 @@ ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this pag
   // Scratch files of one run mean nothing to a reader later; project files are named by their last folders.
   const tidyPath = (file: string) => (/\/(tmp|private|var\/folders)\/|scratchpad|tool-results/.test(file) ? "a temporary file" : file.split("/").slice(-3).join("/"));
   const turnLink = (id: number) => {
-    const turn = data.turns.find((item) => item.id === id);
+    const turn = turnById(id);
     return `<a href="${hashFor("timeline", { turn: String(id) })}">T${id}${turn ? ` · ${h(firstLine(headline(turn), 70))}` : ""}</a>${turn ? ` <span class="muted">${h(when(turn.started_at))}</span>` : ""}`;
   };
 
@@ -626,7 +629,6 @@ ${panel("commands", "Commands that worked", sections[3][3], profileRows, "No com
   // Problem relations stand out; the rest share one quiet colour.
   const relationTone = (type: string) => (type === "fixes" ? "--good" : type === "causes" || type === "breaks" ? "--bad" : type === "avoid" || type === "replaces" ? "--warn" : "--ink");
   const graphNodes = () => data.graph.nodes.filter((node) => inProjectOrGlobal(node.project_id));
-  const memoryById = (id: number) => data.memories.find((memory) => memory.id === id);
 
   function graphView() {
     const nodes = graphNodes();
@@ -862,19 +864,20 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     if (state.view === "timeline") {
       state.turn = params.get("turn") ?? undefined;
       state.session = params.get("session") ?? undefined;
-      if (state.turn !== undefined && state.session === undefined) state.session = data.turns.find((turn) => String(turn.id) === state.turn)?.session_id;
+      if (state.turn !== undefined && state.session === undefined) state.session = turnById(state.turn)?.session_id;
     }
     state.memory = state.view === "memory" ? params.get("m") ?? undefined : undefined;
     state.graphNode = state.view === "graph" ? params.get("n") ?? undefined : undefined;
   }
+
+  const VIEWS: Record<string, () => string> = { overview: overviewView, timeline: timelineView, memory: memoryView, learned: learnedView, graph: graphView, health: healthView };
 
   function renderView() {
     const view = document.getElementById("view");
     if (!view) return;
     graphController?.destroy();
     graphController = null;
-    const views: Record<string, () => string> = { overview: overviewView, timeline: timelineView, memory: memoryView, learned: learnedView, graph: graphView, health: healthView };
-    view.innerHTML = views[state.view]();
+    view.innerHTML = VIEWS[state.view]();
     if (state.view === "graph") {
       graphController = createGraph(document.getElementById("graph-host")!, document.getElementById("graph-inspector")!, graphNodes(), data.graph.edges);
       graphController.setHidden(state.hiddenKinds);
