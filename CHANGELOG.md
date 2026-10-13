@@ -4,6 +4,7 @@
 
 ### Fixed from the fresh-install audit
 
+- `setup` no longer prints the Hub's "You are sending unauthenticated requests ... set a HF_TOKEN" while fetching the public embedding model; it read like a step left to do. Errors still show.
 - A turn is `error` only when a test, build, lint or install command still fails at its end. Every unresolved failure counted, so 4 of 7 turns of a real session that ended well were `error` (a `cat` of a missing file, a wrong query, an MCP tool that could not start), and the work log titled one "test errors still open" after its tests had passed.
 - Copilot turns get their answer. `agentStop` carries only the transcript's path, and the final message reaches that file 50 to 150 ms after the hook starts; the hook now reads the end of `events.jsonl`, takes only a message after the turn's prompt (read too early, it took the previous turn's answer) and waits at most 250 ms. Before, every Copilot turn had no answer in the panel and for the observer.
 - A stated rule ("We decided to use pytest, never unittest.") is stored once, as its decision sentence. It was also stored as a correction holding the whole prompt.
