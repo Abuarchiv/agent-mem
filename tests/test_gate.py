@@ -49,6 +49,12 @@ def test_gate_skips_only_what_has_nothing_to_check(config: Config, monkeypatch):
     assert not paths.pre_tool_has_nothing_to_check(None, json.dumps({**PRE, "hook_event_name": "PostToolUse"}).encode())
     assert not paths.pre_tool_has_nothing_to_check(None, json.dumps({**PRE, "tool_input": {}}).encode())
     assert not paths.pre_tool_has_nothing_to_check(None, b"not json")
+    _guards(config, rules=False, files=["src/app.py"])
+    sed = {**PRE, "tool_input": {"command": "sed -n '1,80p' src/app.py"}}
+    assert not paths.pre_tool_has_nothing_to_check(None, json.dumps(sed).encode())  # Codex reads with sed
+    codex = {**PRE, "tool_name": "exec_command", "tool_input": {"cmd": ["bash", "-lc", "cat src/app.py"]}}
+    assert not paths.pre_tool_has_nothing_to_check(None, json.dumps(codex).encode())
+    assert paths.pre_tool_has_nothing_to_check(None, json.dumps(PRE).encode())
 
 
 def test_guards_follow_rules_and_dead_ends(conn, config: Config, driver: Driver):
@@ -64,6 +70,19 @@ def test_guards_follow_rules_and_dead_ends(conn, config: Config, driver: Driver)
     assert not guards.exists()
     indexer.run(config, allow_download=False)
     assert json.loads(guards.read_text())["files"] == ["app.py"]
+    project_id = conn.execute("SELECT project_id FROM sessions LIMIT 1").fetchone()[0]
+    store.add_memory(
+        conn,
+        project_id=project_id,
+        kind="decision",
+        title="db.py pools per thread",
+        body="x",
+        source="agent",
+        trust="observer",
+        entity_ids=[store.entity_id(conn, project_id, "file", "db.py")],
+    )
+    indexer.run(config, allow_download=False)
+    assert sorted(json.loads(guards.read_text())["files"]) == ["app.py", "db.py"]  # decisions show on read too
     store.guards_exist(config)
     assert not guards.exists()
 

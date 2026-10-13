@@ -68,6 +68,7 @@ Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `
 | `memory/store.py` | Memories, search keys, entities, links, deletion (queues `observe_forget` for facts) |
 | `memory/search.py` | FTS5 + graph candidates, RRF, scoring, abstention (standard library) |
 | `memory/semantic.py` | fastembed embeddings (MiniLM default, e5 prefixes for e5 models), vector search, PageRank, time windows |
+| `memory/notes.py` | Notes Claude Code and Codex keep themselves, stored as `native_note` without a model (indexer); shown only to the other harnesses |
 | `memory/learn.py`, `memory/consolidate.py` | ACT-R activation, usefulness, Hebbian edges; decay, superseding, anchors |
 | `observe/queue.py` | `observe_queue`: lease, finish, fail with backoff, retry, status |
 | `observe/bundle.py` | Turns to model input: prompt, answer, tool names/commands/files/errors, subagent answers, bounded; no `tool_external` |

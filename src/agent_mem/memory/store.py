@@ -144,14 +144,16 @@ def add_memory(
     origin: str | None = None,
     dedupe: str | None = None,
     entity_ids: list[int] | None = None,
+    at: str | None = None,
 ) -> int | None:
     """Insert a memory (append-only). Returns the id, or None when the dedupe key already exists.
 
-    Title and body are always cleaned here (redaction, private sections, size), whatever the source.
+    Title and body are always cleaned here (redaction, private sections, size), whatever the source. ``at`` dates
+    a memory written earlier elsewhere (a harness's own note), so its age and activation are true.
     """
     title = privacy.clean_text(title, 300)
     body = privacy.clean_text(body, 8000)
-    now = timeutil.iso()
+    now = at or timeutil.iso()
     key = dedupe or hashlib.sha256(f"{project_id}|{kind}|{title}|{body}".encode()).hexdigest()
     cursor = conn.execute(
         "INSERT INTO memories(project_id, kind, title, body, source, trust, importance, turn_id, origin, "
@@ -172,8 +174,9 @@ def add_memory(
     if ids:
         link(conn, "m", memory_id, ids)
     learn.record_access(conn, [("m", memory_id)], "created", ts=now)
-    if kind == "dead_end" and ids:
-        # Every writer (hook, observer, mem_remember) comes through here: the pre-tool gate must look again.
+    if kind in {"dead_end", "decision", "lesson", "fact"} and ids:
+        # Every writer (hook, observer, mem_remember) comes through here: the pre-tool gate must look again, a file
+        # with history is shown on read and edit (hooks/capture._file_history).
         with contextlib.suppress(OSError):
             (paths.default_data_dir() / paths.GUARDS).unlink()
     return memory_id

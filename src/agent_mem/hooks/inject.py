@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, timedelta
 from agent_mem.core import spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.signals import command_kind, first_line, looks_like_error, request_text
-from agent_mem.memory import learn, search
+from agent_mem.memory import learn, notes, search
 from agent_mem.memory.store import owner_label
 
 HEADER = (
@@ -225,15 +225,16 @@ def _open_errors(
 def _memory_lines(
     conn: sqlite3.Connection, project_id: str, harness: str, limit: int = 5, kinds: tuple[str, ...] = ()
 ) -> list[tuple[str, tuple[str, int]]]:
-    kinds = kinds or ("decision", "dead_end", "preference", "correction", "summary", "native_note", "fact")
+    kinds = kinds or ("decision", "dead_end", "preference", "correction", "summary", "fact")
     marks = ",".join("?" for _ in kinds)
     rows = conn.execute(
-        "SELECT id, kind, title, created_at, importance, origin FROM memories "
+        "SELECT id, kind, title, body, created_at, importance, origin FROM memories "
         f"WHERE (project_id = ? OR project_id IS NULL) AND invalid_at IS NULL AND kind IN ({marks}) "
         "ORDER BY created_at DESC LIMIT 200",
         (project_id, *kinds),
     ).fetchall()
-    rows = [r for r in rows if not (harness == "claude" and r["origin"] == "claude-auto-memory")]
+    own = notes.own_notes(harness)
+    rows = [r for r in rows if r["origin"] not in own]
     owners = [("m", int(r["id"])) for r in rows]
     stats = learn.owner_stats(conn, owners)
     priority = {"preference": 1.3, "dead_end": 1.25, "decision": 1.2, "correction": 1.1, "lesson": 1.1}
@@ -250,13 +251,26 @@ def _memory_lines(
     lines = []
     # Picked by rank, shown oldest first: an update then reads as an update (LongMemEval, chronological reading).
     for row in sorted(ranked[:limit], key=lambda r: r["created_at"]):
+        title = first_line(row["title"], 180)
         lines.append(
             (
-                f"- [M{row['id']} · {timeutil.day(row['created_at'])} · {row['kind']}] {first_line(row['title'], 180)}",
+                f"- [M{row['id']} · {timeutil.day(row['created_at'])} · {row['kind']}] {title}{_more(row['body'], title)}",
                 ("m", int(row["id"])),
             ),
         )
     return lines
+
+
+def _more(body: str | None, shown: str) -> str:
+    """What opening the entry costs, when it holds clearly more than its line (claude-mem shows ~tokens per entry)."""
+    extra = tokens(body or "") - tokens(shown)
+    return f" (+{extra} tok)" if extra > 30 else ""
+
+
+def now_line() -> str:
+    """The time the agent is working in, so it can tell how old each dated entry is."""
+    stamp = datetime.now().astimezone()
+    return f"Current: {stamp:%Y-%m-%d %H:%M %Z}; (+N tok) after an entry = more detail via mem_get"
 
 
 def session_start(
@@ -270,6 +284,9 @@ def session_start(
     lines.extend(memories)
     # Lessons have their own slots: rules for next time, ranked by use like the rest (``observe/summary.py``).
     lines.extend(_memory_lines(conn, project_id, harness, limit=3, kinds=("lesson",)))
+    # Another harness's notes (memory/notes.py) get their own two slots: long session summaries would otherwise
+    # take every fact slot of a project the user mostly works in with that harness (measured on real data).
+    lines.extend(_memory_lines(conn, project_id, harness, limit=2, kinds=("native_note",)))
     lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
     last = _last_session_lines(conn, project_id, session_id)
@@ -277,7 +294,7 @@ def session_start(
     # The work log as an index, like claude-mem's: titles with ids the agent can open (mem_get). Last, so the budget
     # drops it before facts and lessons; the agent sees what happened lately and can tell a newer decision itself.
     lines.extend(_work_lines(conn, project_id, session_id, {owner for _, owner in last if owner}))
-    return render(lines, config.budgets.session_start)
+    return render([(now_line(), None), *lines], config.budgets.session_start) if lines else None
 
 
 def _work_lines(
@@ -327,7 +344,7 @@ def _focus_lines(
         project_id=project_id,
         exclude_session=session_id,
         limit=6,
-        exclude_origins={"claude-auto-memory"} if harness == "claude" else set(),
+        exclude_origins=notes.own_notes(harness),
     )
     hits = [h for h in search.search(conn, config, query) if h.owner not in taken and h.owner[0] == "m"]
     return [
@@ -360,7 +377,7 @@ def prompt_hints(
         project_id=project_id,
         exclude_session=session_id,
         limit=5,
-        exclude_origins={"claude-auto-memory"} if harness == "claude" else set(),
+        exclude_origins=notes.own_notes(harness),
     )
     hits = [h for h in search.search(conn, config, query) if search.confident(h, config, terms)][:3]
     if not hits:
@@ -415,7 +432,7 @@ def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block 
                 files.append(path)
     if files:
         lines.append(("- Files touched: " + ", ".join(files[-8:]), None))
-    return render(lines, config.budgets.compact)
+    return render([(now_line(), None), *lines], config.budgets.compact) if lines else None
 
 
 def recipe_hint(recipe: sqlite3.Row, config: Config) -> Block | None:
@@ -432,6 +449,16 @@ def recipe_hint(recipe: sqlite3.Row, config: Config) -> Block | None:
 
 def warnings_block(lines: list[tuple[str, tuple[str, int] | None]], config: Config) -> Block | None:
     return render(lines, config.budgets.warning)
+
+
+def file_history_block(lines: list[tuple[str, tuple[str, int] | None]], config: Config) -> Block | None:
+    """Earlier memories about the files a tool touches; history, not the file's current contents."""
+    if not lines:
+        return None
+    return render(
+        [("Earlier memories about this file (history, not its current contents):", None), *lines],
+        config.budgets.file_history,
+    )
 
 
 def label(owner: tuple[str, int]) -> str:

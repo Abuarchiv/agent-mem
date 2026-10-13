@@ -369,12 +369,49 @@ def packages_of(command: str) -> list[str]:
     return [re.split(r"[=<>@~^]", name, maxsplit=1)[0] or name for name in names][:20]
 
 
+# Shell programs that print a file (Codex reads with `sed -n`, `cat`, `nl`; it has no read tool).
+_PRINTERS = {"cat", "head", "tail", "sed", "nl", "less", "more", "bat"}
+# Options that take the next word as their value, per program (`sed -n` is a switch, `head -n` is not).
+_VALUE_FLAGS = {
+    "head": {"-n", "-c", "--lines", "--bytes"},
+    "tail": {"-n", "-c", "--lines", "--bytes"},
+    "sed": {"-e", "-f"},
+}
+
+
+def shell_read_files(command: str) -> list[str]:
+    """Files a printing command reads: `sed -n '1,80p' src/a.py` reads src/a.py."""
+    words = _split(command)
+    if not words or words[0] not in _PRINTERS:
+        return []
+    found: list[str] = []
+    skip_next = False
+    script_pending = words[0] == "sed" and not any(w in {"-e", "-f"} for w in words)
+    for word in words[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if word in _VALUE_FLAGS.get(words[0], ()):
+            skip_next = True
+            continue
+        if word.startswith("-") or word.lstrip("+").isdigit():
+            continue
+        if script_pending:  # sed's first operand is the script
+            script_pending = False
+            continue
+        if len(word) < 1024:
+            found.append(word)
+    return found[:5]
+
+
 def analyze_tool(tool: str, tool_input: Any) -> ToolSignal:
     category = classify_tool(tool)
     command = command_of(tool_input) if category == "shell" else None
     key = command_key(command) if command else None
     kind = command_kind(command) if command else None
     files = files_of(category, tool_input) if category in {"edit", "read"} else []
+    if command and not files:
+        files = shell_read_files(command)
     reverted = reverted_files(command) if command and kind == "revert" else []
     packages = packages_of(command) if command and kind == "install" else []
     return ToolSignal(

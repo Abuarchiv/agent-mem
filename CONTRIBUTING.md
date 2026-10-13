@@ -34,6 +34,17 @@ A new default embedder is a minor release: calibrate `retrieval.min_vector_score
 
 `agent-mem eval --fixture tests/fixtures/memory_cases.json --backend sqlite|mem0` and `agent-mem eval <longmemeval_s.json> --subset tests/fixtures/longmemeval_subset.json`. Reports go to `docs/evidence/runs/`; raw data from real sessions stays under `~/.cache/agent-mem/eval/`.
 
+## Fixing a bug
+
+From claude-mem's merge rubric (`docs/evidence/claude-mem-docs-13.36.1.md`), adopted here:
+
+- Fix the cause where it is. A guard that catches the failure and carries on, a retry, a fallback path, a sweeper or a marker file leaves the failure in place and makes it quieter. Removing such machinery is welcome.
+- No second system beside the one with the bug: no new background process, poller or environment switch that keeps the old behaviour available.
+- The size of the change follows the size of the mistake: one wrong line is about one changed line plus its test.
+- The test comes first and fails without the change. Name the exact command in the commit message, and say what was measured live and what was not (for example "checked against `claude -p` 2.x, Copilot not run").
+
+Hooks still never block or crash the agent (`AGENTS.md` R2). That is the contract with the harness, not a way around a bug.
+
 ## Pull requests
 
 Local commits only until the maintainer allows pushing. One topic per commit, plain commit messages, no generated attributions.

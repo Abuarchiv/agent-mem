@@ -44,6 +44,7 @@ class Budgets:
     prompt: int = 200
     failure: int = 120
     warning: int = 80
+    file_history: int = 160
     compact: int = 400
 
 
@@ -148,6 +149,8 @@ class Viewer:
 class Config:
     data_dir: Path
     capture: bool = True
+    # Store the notes Claude Code and Codex keep themselves (memory/notes.py); no model call.
+    native_notes: bool = True
     hook_deadline_ms: int = 400
     exclude_globs: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE_GLOBS))
     excluded_projects: list[str] = field(default_factory=list)
@@ -262,6 +265,7 @@ _BOUNDS: dict[str, tuple[float, float]] = {
     "budgets.prompt": (0, 4_000),
     "budgets.failure": (0, 2_000),
     "budgets.warning": (0, 2_000),
+    "budgets.file_history": (0, 2_000),
     "budgets.compact": (0, 8_000),
     "retrieval.inject_min_score": (0, 1),
     "retrieval.min_term_coverage": (0, 1),

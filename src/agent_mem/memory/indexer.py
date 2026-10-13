@@ -21,7 +21,7 @@ from agent_mem.core import db, logutil, paths, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
-from agent_mem.memory import consolidate
+from agent_mem.memory import consolidate, notes
 
 
 def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, Any]) -> None:
@@ -163,7 +163,8 @@ def _mark_guards(conn: sqlite3.Connection, config: Config) -> None:
         str(row[0])
         for row in conn.execute(
             "SELECT DISTINCT e.key FROM entities e JOIN links l ON l.entity_id = e.id AND l.owner_type = 'm' "
-            "JOIN memories m ON m.id = l.owner_id WHERE e.kind = 'file' AND m.kind = 'dead_end' AND m.invalid_at IS NULL"
+            "JOIN memories m ON m.id = l.owner_id WHERE e.kind = 'file' AND m.invalid_at IS NULL "
+            "AND m.kind IN ('dead_end', 'decision', 'lesson', 'fact')"
         )
     ]
     target = config.data_dir / paths.GUARDS
@@ -180,6 +181,8 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     )
     stats["spool_applied"], stats["spool_quarantined"] = applied, quarantined
     stats["stale_turns_closed"] = capture.close_stale_turns(conn, config)
+    with db.transaction(conn):
+        stats["native_notes"] = notes.ingest(conn, config)
     _mark_guards(conn, config)
 
     embedder = None

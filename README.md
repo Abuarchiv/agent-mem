@@ -119,9 +119,10 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 ```json
 {
   "capture": true,
+  "native_notes": true,
   "excluded_projects": ["/path/to/private/repo"],
   "exclude_globs": [".env", ".env.*", "*.pem", "secrets/**"],
-  "budgets": {"session_start": 1000, "prompt": 200, "failure": 120, "warning": 80, "compact": 400},
+  "budgets": {"session_start": 1000, "prompt": 200, "failure": 120, "warning": 80, "file_history": 160, "compact": 400},
   "semantic": {"enabled": true, "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
   "observe": {
     "enabled": true,
@@ -139,7 +140,7 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 }
 ```
 
-`observe.enabled: false` stops all model calls; turns are still captured and searchable. `cross_vendor: true` lets any installed stage handle any turn. Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
+`observe.enabled: false` stops all model calls; turns are still captured and searchable. `native_notes: false` stops reading the notes Claude Code (`~/.claude/projects/*/memory/*.md`) and Codex (`~/.codex/memories/rollout_summaries/`) keep themselves; each harness is shown only the other one's notes. `cross_vendor: true` lets any installed stage handle any turn. Per project, `.agent-mem.json` in the repository root can set `{"capture": false}` or extra `"exclude"` globs.
 
 ## Privacy and security
 

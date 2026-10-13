@@ -15,7 +15,7 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
 from agent_mem.core import db, identity, privacy, signals, timeutil
@@ -461,34 +461,71 @@ def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id,
             lines.append(
                 (f"- Note (R{rule['id']}): earlier correction — {rule['message']} ({rule['evidence']}x).", None)
             )
-    if tool_signal.category == "edit" and project_id is not None:
-        for path in _rel_files(project, tool_signal.files):
-            entity = conn.execute(
-                "SELECT id FROM entities WHERE project_id = ? AND kind = 'file' AND key = ?", (project_id, path)
-            ).fetchone()
-            if entity is None:
-                continue
-            for memory in conn.execute(
-                "SELECT m.id, m.title, m.created_at FROM memories m JOIN links l ON l.owner_type = 'm' AND l.owner_id = m.id "
-                "WHERE l.entity_id = ? AND m.kind = 'dead_end' AND m.invalid_at IS NULL ORDER BY m.id DESC LIMIT 2",
-                (entity["id"],),
-            ):
-                warned = conn.execute(
-                    "SELECT 1 FROM accesses WHERE owner_type = 'm' AND owner_id = ? AND kind = 'warned' AND session_id = ?",
-                    (memory["id"], session_id),
-                ).fetchone()
-                if warned:
-                    continue
-                learn.record_access(conn, [("m", int(memory["id"]))], "warned", session_id)
-                lines.append(
-                    (
-                        f"- Caution [M{memory['id']} · {timeutil.day(memory['created_at'])}]: {memory['title']}",
-                        ("m", int(memory["id"])),
-                    )
-                )
     block = inject.warnings_block(lines, config)
+    history = _file_history(conn, config, project, project_id, session_id, tool_signal)
+    response.context = "\n".join(b.text for b in (block, history) if b) or None
+
+
+# Kind, label and weight in the file history: what went wrong before matters most when touching a file.
+_HISTORY = {"dead_end": ("Caution", 3), "decision": ("Decision", 2), "lesson": ("Lesson", 2), "fact": ("Note", 1)}
+# Below this size reading the file costs about what its history would (claude-mem File Read Gate, measured).
+HISTORY_MIN_BYTES = 1_500
+
+
+def _file_history(conn, config, project, project_id, session_id, tool_signal) -> inject.Block | None:
+    """Memories linked to the files a tool reads or edits, once per session each.
+
+    Specific ones first (the file was one of few the memory names), dead ends before decisions before facts.
+    A fact older than the file's last change may describe code that is gone, so it is left out; dead ends,
+    decisions and lessons stay true after an edit.
+    """
+    reading = tool_signal.category in {"read", "shell"}
+    if project_id is None or project is None or not tool_signal.files:
+        return None
+    if tool_signal.category not in {"read", "edit", "shell"}:
+        return None
+    lines: list[tuple[str, tuple[str, int] | None]] = []
+    for path in _rel_files(project, tool_signal.files)[:3]:
+        entity = conn.execute(
+            "SELECT id FROM entities WHERE project_id = ? AND kind = 'file' AND key = ?", (project_id, path)
+        ).fetchone()
+        if entity is None:
+            continue
+        try:
+            stat = os.stat(os.path.join(project.root, path))
+        except OSError:
+            stat = None
+        if reading and (stat is None or stat.st_size < HISTORY_MIN_BYTES):
+            continue
+        changed = timeutil.iso(datetime.fromtimestamp(stat.st_mtime, UTC)) if stat else None
+        ranked = []
+        for row in conn.execute(
+            "SELECT m.id, m.kind, m.title, m.created_at, (SELECT count(*) FROM links l2 JOIN entities e2 "
+            "ON e2.id = l2.entity_id AND e2.kind = 'file' WHERE l2.owner_type = 'm' AND l2.owner_id = m.id) AS spread "
+            "FROM memories m JOIN links l ON l.owner_type = 'm' AND l.owner_id = m.id "
+            "WHERE l.entity_id = ? AND m.invalid_at IS NULL AND m.kind IN ('dead_end', 'decision', 'lesson', 'fact') "
+            "AND NOT EXISTS (SELECT 1 FROM accesses a WHERE a.owner_type = 'm' AND a.owner_id = m.id "
+            "AND a.session_id = ? AND a.kind IN ('shown', 'injected', 'warned')) ORDER BY m.id DESC LIMIT 40",
+            (entity["id"], session_id),
+        ):
+            if row["kind"] == "fact" and changed and row["created_at"] < changed:
+                continue
+            spread = int(row["spread"])
+            weight = _HISTORY[row["kind"]][1] + (2 if spread <= 3 else 1 if spread <= 8 else 0)
+            ranked.append((weight, int(row["id"]), row))
+        for _, memory_id, row in sorted(ranked, key=lambda item: (-item[0], -item[1]))[:3]:
+            label = _HISTORY[row["kind"]][0]
+            lines.append(
+                (
+                    f"- {label} [M{memory_id} · {timeutil.day(row['created_at'])}] {path}: {row['title']}",
+                    ("m", memory_id),
+                )
+            )
+    block = inject.file_history_block(lines, config)
     if block:
-        response.context = block.text
+        kind = "warned" if not reading else "shown"
+        learn.record_access(conn, block.owners, kind, session_id)
+    return block
 
 
 def _on_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
@@ -559,6 +596,12 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
 
     if tool_signal.category == "edit" and files and project_id is not None:
         _feedback_used(conn, project_id, session_id, files)
+
+    # Copilot does not fire plugin preToolUse hooks (copilot-cli#2540); after the call is the next chance.
+    if with_context and not response.context:
+        history = _file_history(conn, config, project, project_id, session_id, tool_signal)
+        if history:
+            response.context = history.text
 
 
 def _resolve_failures(

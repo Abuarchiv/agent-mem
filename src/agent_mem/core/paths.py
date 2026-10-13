@@ -41,8 +41,8 @@ def _tool_input(payload: dict[str, object]) -> object:
 
 
 def pre_tool_has_nothing_to_check(event_name: str | None, raw: bytes) -> bool:
-    """True for a pre-tool event the hook would answer with silence: a command while no rule exists, an edit of a
-    file without a dead end. The hook then exits before loading the database code (about 45 ms per Bash or Edit
+    """True for a pre-tool event the hook would answer with silence: a command while no rule exists and no
+    remembered file is named in it, a read or edit of a file without memories. The hook then exits before loading the database code (about 45 ms per Bash or Edit
     call), and the event is not stored: nothing reads pre-tool events. In doubt it returns False."""
     try:
         guards = json.loads((default_data_dir() / GUARDS).read_text(encoding="utf-8"))
@@ -55,12 +55,15 @@ def pre_tool_has_nothing_to_check(event_name: str | None, raw: bytes) -> bool:
     tool_input = _tool_input(payload)
     if name not in _PRE_TOOL or not isinstance(tool_input, dict):
         return False
-    if "command" in tool_input:
-        return not guards.get("rules", True)
+    files = [str(f) for f in guards.get("files") or []]
+    command = tool_input.get("command", tool_input.get("cmd"))
+    if command is not None:
+        # `sed -n '1,80p' db.py` is how Codex reads a file: its history is worth the database.
+        text = command if isinstance(command, str) else " ".join(str(part) for part in command)
+        return not guards.get("rules", True) and not any(f in text for f in files)
     targets = [
         str(value).replace("\\", "/")
         for key, value in tool_input.items()
         if key in {"file_path", "filePath", "path", "notebook_path"} and isinstance(value, str)
     ]
-    files = [str(f) for f in guards.get("files") or []]
     return bool(targets) and not any(t == f or t.endswith("/" + f) for t in targets for f in files)

@@ -2,6 +2,14 @@
 
 ## Unreleased (2.0 track)
 
+### From claude-mem's documentation
+
+- Observer failures from `claude -p` were read from stderr only, which carries just a tag; the readable error is on stdout. The model fallback now works for Claude and a usage limit pauses the stage. Explicit `ERROR` lines win, because codex echoes the prompt into stderr. "exceeded" alone (context length) no longer pauses a stage.
+- The codex observer runs with `--disable hooks --disable memories`: plugin hooks (including claude-mem's) captured the observer's own bundles.
+- Reading or editing a file shows up to three earlier memories about it (dead ends, decisions, lessons, facts), once per session, specific ones first; facts older than the file's last change are left out. Works in Claude Code (`Read`), Codex (`sed`/`cat`), Copilot (`view`) and OpenCode (`read`). Budget `budgets.file_history` (160 tokens).
+- The notes Claude Code and Codex keep themselves are stored as `native_note` without a model call; each harness sees only the other one's notes, with two slots of their own in the briefing. `native_notes: false` turns it off.
+- The briefing names the current time and shows `(+N tok)` after entries whose full text is clearly longer.
+
 ### Install and upgrade
 
 - `agent-mem upgrade` installs the newest commit of the source this copy came from (extras and a branch or tag kept, a pinned commit dropped), then runs `doctor --fix` with the new code. It uses `uv tool install --upgrade`, which swaps the environment in place; `--reinstall` deletes it first, and in a measured run 258 of 332 hook calls during those 2.6 s found no binary.
