@@ -753,7 +753,7 @@ def terminal(
     if spent > read:  # claude-mem's footer: what loading costs against what finding it out took
         out.append(
             paint("2", f"Read ~{read:,} tokens · built from ~{spent:,} tokens of agent work · ")
-            + paint("32", f"{round((spent - read) * 100 / spent)}% less to read than to redo")
+            + paint("32", f"{(spent - read) * 100 // spent}% less to read than to redo")  # floor: 99.9 is not 100
         )
     out.append(paint("2", f"Details: {hint} · {browse}"))
     return "\n".join(out)

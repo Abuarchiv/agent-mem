@@ -187,7 +187,7 @@ def _injected(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
         "tokens": total,
         "tokens_per_session": round(total / sessions) if sessions else None,
         "work": spent,
-        "saved_percent": round((spent - total) * 100 / spent) if spent > total else None,
+        "saved_percent": (spent - total) * 100 // spent if spent > total else None,  # floor: 99.9 is not 100
         "measured_turns": int(turns),
         "built_from": int(built),
     }

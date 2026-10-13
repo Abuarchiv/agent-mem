@@ -144,11 +144,12 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     panel = inject.terminal(context, "shop", color=False, spent=40_000)
     read = inject.tokens(context)
     assert f"Read ~{read:,} tokens · built from ~40,000 tokens of agent work" in panel
-    assert f"{round((40_000 - read) * 100 / 40_000)}% less to read than to redo" in panel
+    assert f"{(40_000 - read) * 100 // 40_000}% less to read than to redo" in panel
+    assert "100% less" not in inject.terminal(context, "shop", color=False, spent=10_000_000)  # 99.9 stays 99
     assert "agent work" not in inject.terminal(context, "shop", color=False)  # nothing measured: no claim
 
     db.set_meta(conn, f"injected:{db.timeutil.day(db.timeutil.iso())}", "2,300")  # a day written before the work column
     capture._count_injection(conn, db.timeutil.iso(), 100, 10_000)
     injected = _injected(conn)
     assert (injected["blocks"], injected["tokens"], injected["work"]) == (3, 400, 10_000)
-    assert injected["saved_percent"] == 96
+    assert injected["saved_percent"] == 96  # 9,600 of 10,000
