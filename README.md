@@ -16,7 +16,7 @@ agent-mem is not on PyPI; install it from the repository, never by its bare name
 
 `setup --write` registers the hooks and the MCP server with the **absolute path** of the binary, so sessions started from an IDE find it too. It downloads the embedding model (about 220 MB) and prints what it detected: harnesses, providers, extras. Start a session, finish one turn, and the next session begins with the facts from the first.
 
-Alternatives: `curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh` (installs uv first), the Claude Code marketplace (`/plugin marketplace add Abuarchiv/agent-mem`, `/plugin install agent-mem@agent-mem`; the plugin only registers the hooks, so install the `agent-mem` command first with the `uv tool install` line above and skip `setup --write`, or every hook fails with "command not found"), or `agent-mem setup <harness>` without `--write` to see the manual steps.
+Alternatives: `curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh | sh` (installs uv first; on Windows in PowerShell: `irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1 | iex`), the Claude Code marketplace (`/plugin marketplace add Abuarchiv/agent-mem`, `/plugin install agent-mem@agent-mem`; the plugin only registers the hooks, so install the `agent-mem` command first with the `uv tool install` line above and skip `setup --write`, or every hook fails with "command not found"), or `agent-mem setup <harness>` without `--write` to see the manual steps.
 
 Three sizes:
 

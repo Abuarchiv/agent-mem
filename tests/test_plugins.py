@@ -87,5 +87,15 @@ def test_installers_parse():
         subprocess.run([sh, "-n", str(ROOT / "install.sh")], check=True)
     for line in (ROOT / "install.ps1").read_text(encoding="utf-8").splitlines():
         assert line.count('"') % 2 == 0, line  # PowerShell is not available everywhere; catch broken quoting
+        # Run through `irm ... | iex`, an `exit` closed the user's window before the error could be read.
+        assert not line.lstrip().startswith("exit"), line
+    pwsh = shutil.which("pwsh")
+    if pwsh:
+        path = str(ROOT / "install.ps1").replace("'", "''")
+        parse = (
+            f"$e = $null; [void][Management.Automation.Language.Parser]::ParseFile('{path}', [ref]$null, [ref]$e); $e"
+        )
+        result = subprocess.run([pwsh, "-NoProfile", "-c", parse], capture_output=True, text=True, check=True)
+        assert not result.stdout.strip(), result.stdout
     for name in ("install.sh", "install.ps1"):
         assert "agent-mem doctor" in (ROOT / name).read_text(encoding="utf-8")
