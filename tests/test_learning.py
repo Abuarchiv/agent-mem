@@ -235,7 +235,15 @@ def test_a_parent_folder_session_finds_what_was_learned_in_a_nested_project(conn
     hits = search.search(conn, config, search.Query(text="viewer launch agent restarts", project_id=parent_id))
     assert hits and "launch agent" in hits[0].text
     nested_id = conn.execute("SELECT id FROM projects WHERE name = 'agent-mem'").fetchone()[0]
-    assert search.scope(conn, nested_id) == [nested_id]  # a nested project does not see its parent's work
+    # What a session in the parent folder learned stays filed there; the nested project looks there too (B.33),
+    # a sibling project and the home folder stay out.
+    sibling = parent / "other"
+    sibling.mkdir()
+    subprocess.run(["git", "init", "-q", str(sibling)], check=True)
+    Fresh(conn, config, sibling).prompt("s9", "unrelated work")
+    sibling_id = conn.execute("SELECT id FROM projects WHERE name = 'other'").fetchone()[0]
+    assert search.scope(conn, nested_id) == [nested_id, parent_id]
+    assert sibling_id not in search.scope(conn, nested_id)
     block = inject.prompt_hints(
         conn, config, parent_id, "claude:s2", "How does the viewer launch agent restart?", "claude"
     )

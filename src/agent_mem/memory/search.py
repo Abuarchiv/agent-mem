@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -148,6 +149,11 @@ STOPWORDS = {
     "dort",
     "soll",
     "sollen",
+    "sollten",
+    "bleibt",
+    "bleiben",
+    "lange",
+    "geht",
     "muss",
     "müssen",
     "gibt",
@@ -358,32 +364,35 @@ def fts_candidates(conn: sqlite3.Connection, terms: Sequence[str], limit: int = 
 
 
 def matching_entities(conn: sqlite3.Connection, project_id: str | None, terms: Sequence[str]) -> list[int]:
-    """Entities named in the query: exact key, file basename, or (for longer terms) a substring. Matched in SQL."""
+    """Entities named in the query, strongest first (``seed_strengths``)."""
+    return list(seed_strengths(conn, project_id, terms))
+
+
+def seed_strengths(conn: sqlite3.Connection, project_id: str | None, terms: Sequence[str]) -> dict[int, float]:
+    """Entities named in the query and how surely: the exact key or a file's name 1.0, a word inside a path 0.3
+    ("viewer" inside every path of the viewer package says little about which file is meant). Matched in SQL."""
     usable = [t.lower() for t in terms if len(t) >= 3][:12]
-    if not usable:
-        return []
-    clauses: list[str] = []
-    params: list[object] = [project_id or ""]
+    found: dict[int, float] = {}
     for term in usable:
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        clauses.append("lower(key) = ? OR lower(key) LIKE ? ESCAPE '\\'")
-        params.extend([term, f"%/{escaped}"])
-        if len(term) >= 5:
-            clauses.append("instr(lower(key), ?) > 0")
-            params.append(term)
-    rows = conn.execute(
-        f"SELECT id FROM entities WHERE project_id IN (?, '') AND kind IN ('file', 'command', 'package') "
-        f"AND ({' OR '.join(clauses)}) LIMIT 30",
-        params,
-    ).fetchall()
-    return [int(row[0]) for row in rows]
+        for row in conn.execute(
+            "SELECT id, lower(key) AS k FROM entities WHERE project_id IN (?, '') AND kind IN ('file', 'command', "
+            "'package') AND (lower(key) = ? OR lower(key) LIKE ? ESCAPE '\\' OR (length(?) >= 5 AND "
+            "instr(lower(key), ?) > 0)) LIMIT 60",
+            (project_id or "", term, f"%/{escaped}", term, term),
+        ):
+            name = row["k"].rsplit("/", 1)[-1]
+            strength = 1.0 if term in {row["k"], name, name.rsplit(".", 1)[0]} else 0.3
+            found[int(row["id"])] = max(found.get(int(row["id"]), 0.0), strength)
+    return dict(sorted(found.items(), key=lambda item: -item[1])[:30])
 
 
 def graph_candidates_sql(
     conn: sqlite3.Connection, project_id: str | None, terms: list[str], limit: int = 40
 ) -> list[Owner]:
     """Owners linked to query entities and their strongest 1-hop neighbours (no external deps)."""
-    seeds = matching_entities(conn, project_id, terms)
+    strengths = seed_strengths(conn, project_id, terms)
+    seeds = list(strengths)
     if not seeds:
         return []
     placeholders = ",".join("?" for _ in seeds)
@@ -392,13 +401,17 @@ def graph_candidates_sql(
         f"WHERE a IN ({placeholders}) OR b IN ({placeholders}) GROUP BY other ORDER BY w DESC LIMIT 20",
         (*seeds, *seeds, *seeds),
     ).fetchall()
-    weights = dict.fromkeys(seeds, 1.0)
+    weights = dict(strengths)
     for row in neighbours:
         weights.setdefault(int(row["other"]), float(row["w"]) * 0.5)
     return owners_for_entities(conn, weights, limit)
 
 
 LINKS_PER_ENTITY = 50
+GRAPH_CANDIDATES = 200
+# Measured on 32 real questions, fixture, coding-agent-life and LongMemEval-40 (docs/PLAN.md B.33).
+COVERAGE_WEIGHT = 0.5
+GRAPH_WEIGHT = 0.3
 
 
 def owners_for_entities(conn: sqlite3.Connection, weights: dict[int, float], limit: int) -> list[Owner]:
@@ -504,14 +517,22 @@ def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
 
 
 def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
-    """The project and every project nested inside it. A session started in ~/Lernen that works in ~/Lernen/agent-mem
-    has its turns and facts filed under agent-mem (``capture._narrow_turn``); searching from ~/Lernen must find them."""
+    """The project, every project nested inside it and the projects around it. A session started in ~/Lernen that
+    works in ~/Lernen/agent-mem has its turns and facts filed under agent-mem (``capture._narrow_turn``); searching
+    from ~/Lernen must find them. The other way round, what a session in ~/Lernen learned about agent-mem stays filed
+    under ~/Lernen (46 memories on real data), so agent-mem looks there too. The home folder is around everything
+    and no project of its own."""
     if project_id is None:
         return [None]
     rows = conn.execute("SELECT id, root FROM projects").fetchall()
     root = next((r[1] for r in rows if r[0] == project_id), None)
-    nested = [r[0] for r in rows if root and r[0] != project_id and identity.is_within(r[1], root)]
-    return [project_id, *nested]
+    if not root:
+        return [project_id]
+    others = [r for r in rows if r[0] != project_id]
+    nested = [r[0] for r in others if identity.is_within(r[1], root)]
+    home = os.path.expanduser("~")
+    around = [r[0] for r in others if r[1] not in {home, os.sep} and identity.is_within(root, r[1])]
+    return [project_id, *nested, *around]
 
 
 def _in(column: str, ids: list[str | None]) -> tuple[str, tuple[str | None, ...]]:
@@ -548,7 +569,11 @@ def search(
     terms = query_terms(query.text)
     projects = scope(conn, query.project_id)
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
-    lists["graph"] = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, 40)
+    # The graph says how strongly a hit is tied to the files and commands the question names. As a list of its own in
+    # the fusion it outvoted exact matches with whatever touched such a file last (B.33); it now reorders the hits the
+    # text and the vectors found.
+    tied = (graph_source or graph_candidates_sql)(conn, query.project_id, terms, GRAPH_CANDIDATES)
+    tie = {owner: 1.0 - rank / len(tied) for rank, owner in enumerate(tied)}
     if vector_source is not None:
         lists["vector"] = vector_source(query.text, 60)
     if query.window:
@@ -584,7 +609,9 @@ def search(
             continue
         hit.rrf = score / max_rrf if max_rrf else 0.0
         hit.sources = sources
-        hit.coverage, hit.matched_terms = coverage(hit.topic if hit.owner[0] == "t" else hit.text, terms)
+        # A long memory (another harness's session summary) contains nearly any word; like a turn it is judged by its
+        # start.
+        hit.coverage, hit.matched_terms = coverage(hit.topic if hit.owner[0] == "t" else hit.text[:800], terms)
         candidates.append(hit)
     stats = learn.owner_stats(conn, [h.owner for h in candidates], now)
     for hit in candidates:
@@ -597,7 +624,14 @@ def search(
             * learn.TRUST_FACTOR.get(hit.trust, 0.8)
             * (config.retrieval.current_project_boost if hit.project_id == query.project_id else 1.0)
         )
-    candidates.sort(key=lambda h: h.score, reverse=True)
+    # Order, not score: a hit that names more of the question's words comes first, and so does one tied to the files
+    # it names. The score itself stays what the abstention gate was calibrated on.
+    candidates.sort(
+        key=lambda h: (
+            h.score * (1 - COVERAGE_WEIGHT + COVERAGE_WEIGHT * h.coverage) * (1 + GRAPH_WEIGHT * tie.get(h.owner, 0))
+        ),
+        reverse=True,
+    )
     per_session: dict[str | None, int] = {}
     results: list[Hit] = []
     for hit in candidates:

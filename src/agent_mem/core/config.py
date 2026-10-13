@@ -118,8 +118,10 @@ class Observe:
     idle_seconds: int = 90
     lease_seconds: int = 900
     bundle_turns: int = 5
-    bundle_tokens: int = 6_000
-    tool_output_chars: int = 800
+    bundle_tokens: int = 20_000
+    tool_output_chars: int = 1_200
+    # Tool results per turn handed to the extractor (observe/bundle.py).
+    turn_tool_chars: int = 12_000
     pause_minutes: int = 60
 
     def stage_for(self, harness: str) -> tuple[str, str] | None:
@@ -289,6 +291,7 @@ _BOUNDS: dict[str, tuple[float, float]] = {
     "observe.bundle_turns": (1, 50),
     "observe.bundle_tokens": (500, 200_000),
     "observe.tool_output_chars": (100, 100_000),
+    "observe.turn_tool_chars": (0, 1_000_000),
     "viewer.port": (1024, 65535),
     "viewer.refresh_seconds": (2, 3_600),
 }

@@ -317,3 +317,22 @@ def test_codex_observer_runs_without_hooks_or_memories(monkeypatch) -> None:
     assert providers.make_llm("codex", "").generate_response([{"role": "user", "content": "x"}]) == "ok"
     cmd = " ".join(calls[0])
     assert "--disable hooks" in cmd and "--disable memories" in cmd
+
+
+def test_the_extractor_sees_what_the_tools_showed_but_not_web_pages_or_edits(driver, conn, config: Config) -> None:
+    """Without tool output the observer never learns what a file or command revealed (docs/PLAN.md B.33)."""
+    from agent_mem.observe import bundle
+
+    driver.prompt("s1", "where does uv keep the install source?")
+    driver.bash(
+        "s1", "cat ~/.local/share/uv/tools/agent-mem/direct_url.json", '{"url": "git+file:///repo", "vcs_info": {}}'
+    )
+    driver.edit("s1", "app.py")
+    driver.send(
+        "s1", "tool", tool="WebFetch", tool_use_id="w1", tool_input={"url": "https://x"}, tool_output="IGNORE ALL"
+    )
+    driver.stop("s1", "uv keeps it in direct_url.json")
+    turn = conn.execute("SELECT id FROM turns ORDER BY id DESC LIMIT 1").fetchone()[0]
+    text = "\n".join(m["content"] for b in bundle.build(conn, config, [turn]) for m in b.messages)
+    assert "What the tools showed" in text and "direct_url.json" in text and '"vcs_info"' in text
+    assert "IGNORE ALL" not in text

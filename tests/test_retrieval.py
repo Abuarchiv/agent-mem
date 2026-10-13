@@ -5,7 +5,7 @@ import numpy as np
 
 from agent_mem.core import db, timeutil
 from agent_mem.core.config import Config
-from agent_mem.memory import consolidate, semantic, store
+from agent_mem.memory import consolidate, search, semantic, store
 from tests.conftest import Driver
 
 
@@ -105,7 +105,7 @@ def test_hybrid_search_with_vectors_and_graph(driver: Driver, conn, config: Conf
     assert hits[0].label == "T1"
     assert {"fts", "vector"} <= hits[0].sources
     by_file = retriever.search("exporter.py", _pid(conn), record_shown=False)
-    assert by_file[0].label == "T1" and "graph" in by_file[0].sources
+    assert by_file[0].label == "T1"  # the graph ties T1 to exporter.py and orders it first (B.33)
 
 
 def test_named_time_ranks_first_and_excludes_nothing(driver: Driver, conn, config: Config):
@@ -335,3 +335,37 @@ def test_day_words_are_no_topic(driver: Driver, conn):
     other = Driver(conn, driver.config, driver.cwd)
     assert not other.prompt("s2", "was läuft heute im kino").context  # only "läuft" and "heute" in common
     assert other.prompt("s2", "auf welchem port läuft der viewer").context
+
+
+def test_an_exact_match_is_not_outvoted_by_recent_work_on_a_file_with_the_word_in_its_path(
+    driver: Driver, conn, config: Config
+):
+    """The graph used to vote like a text match with whatever touched such a file last (am2 in B.33)."""
+    from agent_mem.memory import store
+
+    driver.prompt("s0", "seed")
+    project_id = conn.execute("SELECT project_id FROM sessions LIMIT 1").fetchone()[0]
+    exact = store.add_memory(
+        conn,
+        project_id=project_id,
+        kind="fact",
+        title="Die Viewer-Timeline blendet Sessions ohne Turns aus und nennt nur deren Anzahl",
+        body="Die Viewer-Timeline blendet Sessions ohne Turns aus und nennt nur deren Anzahl",
+        source="agent",
+        trust="observer",
+    )
+    timeline = store.entity_id(conn, project_id, "file", "src/ui/timeline.py")
+    for n in range(6):  # newer memories naming one word of the question, linked to a file named like another
+        store.add_memory(
+            conn,
+            project_id=project_id,
+            kind="fact",
+            title=f"Viewer-Farben Runde {n}: Akzentfarbe angepasst",
+            body=f"Viewer-Farben Runde {n}: Akzentfarbe angepasst",
+            source="agent",
+            trust="observer",
+            entity_ids=[timeline],
+        )
+    query = search.Query(text="Wie geht die Viewer-Timeline mit Sessions ohne Turns um?", project_id=project_id)
+    hits = search.search(conn, config, query)
+    assert hits and hits[0].owner == ("m", exact)

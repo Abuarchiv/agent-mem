@@ -12,6 +12,13 @@
 - A `Write` of a script containing `exit 1` was read as a failed command: exit codes are now read from shell output only, in Claude Code, Copilot and OpenCode.
 - The terminal panel at session start opens with the last session and its next steps, shows five recent turns and groups memories by kind with the three newest each (about 30 lines instead of 64).
 
+### Better than claude-mem on the same data
+
+- The observer sees what the tools showed (command or file and the start of the output) and records what they revealed, with exact names. Before, the bundle held only prompts, answers and command lines, and the prompt forbade tool output, so details such as where `uv tool` keeps the install source never became facts. Bundles are larger (20,000 tokens).
+- The graph orders what text and vectors found instead of voting like a text match; an exact match no longer drops behind whatever touched a file with the word in its path last. A hit naming more of the question's words comes first.
+- A project's search includes the projects around it (not the home folder): what a session in `~/Lernen` learned about `~/Lernen/agent-mem` was invisible from there.
+- On 32 real questions answered from the same two days: automatic context 24/32 against claude-mem's 3/32 (8/32 with its prompt injection on), search 23/32 against 6/32, silent on 8 of 8 unrelated questions against 0 of 8 (docs/PLAN.md B.33).
+
 ### More context
 
 - Budgets fill what each harness passes on in one hook output (Claude Code 10,000 characters, Codex 8,000 tokens with `additionalContextLimit`, Copilot 10 KB after a tool, OpenCode unlimited): session start 8,000 tokens, prompt 2,400, compaction 4,000, file history 1,200, cut per harness. The briefing grows its slots until the budget is used; on real data Claude gets about 9,000 characters (49 entries) instead of about 4,000, Codex about 29,000 (198 entries). The prompt hook shows up to 10 confident hits with an excerpt of their text instead of 3 titles. Codex hooks changed: confirm them once with `/hooks`.

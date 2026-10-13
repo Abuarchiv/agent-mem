@@ -71,7 +71,7 @@ Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `
 | `memory/notes.py` | Notes Claude Code and Codex keep themselves, stored as `native_note` without a model (indexer); shown only to the other harnesses |
 | `memory/learn.py`, `memory/consolidate.py` | ACT-R activation, usefulness, Hebbian edges; decay, superseding, anchors |
 | `observe/queue.py` | `observe_queue`: lease, finish, fail with backoff, retry, status |
-| `observe/bundle.py` | Turns to model input: prompt, answer, tool names/commands/files/errors, subagent answers, bounded; no `tool_external` |
+| `observe/bundle.py` | Turns to model input: prompt, what the tools showed (command or file and the start of the output), answer, commands/files/errors, subagent answers, bounded; no `tool_external` |
 | `observe/providers.py` | Stages `claude`, `codex`, `copilot`, `ollama`, `fake`; quota and login detection; vendor-faithful chain |
 | `observe/mem0_adapter.py` | The only import point of mem0: `extract`, `add_raw`, `search`, `forget`, `reindex` |
 | `observe/summary.py` | Work log per bundle: turn titles and types, session summary, lessons with evidence |
@@ -99,7 +99,10 @@ mem0 side: Qdrant collection `agent_mem` (one namespace per project, `user_id = 
 score = rrf_norm × (0.5 + 0.5·σ(B)) × (0.7 + 0.3·importance) × (0.5 + usefulness) × trust × project_boost
 B = ln Σ t_j^-0.5            (ACT-R, hours since each access)
 usefulness = (used + 1) / (shown + 2)
+order = score × (0.5 + 0.5·coverage) × (1 + 0.3·tie)
 ```
+
+`score` is what the abstention gate compares; `order` only sorts. `coverage` is the share of the question's words in a hit (a turn's request and the start of its answer, a memory's first 800 characters). `tie` (0 to 1) is how strongly the graph ties a hit to the files, commands and packages the question names: seeds by exact name 1.0, by a word inside a path 0.3. The graph reorders what text and vectors found and adds no candidates of its own; as a separate list in the fusion it outvoted exact matches with whatever touched such a file last (`docs/PLAN.md` B.33). A project's search includes the projects nested in it and the projects around it (`~/Lernen` around `~/Lernen/agent-mem`), never the home folder.
 
 Automatic injection (prompt hook) is lexical and also requires a minimum score and term coverage; question words and filler verbs are not terms, hyphenated words are searched as their parts, and one inflection ending is dropped. Vector candidates (MCP server, CLI) count only above `retrieval.min_vector_score` (0.3 for MiniLM, calibrated in `docs/PLAN.md` B.23). `mem_search` applies the same gate; a hit with vector support needs a third of the content words. Without a confident hit it lists three weak candidates under "No confident match". `agent-mem eval --fixture` reports both paths (`hit@1`, `abstention` and `injected_*`, B.28).
 

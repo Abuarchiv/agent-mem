@@ -1,8 +1,11 @@
 """Build the message bundle for one extraction call (docs/PLAN.md §4.3 point 4).
 
-Content per turn: the user's prompt, the agent's answer, and one compact line with the commands,
-files and error lines the turn touched (from the ``turns`` columns, already cleaned by capture), plus
-the final answers of subagents that ran in the turn (``SubagentStop``).
+Content per turn: the user's prompt, what the turn's tools showed (command or file and the start of the
+output, ``observe.tool_output_chars`` each, ``observe.turn_tool_chars`` per turn), the agent's answer, and
+one compact line with the commands, files and error lines the turn touched (from the ``turns`` columns,
+already cleaned by capture), plus the final answers of subagents that ran in the turn (``SubagentStop``).
+Without the outputs the extractor never learns what a file or command revealed ("`uv tool` keeps the
+install source in `direct_url.json`"); claude-mem's observer sees every tool call (docs/PLAN.md B.33).
 Events with ``trust = 'tool_external'`` never contribute text (§6 point 2). The whole bundle is
 capped at ``observe.bundle_tokens`` (4 characters per token); a bundle that would exceed it is split
 at turn boundaries, a single oversized turn is truncated.
@@ -34,7 +37,27 @@ class Bundle:
         return sum(len(m["content"]) for m in self.messages)
 
 
-def _turn_messages(row: sqlite3.Row, config: Config, subagents: list[str]) -> list[dict[str, str]]:
+def _tool_line(payload: dict, per_call: int) -> str | None:
+    """One tool call as the extractor sees it: what ran or was read, then the start of what came back."""
+    output = " ".join(str(payload.get("output") or "").split())
+    if len(output) < 40 or payload.get("category") == "edit":  # nothing learned, or the change itself
+        return None
+    try:
+        tool_input = json.loads(payload.get("input") or "null")
+    except ValueError:
+        tool_input = payload.get("input")
+    category = str(payload.get("category") or "tool")
+    what = signals.command_of(tool_input) if category == "shell" else None
+    if what is None:
+        files = signals.files_of(category, tool_input) if isinstance(tool_input, dict) else []
+        what = files[0] if files else " ".join(str(payload.get("input") or "").split())[:160]
+    what = " ".join(str(what).split())[:240]
+    return f"[{category}] {what} → {output[:per_call]}"
+
+
+def _turn_messages(
+    row: sqlite3.Row, config: Config, subagents: list[str], tools: list[str] | None = None
+) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     prompt = privacy.clean_text(str(row["prompt"] or ""), config.limits.prompt_chars)
     if prompt.strip():
@@ -43,6 +66,8 @@ def _turn_messages(row: sqlite3.Row, config: Config, subagents: list[str]) -> li
             prompt = f"[harness notice, not written by the user] {signals.request_text(prompt)}"
         messages.append({"role": "user", "content": prompt})
     answer = privacy.clean_text(str(row["answer"] or ""), config.limits.answer_chars)
+    if tools:
+        answer = "What the tools showed:\n" + "\n".join(tools) + ("\n\nAnswer:\n" + answer if answer.strip() else "")
     extras = []
     commands = json.loads(row["commands_json"] or "[]")
     files = json.loads(row["files_json"] or "[]")
@@ -82,11 +107,24 @@ def build(conn: sqlite3.Connection, config: Config, turn_ids: list[int]) -> list
             answer = str(json.loads(event["payload"]).get("answer") or "").strip()
             if answer:
                 subagents.setdefault(int(event["turn_id"]), []).append(" ".join(answer.split()))
+    tools: dict[int, list[str]] = {}
+    used: dict[int, int] = {}
+    for event in conn.execute(
+        f"SELECT turn_id, payload FROM events WHERE kind = 'tool' AND trust != 'tool_external' "
+        f"AND turn_id IN ({placeholders}) ORDER BY id",
+        tuple(turn_ids),
+    ):
+        with contextlib.suppress(ValueError):
+            line = _tool_line(json.loads(event["payload"]), config.observe.tool_output_chars)
+            turn = int(event["turn_id"])
+            if line and used.get(turn, 0) + len(line) <= config.observe.turn_tool_chars:
+                tools.setdefault(turn, []).append(line)
+                used[turn] = used.get(turn, 0) + len(line)
     cap = config.observe.bundle_tokens * CHARS_PER_TOKEN
     bundles: list[Bundle] = []
     current: Bundle | None = None
     for row in rows:
-        messages = _turn_messages(row, config, subagents.get(int(row["id"]), []))
+        messages = _turn_messages(row, config, subagents.get(int(row["id"]), []), tools.get(int(row["id"])))
         if not messages:
             continue
         size = sum(len(m["content"]) for m in messages)
