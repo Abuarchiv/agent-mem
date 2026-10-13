@@ -292,3 +292,27 @@ def test_viewer_cache_stays_bounded_whatever_the_address_says(config: Config, dr
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_graph_links_memories_through_the_files_and_commands_they_name(conn, config: Config):
+    from agent_mem.memory import store
+
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'shop', '/p', 't')")
+    for body in (
+        "inject.py caps the briefing at the session budget.",
+        "Never cache results in `inject.py`; run `uv run pytest -q tests/x.py` after changes.",
+        "Run `uv run pytest` before a commit.",
+        "The shop project uses `shop` as its name.",  # the project's own name connects nothing
+        "A note in /tmp/scratch/run.py is gone tomorrow.",
+        "Another one about /tmp/scratch/run.py.",
+    ):
+        store.add_memory(conn, project_id="p", kind="fact", title="", body=body, source="agent", trust="user")
+    graph = ui.memory_graph(conn, None)
+    entities = {node["label"]: node for node in graph["nodes"] if node["type"] == "entity"}
+    assert set(entities) == {"inject.py", "uv run pytest"}  # scratch files and the project name are left out
+    assert entities["inject.py"]["kind"] == "file" and entities["uv run pytest"]["kind"] == "command"
+    memories = {node["id"] for node in graph["nodes"] if node["type"] == "memory"}
+    assert len(memories) == 3 and all(edge["b"] in memories for edge in graph["edges"])
+    assert ui.memory_entities("`a`, `hooks`, `--flag`, `cd src`, `observe.entity_model`") == {
+        ("setting", "observe.entity_model"): "observe.entity_model"
+    }
