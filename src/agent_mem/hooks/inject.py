@@ -229,15 +229,22 @@ def _open_errors(
 
 
 def _memory_lines(
-    conn: sqlite3.Connection, project_id: str, harness: str, limit: int = 5, kinds: tuple[str, ...] = ()
+    conn: sqlite3.Connection,
+    project_id: str,
+    harness: str,
+    limit: int = 5,
+    kinds: tuple[str, ...] = (),
+    session_id: str | None = None,
 ) -> list[tuple[str, tuple[str, int]]]:
     kinds = kinds or ("decision", "dead_end", "preference", "correction", "summary", "fact")
     marks = ",".join("?" for _ in kinds)
     rows = conn.execute(
         "SELECT id, kind, title, body, created_at, importance, origin FROM memories "
         f"WHERE (project_id = ? OR project_id IS NULL) AND invalid_at IS NULL AND kind IN ({marks}) "
+        # Copilot sends the first prompt before the session start: what it just said is no memory to recall.
+        "AND (turn_id IS NULL OR turn_id NOT IN (SELECT id FROM turns WHERE session_id = ?)) "
         "ORDER BY created_at DESC LIMIT ?",
-        (project_id, *kinds, max(200, limit * 4)),
+        (project_id, *kinds, session_id, max(200, limit * 4)),
     ).fetchall()
     own = notes.own_notes(harness)
     rows = [r for r in rows if r["origin"] not in own]
@@ -305,13 +312,17 @@ def _briefing_lines(
     if profile:
         lines.append((profile, None))
     # At scale 1: 5 memories, 3 lessons, 2 notes, 10 work entries; render cuts the end when the budget is full.
-    memories = _memory_lines(conn, project_id, harness, limit=round(5 * scale))
+    memories = _memory_lines(conn, project_id, harness, limit=round(5 * scale), session_id=session_id)
     lines.extend(memories)
     # Lessons have their own slots: rules for next time, ranked by use like the rest (``observe/summary.py``).
-    lines.extend(_memory_lines(conn, project_id, harness, limit=round(3 * scale), kinds=("lesson",)))
+    lines.extend(
+        _memory_lines(conn, project_id, harness, limit=round(3 * scale), kinds=("lesson",), session_id=session_id)
+    )
     # Another harness's notes (memory/notes.py) get their own slots: long session summaries would otherwise
     # take every fact slot of a project the user mostly works in with that harness (measured on real data).
-    lines.extend(_memory_lines(conn, project_id, harness, limit=round(2 * scale), kinds=("native_note",)))
+    lines.extend(
+        _memory_lines(conn, project_id, harness, limit=round(2 * scale), kinds=("native_note",), session_id=session_id)
+    )
     lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
     last = _last_session_lines(conn, project_id, session_id)

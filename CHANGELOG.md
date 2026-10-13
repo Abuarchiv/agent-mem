@@ -4,6 +4,10 @@
 
 ### Fixed from the fresh-install audit
 
+- Copilot turns get their answer. `agentStop` carries only the transcript's path, and the final message reaches that file 50 to 150 ms after the hook starts; the hook now reads the end of `events.jsonl`, takes only a message after the turn's prompt (read too early, it took the previous turn's answer) and waits at most 250 ms. Before, every Copilot turn had no answer in the panel and for the observer.
+- A stated rule ("We decided to use pytest, never unittest.") is stored once, as its decision sentence. It was also stored as a correction holding the whole prompt.
+- The session-start briefing leaves out memories from the session itself. Copilot sends the first prompt before the session start, so a decision typed in that prompt came straight back as a memory.
+- `setup --write` also fetches the concept model (spaCy, about 13 MB, checksum pinned), so `doctor` is green right after a fresh install; `--no-models` skips it too.
 - A usage limit or a logged-out CLI now pauses the observer stage. mem0 re-raises the provider's error as the cause of its `LLMError`, so it was handled as a generic failure: every turn spent its attempts and ended in `failed`. Review and graph calls pause the stage the same way.
 - The panel and `doctor` say which it is: "`claude` is not logged in; log in there once" (doctor turns yellow with that remedy) or "paused after a usage limit". Before, doctor stayed green and the panel said "quota or login".
 - Hook commands quote the binary path when it holds a space or another shell character (`& '…'` for PowerShell); `/Users/a b/…/agent-mem hook claude` ran `/Users/a` and failed every event with exit 127. `doctor` and the staleness check read the quoted path back.

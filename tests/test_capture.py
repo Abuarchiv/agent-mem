@@ -224,3 +224,21 @@ def test_copilot_app_worktrees_are_captured_but_its_own_chats_are_not(conn, conf
     Driver(conn, config, chat, harness="copilot").prompt("c", "hi")
     sessions = {row[0] for row in conn.execute("SELECT native_id FROM sessions")}
     assert sessions == {"w"}
+
+
+def test_a_stated_rule_is_kept_once_as_its_decision_and_never_echoed_back(conn, config, project):
+    """Fresh install, Copilot: "… We decided to use pytest, never unittest." became a correction (the whole prompt)
+    and a decision, and Copilot's session start, which comes after the first prompt, showed both back."""
+    import json as _json
+
+    from agent_mem.hooks import hook
+
+    base = {"sessionId": "c1", "cwd": str(project), "timestamp": 1791902160502}
+    prompt = "Read parse.py and say what parse does. We decided to use pytest, never unittest."
+    echoed = hook.run("copilot", "userPromptSubmitted", _json.dumps({**base, "prompt": prompt}), config)
+    started = hook.run("copilot", "sessionStart", _json.dumps({**base, "source": "new"}), config)
+    kinds = [r[0] for r in conn.execute("SELECT kind FROM memories ORDER BY id")]
+    assert kinds == ["decision"]
+    assert "pytest" not in echoed and "pytest" not in started.split("\n", 1)[-1]
+    later = hook.run("copilot", "sessionStart", _json.dumps({**base, "sessionId": "c2", "source": "new"}), config)
+    assert "never unittest" in later

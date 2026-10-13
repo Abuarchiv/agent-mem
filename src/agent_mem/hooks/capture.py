@@ -401,8 +401,15 @@ def _learn_from_prompt(
     # With a working observer the model reads the turn and writes corrections and decisions as facts;
     # the patterns then only raise the turn's importance (B.24: regex corrections caught complaints too).
     observed = _observer_active(conn, config)
-    # A long spoken prompt is not a correction one can apply later; the turn itself stays searchable.
-    if corrective and not observed and len(prompt) <= CORRECTION_CHARS:
+    decisions = [] if observed or not typed else signals.decision_sentences(prompt)
+    # A long spoken prompt is not a correction one can apply later; the turn itself stays searchable. A stated rule
+    # ("we decided to use pytest, never unittest") is kept as its decision sentence, not as the whole prompt again.
+    if (
+        corrective
+        and not observed
+        and len(prompt) <= CORRECTION_CHARS
+        and (signals.is_correction(prompt) or not decisions)
+    ):
         store.add_memory(
             conn,
             project_id=project_id,
@@ -420,7 +427,7 @@ def _learn_from_prompt(
             # A bare "nicht X" is too loose to become a rule when the observer can write the rule itself.
             if prefer is not None or not observed:
                 store.learn_rule(conn, config, project_id, avoid, prefer, turn_id)
-    for sentence in [] if observed or not typed else signals.decision_sentences(prompt):
+    for sentence in decisions:
         store.add_memory(
             conn,
             project_id=project_id,

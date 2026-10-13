@@ -6,6 +6,9 @@ Reference: https://docs.github.com/en/copilot/reference/hooks-reference
 
 from __future__ import annotations
 
+import json
+import os
+import time
 from typing import Any
 
 from agent_mem.core import timeutil
@@ -34,6 +37,50 @@ _KINDS = {
     "preCompact": "compact",
     "sessionEnd": "session_end",
 }
+
+
+TAIL_BYTES = 256 * 1024
+# agentStop starts 50 to 150 ms before the final message reaches the transcript (measured twice, CLI 1.0.96).
+ANSWER_TRIES = 6
+ANSWER_WAIT_S = 0.05
+
+
+def _answer_in(transcript: str) -> str | None:
+    """The last message of the current turn, or None while it is not written yet."""
+    try:
+        with open(transcript, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - TAIL_BYTES))
+            tail = fh.read()
+    except OSError:
+        return None
+    for raw in reversed(tail.splitlines()):
+        if b'"user.message"' in raw:
+            return None  # reached the prompt: the answer before it belongs to the previous turn
+        if b'"assistant.message"' not in raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            continue  # the first line of the tail is usually cut
+        data = entry.get("data") if isinstance(entry, dict) else None
+        content = data.get("content") if isinstance(data, dict) else None
+        if entry.get("type") == "assistant.message" and isinstance(content, str) and content.strip():
+            return content
+    return None
+
+
+def last_answer(transcript: str | None) -> str | None:
+    """The agent's answer from the session transcript (``session-state/<id>/events.jsonl``): ``agentStop`` carries
+    no answer, only the transcript's path. Reads only the end of the file, waiting at most 250 ms for it."""
+    if not transcript or not os.path.isfile(transcript):
+        return None
+    for attempt in range(ANSWER_TRIES):
+        answer = _answer_in(transcript)
+        if answer is not None or attempt == ANSWER_TRIES - 1:
+            return answer
+        time.sleep(ANSWER_WAIT_S)
+    return None
 
 
 def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event | None:
@@ -87,4 +134,6 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
         event.tool_output = event.error
     elif kind in {"stop", "subagent_stop"}:
         event.answer = text_of(get(payload, "response", "result", "text", "lastAssistantMessage"))
+        if event.answer is None and kind == "stop":
+            event.answer = last_answer(text_of(get(payload, "transcriptPath", "transcript_path")))
     return event

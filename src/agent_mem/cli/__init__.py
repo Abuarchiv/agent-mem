@@ -167,7 +167,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="register hooks and the MCP server with the absolute path of this binary (otherwise print the steps)",
     )
-    p.add_argument("--no-models", action="store_true", help="with --write: skip the embedding model download")
+    p.add_argument("--no-models", action="store_true", help="with --write: skip the embedding and concept model downloads")
     p = sub.add_parser("uninstall", help="remove hooks and MCP entries written by `setup --write`; data stays")
     p.add_argument("harness", choices=["all", "claude", "codex", "copilot", "opencode"])
     p = sub.add_parser("view", help="open the viewer in the browser (starts it if needed)")

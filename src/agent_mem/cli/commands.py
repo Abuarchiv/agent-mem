@@ -586,6 +586,15 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
 
         embedder, reason = semantic.load_embedder_verbose(config, allow_download=True)
         print(f"embedding model {embedder.model} ready." if embedder else f"embedding model not available: {reason}")
+    if found["extras"]["observer"] and not ns.no_models:
+        # Without it doctor is yellow right after setup ("entity linking: spaCy model missing"), about 13 MB.
+        from agent_mem.observe import spacy_model
+
+        if spacy_model.model_path(config) is None:
+            try:
+                print(f"concept model {config.observe.entity_model} ready ({spacy_model.download_model(config)}).")
+            except (OSError, ValueError) as error:
+                print(f"concept model not downloaded: {error}. Facts work without mem0's entity linking.")
     if config.viewer.enabled:
         print(server.install_autostart(config))
     print("\nDetected:\n" + _detect_table(found))

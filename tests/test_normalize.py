@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agent_mem.core.events import Event, PayloadError
@@ -208,3 +210,31 @@ def test_copilot_snake_case_payloads():
     assert event.tool_input == {"command": "npm test"} and event.tool_failed and event.error == "2 failed"
     sub = normalize("copilot", {"sessionId": "p", "agentName": "explore"}, "subagentStart")
     assert sub.kind == "session_start" and sub.source == "subagent"
+
+
+def test_copilot_stop_takes_the_answer_from_the_transcript(tmp_path):
+    """agentStop carries only transcriptPath (CLI 1.0.96); without it every Copilot turn had no answer, in the
+    panel and for the observer."""
+    transcript = tmp_path / "events.jsonl"
+    lines = [
+        {"type": "user.message", "data": {"content": "What does parse do?"}},
+        {"type": "assistant.message", "data": {"content": "", "toolRequests": [{"name": "bash"}]}},
+        {"type": "tool.execution_complete", "data": {"result": {"content": "def parse(s): ..."}}},
+        {
+            "type": "assistant.message",
+            "data": {"content": "parse splits the string at commas.", "phase": "final_answer"},
+        },
+        {"type": "assistant.turn_end", "data": {"turnId": "1"}},
+    ]
+    transcript.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    payload = {
+        "sessionId": "p",
+        "timestamp": 1790000000000,
+        "stopReason": "end_turn",
+        "transcriptPath": str(transcript),
+    }
+    assert normalize("copilot", payload, "agentStop").answer == "parse splits the string at commas."
+    assert normalize("copilot", {**payload, "transcriptPath": str(tmp_path / "gone.jsonl")}, "agentStop").answer is None
+    # Read before the final message is written: the previous turn's answer must not be taken.
+    transcript.write_text("".join(json.dumps(line) + "\n" for line in [*lines, lines[0]]))
+    assert normalize("copilot", payload, "agentStop").answer is None
