@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def _rule_id(text: str) -> int:
@@ -76,13 +80,11 @@ def _explain(error: Exception) -> str:
     return f"unexpected {type(error).__name__}: {error}. Run again with AGENT_MEM_DEBUG=1 for details and report it."
 
 
-def _main(args: list[str]) -> int:
+def _parser() -> argparse.ArgumentParser:
     import argparse
-    import json
     from pathlib import Path
 
     from agent_mem.cli.install import version
-    from agent_mem.core.config import load
 
     parser = argparse.ArgumentParser(prog="agent-mem", description="Local, self-learning memory for coding agents.")
     parser.add_argument(
@@ -184,103 +186,15 @@ def _main(args: list[str]) -> int:
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")
 
-    ns = parser.parse_args(args)
-    config = load(ns.data_dir) if ns.data_dir else load()
+    return parser
 
-    if ns.command == "mcp":
-        from agent_mem.mcp.server import main as mcp_main
 
-        return mcp_main()
-    if ns.command == "observe":
-        if ns.status:
-            from agent_mem.core import db
-            from agent_mem.observe import queue
-
-            conn = db.connect(config)
-            try:
-                print(json.dumps(queue.status(conn), indent=2, ensure_ascii=False, default=str))
-            finally:
-                conn.close()
-            return 0
-        if ns.reindex:
-            from agent_mem.observe.worker import reindex
-
-            print(json.dumps(reindex(config), indent=2))
-            return 0
-        from agent_mem.observe.worker import run as observe_run
-
-        stats = observe_run(config, drain=not ns.once, retry_failed=ns.retry_failed, reprocess_raw=ns.reprocess_raw)
-        if not ns.quiet:
-            print(json.dumps(stats, indent=2, default=str))
-        return 0
-    if ns.command == "index":
-        from agent_mem.memory.indexer import run
-
-        stats = run(config, allow_download=not ns.no_download)
-        from agent_mem.cli.health import record_setup_health
-
-        record_setup_health(config)
-        if not ns.quiet:
-            print(json.dumps(stats, indent=2, default=str))
-        return 0
-    if ns.command == "doctor":
-        from agent_mem.cli.health import doctor, format_checks, to_json
-
-        checks = doctor(config, fix=ns.fix)
-        print(to_json(checks) if ns.json else format_checks(checks))
-        return 0 if all(c.ok or c.warn_only for c in checks) else 1
-    if ns.command == "eval":
-        from agent_mem.bench.evaluate import Runner
-
-        runner = Runner(
-            ns.backend,
-            semantic_search=not ns.no_semantic,
-            llm=ns.llm,
-            llm_model=ns.llm_model,
-            custom_instructions=ns.custom_prompt.read_text(encoding="utf-8") if ns.custom_prompt else None,
-            min_score=ns.min_score,
-            embedder_model=ns.embedder,
-            vector_floor=ns.vector_floor,
-        )
-        if ns.fixture:
-            report = runner.fixture(ns.fixture)
-        elif ns.dataset:
-            report = runner.longmemeval(ns.dataset, limit=ns.limit, subset=ns.subset, progress=ns.progress)
-        else:
-            parser.error("eval needs a dataset or --fixture")
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        return 0
-    if ns.command == "paths":
-        print(
-            json.dumps(
-                {
-                    "data_dir": str(config.data_dir),
-                    "database": str(config.db_path),
-                    "config": str(config.config_path),
-                    "logs": str(config.log_dir),
-                    "models": str(config.model_dir),
-                },
-                indent=2,
-            )
-        )
-        return 0
-    if ns.command == "serve":
-        from agent_mem.ui import server
-
-        if ns.autostart:
-            print(server.install_autostart(config))
-            return 0
-        if ns.no_autostart:
-            removed = server.remove_autostart()
-            print(
-                f"Removed {removed}. The viewer still starts with each agent session."
-                if removed
-                else "No login item found."
-            )
-            return 0
-        return server.serve(config, quiet=ns.quiet)
+def _main(args: list[str]) -> int:
     from agent_mem.cli import commands
+    from agent_mem.core.config import load
 
+    ns = _parser().parse_args(args)
+    config = load(ns.data_dir) if ns.data_dir else load()
     return commands.dispatch(ns, config)
 
 

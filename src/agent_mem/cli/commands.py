@@ -24,6 +24,13 @@ from agent_mem.memory import store, views
 def dispatch(ns: argparse.Namespace, config: Config) -> int:
     handler = {
         "status": cmd_status,
+        "doctor": cmd_doctor,
+        "paths": cmd_paths,
+        "mcp": cmd_mcp,
+        "observe": cmd_observe,
+        "index": cmd_index,
+        "eval": cmd_eval,
+        "serve": cmd_serve,
         "search": cmd_search,
         "show": cmd_show,
         "pause": cmd_pause,
@@ -624,3 +631,101 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
         print(f"$ agent-mem {' '.join(step)}", flush=True)
         code = subprocess.run([exe, "--data-dir", str(config.data_dir), *step], check=False).returncode
     return code
+
+
+def cmd_doctor(ns: argparse.Namespace, config: Config) -> int:
+    from agent_mem.cli.health import doctor, format_checks, to_json
+
+    checks = doctor(config, fix=ns.fix)
+    print(to_json(checks) if ns.json else format_checks(checks))
+    return 0 if all(c.ok or c.warn_only for c in checks) else 1
+
+
+def cmd_paths(ns: argparse.Namespace, config: Config) -> int:
+    locations = {
+        "data_dir": config.data_dir,
+        "database": config.db_path,
+        "config": config.config_path,
+        "logs": config.log_dir,
+        "models": config.model_dir,
+    }
+    print(json.dumps({name: str(path) for name, path in locations.items()}, indent=2))
+    return 0
+
+
+def cmd_mcp(ns: argparse.Namespace, config: Config) -> int:
+    from agent_mem.mcp.server import main as mcp_main
+
+    return mcp_main()
+
+
+def cmd_observe(ns: argparse.Namespace, config: Config) -> int:
+    if ns.status:
+        from agent_mem.observe import queue
+
+        with _conn(config) as conn:
+            print(json.dumps(queue.status(conn), indent=2, ensure_ascii=False, default=str))
+        return 0
+    if ns.reindex:
+        from agent_mem.observe.worker import reindex
+
+        print(json.dumps(reindex(config), indent=2))
+        return 0
+    from agent_mem.observe.worker import run
+
+    stats = run(config, drain=not ns.once, retry_failed=ns.retry_failed, reprocess_raw=ns.reprocess_raw)
+    if not ns.quiet:
+        print(json.dumps(stats, indent=2, default=str))
+    return 0
+
+
+def cmd_index(ns: argparse.Namespace, config: Config) -> int:
+    from agent_mem.cli.health import record_setup_health
+    from agent_mem.memory.indexer import run
+
+    stats = run(config, allow_download=not ns.no_download)
+    record_setup_health(config)
+    if not ns.quiet:
+        print(json.dumps(stats, indent=2, default=str))
+    return 0
+
+
+def cmd_eval(ns: argparse.Namespace, config: Config) -> int:
+    from agent_mem.bench.evaluate import Runner
+
+    if not ns.fixture and not ns.dataset:
+        print("agent-mem eval: needs a dataset or --fixture", file=sys.stderr)
+        return 2
+    runner = Runner(
+        ns.backend,
+        semantic_search=not ns.no_semantic,
+        llm=ns.llm,
+        llm_model=ns.llm_model,
+        custom_instructions=ns.custom_prompt.read_text(encoding="utf-8") if ns.custom_prompt else None,
+        min_score=ns.min_score,
+        embedder_model=ns.embedder,
+        vector_floor=ns.vector_floor,
+    )
+    if ns.fixture:
+        report = runner.fixture(ns.fixture)
+    else:
+        report = runner.longmemeval(ns.dataset, limit=ns.limit, subset=ns.subset, progress=ns.progress)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_serve(ns: argparse.Namespace, config: Config) -> int:
+    from agent_mem.ui import server
+
+    if ns.autostart:
+        print(server.install_autostart(config))
+        return 0
+    if ns.no_autostart:
+        removed = server.remove_autostart()
+        print(
+            f"Removed {removed}. The viewer still starts with each agent session."
+            if removed
+            else "No login item found."
+        )
+        return 0
+    return server.serve(config, quiet=ns.quiet)

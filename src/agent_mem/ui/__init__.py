@@ -19,7 +19,7 @@ import sys
 from datetime import timedelta
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from agent_mem import __version__
 from agent_mem.core import timeutil
@@ -102,20 +102,24 @@ def _count(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> 
     return int(conn.execute(sql, params).fetchone()[0])
 
 
-def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | None = None) -> dict[str, Any]:
-    """Bounded, JSON-safe snapshot of the database. ``project_id`` limits every list to one project."""
-    from agent_mem.cli.health import agents, quarantine_latest, status
+class _Scope(NamedTuple):
+    """A snapshot covers all projects or one: the WHERE clause, its AND form and the parameter they need."""
 
-    scoped = project_id is not None
-    where = "WHERE project_id = ?" if scoped else ""
-    and_scope = "AND project_id = ?" if scoped else ""
-    params: tuple[Any, ...] = (project_id,) if scoped else ()
+    scoped: bool
+    where: str
+    and_scope: str
+    params: tuple[Any, ...]
 
-    projects = _rows(
-        conn,
-        f"SELECT id, name, root, remote FROM projects {'WHERE id = ?' if scoped else ''} ORDER BY name",
-        params,
-    )
+
+def _scope(project_id: str | None) -> _Scope:
+    if project_id is None:
+        return _Scope(False, "", "", ())
+    return _Scope(True, "WHERE project_id = ?", "AND project_id = ?", (project_id,))
+
+
+def _sessions(conn: sqlite3.Connection, scope: _Scope) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Latest sessions with their summary, and what the hooks put into those sessions' context."""
+    scoped, params = scope.scoped, scope.params
     sessions = _rows(
         conn,
         "SELECT s.id, s.harness, s.project_id, s.branch, s.started_at, s.ended_at, s.last_event_at, s.summarized_at, "
@@ -141,6 +145,12 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         if session_ids
         else []
     )
+    return sessions, recalls
+
+
+def _turns(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
+    """Latest turns, long text capped."""
+    where, params = scope.where, scope.params
     turns: list[dict[str, Any]] = []
     for row in conn.execute(
         "SELECT id, session_id, project_id, started_at, ended_at, prompt, answer, outcome, importance, trust, title, type, "
@@ -170,6 +180,11 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
                 "work": row["work_tokens"],
             }
         )
+    return turns
+
+
+def _actions(conn: sqlite3.Connection, turns: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """The tool calls of each turn, as a command or target plus the agent's own description."""
     actions: dict[str, list[dict[str, Any]]] = {}
     for turn in turns:
         items = []
@@ -204,6 +219,12 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         if items:
             actions[str(turn["id"])] = items
 
+    return actions
+
+
+def _memories(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
+    """Latest memories with their harness, session and use counts."""
+    where, params = scope.where, scope.params
     memories: list[dict[str, Any]] = []
     for row in conn.execute(
         "SELECT id, project_id, kind, title, body, source, trust, importance, turn_id, origin, valid_from, invalid_at, "
@@ -228,6 +249,14 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         memory["used"] = entry.used
         memory["shown"] = entry.shown
 
+    return memories
+
+
+def _learned(
+    conn: sqlite3.Connection, scope: _Scope
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Error fixes, rules and the commands that worked."""
+    scoped, where, params = scope.scoped, scope.where, scope.params
     recipes = _rows(
         conn,
         "SELECT id, project_id, error_sig, error_text, command_key, files_json, successes, recurrences, last_turn_id, "
@@ -249,6 +278,12 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         (*params, LIMITS["profile"]),
     )
 
+    return recipes, rules, profile
+
+
+def _daily(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
+    """Requests and errors per day for the activity chart."""
+    and_scope, params = scope.and_scope, scope.params
     days = LIMITS["days"]
     since = timeutil.iso(timeutil.now() - timedelta(days=days))
     daily = _rows(
@@ -258,8 +293,13 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
         (since, *params),
     )
 
+    return daily
+
+
+def _counts(conn: sqlite3.Connection, scope: _Scope) -> dict[str, Any]:
+    """Totals for the overview, beyond the capped lists."""
+    scoped, where, and_scope, params = scope.scoped, scope.where, scope.and_scope, scope.params
     counts = {
-        "projects": len(projects),
         "sessions": _count(conn, f"SELECT COUNT(*) FROM sessions {where}", params),
         "turns": _count(conn, f"SELECT COUNT(*) FROM turns {where}", params),
         "turns_error": _count(conn, f"SELECT COUNT(*) FROM turns WHERE outcome = 'error' {and_scope}", params),
@@ -279,6 +319,26 @@ def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | N
             params,
         ),
     }
+    return counts
+
+
+def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | None = None) -> dict[str, Any]:
+    """Bounded, JSON-safe snapshot of the database. ``project_id`` limits every list to one project."""
+    from agent_mem.cli.health import agents, quarantine_latest, status
+
+    scope = _scope(project_id)
+    where, params = scope.where, scope.params
+    projects = _rows(
+        conn, f"SELECT id, name, root, remote FROM projects {where.replace('project_id', 'id')} ORDER BY name", params
+    )
+    sessions, recalls = _sessions(conn, scope)
+    turns = _turns(conn, scope)
+    actions = _actions(conn, turns)
+    memories = _memories(conn, scope)
+    recipes, rules, profile = _learned(conn, scope)
+    daily = _daily(conn, scope)
+    counts = _counts(conn, scope)
+    counts = {"projects": len(projects), **counts}
     health = status(conn, config)
     learning_row = conn.execute(
         f"SELECT COALESCE(SUM(successes), 0), COALESCE(SUM(recurrences), 0) FROM recipes {where}", params
