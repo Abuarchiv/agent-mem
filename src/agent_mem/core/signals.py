@@ -335,6 +335,21 @@ def _runner_command(tokens: list[str]) -> str | None:
     return program
 
 
+def tools_run(command: str) -> set[str]:
+    """Every tool a shell line runs, as a rule names it: `cd x && python3 -m pip install` runs pip, `pip3` is pip,
+    `uv pip install` runs uv, and `git push` keeps its subcommand. An echoed word runs nothing."""
+    first_line = command.strip().splitlines()[0] if command.strip() else ""
+    names: set[str] = set()
+    for segment in re.split(r"\s*(?:&&|\|\||;|\|)\s*", first_line):
+        key = _segment_key(segment)
+        if key is None:
+            continue
+        parts = key.split()
+        tool = parts[2] if parts[0] in {"python", "uv", "poetry", "pdm", "hatch"} and len(parts) == 3 else parts[0]
+        names |= {key, tool, re.sub(r"[\d.]+$", "", tool) or tool}
+    return names
+
+
 def same_tool(a: str | None, b: str | None) -> bool:
     """Two command keys run the same tool: `python -m pytest`, `uv run pytest` and `pytest` all run pytest."""
 

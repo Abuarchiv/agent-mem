@@ -188,3 +188,14 @@ def test_read_only_git_and_queries_fix_nothing():
     assert signals.fixable("git commit") and signals.fixable("uv run pytest")
     assert signals.command_key("git status --short && uv run pytest -q") == "uv run pytest"
     assert signals.command_key('sqlite3 db "select 1" && git diff') == "sqlite3"  # only looking: the first look
+
+
+def test_a_rule_sees_the_tool_each_part_of_a_command_runs():
+    """A rule "use uv instead of pip" let `cd x && python3 -m pip install` and `pip3 install` through and blocked
+    `uv pip install`, the uv way the user asked for: it looked at the first three words of the whole line."""
+    assert "pip" in signals.tools_run("cd x && python3 -m pip install requests")
+    assert "pip" in signals.tools_run("pip3 install requests") and "pip" in signals.tools_run("sudo pip install x")
+    assert "pip" not in signals.tools_run("uv pip install requests")
+    assert "pip" not in signals.tools_run('echo "we use uv, not pip"')
+    assert "git push" in signals.tools_run("git add . && git push origin main")
+    assert "npm" in signals.tools_run("cd web && npm install")

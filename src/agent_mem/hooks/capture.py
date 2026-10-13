@@ -476,13 +476,11 @@ def _observer_active(conn: sqlite3.Connection, config: Config) -> bool:
 
 
 def _matching_rules(conn: sqlite3.Connection, project_id: str | None, command: str) -> list[sqlite3.Row]:
-    key = signals.command_key(command) or ""
-    program = key.split(" ")[0] if key else ""
+    names = signals.tools_run(command)
     rows = conn.execute(
         "SELECT * FROM rules WHERE (project_id IS ? OR project_id IS NULL) AND kind = 'avoid_command'", (project_id,)
     ).fetchall()
-    tokens = set(re.split(r"\s+", command.strip().lower())[:3])
-    return [r for r in rows if r["pattern"] in {program, key} or r["pattern"] in tokens]
+    return [r for r in rows if r["pattern"] in names]
 
 
 def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
