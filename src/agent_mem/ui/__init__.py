@@ -411,8 +411,7 @@ def render(snapshot: dict[str, Any]) -> str:
         for family, weights, file in FONTS
     )
     css = faces + _asset("app.css").decode("utf-8")
-    # d3-force lays out the graph; vendored, so the page still loads nothing (ui/d3-force.min.js, ISC licence).
-    script = _asset("d3-force.min.js").decode("utf-8") + "\n" + _asset("app.js").decode("utf-8")
+    script = _asset("app.js").decode("utf-8")
     digest = base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii")
     policy = (
         "default-src 'none'; "

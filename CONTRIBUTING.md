@@ -24,7 +24,7 @@ The provider `fake` answers from a JSON file named in `AGENT_MEM_FAKE_LLM` (a li
 
 ## Changing the viewer
 
-The page script is `src/agent_mem/ui/app.ts`. The package ships the built `app.js` next to it, so installs need no Node. After an edit, type-check and rebuild, and commit both files (CI fails if they differ). The compiler version is pinned so the same source always builds the same file:
+The page script is `src/agent_mem/ui/app.ts`; the repository holds no JavaScript. A package build (`hatch_build.py`) erases the types into `app.js` with Node's type stripping, Node coming from the `nodejs-wheel-binaries` wheel, so neither installs nor builds need Node on the machine. `app.js` is ignored by git; the tests rebuild it from the current `app.ts`. Only erasable TypeScript is allowed (no `enum`, `namespace` or parameter properties). Type-check after an edit:
 
 ```sh
 npm install --no-save typescript@7.0.2

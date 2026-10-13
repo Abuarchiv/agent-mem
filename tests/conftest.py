@@ -13,6 +13,16 @@ from agent_mem.core.events import Event
 from agent_mem.hooks import capture
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _viewer_script() -> None:
+    """Pages render the script built from the current ``ui/app.ts``. An installed package (the sdist job) has its own."""
+    try:
+        from hatch_build import build_viewer_script
+    except ImportError:
+        return
+    build_viewer_script(Path(__file__).resolve().parents[1])
+
+
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AGENT_MEM_NO_SPAWN", "1")

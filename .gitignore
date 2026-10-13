@@ -15,6 +15,9 @@ htmlcov/
 # Node (OpenCode plugin development only)
 node_modules/
 
+# Built from ui/app.ts by hatch_build.py
+src/agent_mem/ui/app.js
+
 # Secrets and runtime data never belong in Git
 .env
 .env.*

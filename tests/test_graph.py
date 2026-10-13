@@ -78,10 +78,11 @@ def test_graph_calls_use_their_own_purpose_in_the_call_log(config: Config) -> No
     conn.close()
 
 
-def test_the_page_embeds_d3_force_in_its_one_hashed_script(conn, config: Config) -> None:
+def test_the_page_lays_out_the_graph_in_its_one_hashed_script(conn, config: Config) -> None:
     page = ui.render(ui.build_snapshot(conn, config))
     script = page.rsplit("<script>", 1)[1]
-    assert "forceSimulation" in script and "function graphView" in script  # one script, one hash in the CSP
+    assert "function forceLayout" in script and "function graphView" in script  # one script, one hash in the CSP
+    assert ": SimNode" not in script  # types are erased
 
 
 def test_a_batch_without_json_twice_is_skipped_so_it_cannot_block_the_graph(conn) -> None:

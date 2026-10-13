@@ -95,8 +95,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Type-check the viewer and check that app.js is built from app.ts
+      - name: Type-check the viewer
         run: |
           npm install --no-save --no-audit --no-fund typescript@7.0.2
           npx tsc -p src/agent_mem/ui
-          git diff --exit-code src/agent_mem/ui/app.js

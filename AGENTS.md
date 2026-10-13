@@ -24,7 +24,7 @@ of design decisions; measurements go to its Appendix B and are never edited afte
   migration test.
 - **R7 Plugins.** Manifests in `plugins/` carry the package version (a test checks this).
 - **R8 Viewer.** `ui/` (the `agent-mem view` page) is loaded only by `cli/`, escapes every stored string; `purge` deletes
-  written pages. The page script is `ui/app.ts`; `npx tsc -p src/agent_mem/ui` builds the shipped `ui/app.js`, commit both.
+  written pages. The page script is `ui/app.ts`, erasable TypeScript only; the package build turns it into `app.js` (`hatch_build.py`), which is never committed. No JavaScript in the repository.
 - **R9 Development.** `uv sync --all-extras`, `uv run pytest -m "not local"`, `uv run ruff check src
   tests && uv run ruff format --check src tests && uv run pyright`. Tests marked `local` need the
   observer extra and a cached embedding model; run them by hand before a release. `uv.lock` is

@@ -1,5 +1,5 @@
 /* agent-mem view: renders the embedded snapshot. No network access; all text is escaped before it reaches the DOM.
-   Built from app.ts with `npx tsc -p src/agent_mem/ui`; edit app.ts, never app.js. */
+   A package build erases the types into app.js (hatch_build.py); `npx tsc -p src/agent_mem/ui` checks them. */
 
 // The snapshot from ui/__init__.py (build_snapshot), as far as the page reads it. Names follow the database columns.
 type Iso = string | null | undefined;
@@ -61,29 +61,14 @@ interface State {
 }
 interface AttentionItem { tone: string; text: string; view: string }
 
-// A graph node once d3-force has placed it; fx/fy pin it while it is dragged.
-type SimNode = GraphNode & { degree: number; r: number; x: number; y: number; fx?: number | null; fy?: number | null };
+// A graph node once the layout has placed it; fx/fy pin it while it is dragged.
+type SimNode = GraphNode & { degree: number; r: number; x: number; y: number; vx: number; vy: number; fx?: number | null; fy?: number | null };
 type SimEdge = GraphEdge & { source: SimNode; target: SimNode };
 interface GraphLabel { node: SimNode; p: { x: number; y: number }; r: number; priority: number }
 interface GraphController {
   zoomBy(factor: number): void; reset(): void; setQuery(query: string): void; setHidden(kinds: Iterable<string>): void;
   select(id: number | string | undefined): void; destroy(): void;
 }
-
-// d3-force is vendored as a global (d3-force.min.js); only the calls this page makes are typed.
-interface Force<T> {
-  distance(value: (item: T) => number): Force<T>; strength(value: number | ((item: T) => number)): Force<T>;
-  distanceMax(value: number): Force<T>; iterations(value: number): Force<T>;
-}
-interface Simulation {
-  force(name: string, force: Force<SimNode> | Force<SimEdge>): Simulation; alphaDecay(value: number): Simulation;
-  alphaTarget(value: number): Simulation; alpha(value: number): Simulation; on(type: "tick", listener: () => void): Simulation;
-  restart(): Simulation; stop(): Simulation; tick(): Simulation;
-}
-declare const d3: {
-  forceSimulation(nodes: SimNode[]): Simulation; forceLink(links: SimEdge[]): Force<SimEdge>; forceManyBody(): Force<SimNode>;
-  forceCollide(radius: (node: SimNode) => number): Force<SimNode>; forceX(x: number): Force<SimNode>; forceY(y: number): Force<SimNode>;
-};
 
 (() => {
   "use strict";
@@ -658,11 +643,76 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
     return new Set(nodes.filter((node) => size.get(find(node.id))! < 3).map((node) => node.id));
   }
 
+  // The graph layout, the way d3-force computes it (velocity Verlet that cools down): links pull related things
+  // together, every pair pushes apart, overlapping circles separate so labels stay readable, and a weak pull to the
+  // centre keeps separate clusters on screen. One tick per animation frame until it is cool.
+  // ponytail: repulsion and collision compare all pairs, O(n²) per tick; fine for the at most 1,200 things a
+  // 600-relation snapshot holds (290 today), a quadtree (Barnes-Hut) if that limit grows.
+  function forceLayout(nodes: SimNode[], edges: SimEdge[], onTick: () => void) {
+    let alpha = 1, target = 0, frame = 0;
+    const jiggle = () => (Math.random() - 0.5) * 1e-6;
+    nodes.forEach((node, i) => {
+      const radius = 10 * Math.sqrt(0.5 + i), angle = i * Math.PI * (3 - Math.sqrt(5));
+      Object.assign(node, { x: radius * Math.cos(angle), y: radius * Math.sin(angle), vx: 0, vy: 0 });
+    });
+    const tick = () => {
+      alpha += (target - alpha) * 0.03;
+      for (const { source: s, target: t } of edges) {
+        let x = t.x + t.vx - s.x - s.vx || jiggle(), y = t.y + t.vy - s.y - s.vy || jiggle();
+        const length = Math.hypot(x, y), pull = (length - (46 + s.r + t.r)) / length * alpha * 0.55;
+        x *= pull; y *= pull;
+        const bias = s.degree / (s.degree + t.degree);
+        t.vx -= x * bias; t.vy -= y * bias; s.vx += x * (1 - bias); s.vy += y * (1 - bias);
+      }
+      // Each pair once: both push each other, the better-connected one harder.
+      nodes.forEach((node, i) => {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const other = nodes[j];
+          const x = other.x - node.x || jiggle(), y = other.y - node.y || jiggle(), distance = Math.max(1, x * x + y * y);
+          if (distance >= 520 * 520) continue;
+          const toNode = (-120 - other.degree * 28) * alpha / distance, toOther = (-120 - node.degree * 28) * alpha / distance;
+          node.vx += x * toNode; node.vy += y * toNode; other.vx -= x * toOther; other.vy -= y * toOther;
+        }
+      });
+      for (let round = 0; round < 2; round += 1) {
+        nodes.forEach((node, i) => {
+          const xi = node.x + node.vx, yi = node.y + node.vy, ri = node.r + 14;
+          for (let j = i + 1; j < nodes.length; j += 1) {
+            const other = nodes[j];
+            const rj = other.r + 14, reach = ri + rj;
+            let x = xi - other.x - other.vx || jiggle(), y = yi - other.y - other.vy || jiggle();
+            if (Math.abs(x) >= reach || Math.abs(y) >= reach) continue;
+            const distance = Math.hypot(x, y);
+            if (distance >= reach) continue;
+            const overlap = (reach - distance) / distance, share = (rj * rj) / (ri * ri + rj * rj);
+            x *= overlap; y *= overlap;
+            node.vx += x * share; node.vy += y * share; other.vx -= x * (1 - share); other.vy -= y * (1 - share);
+          }
+        });
+      }
+      for (const node of nodes) {
+        node.vx -= node.x * 0.045 * alpha; node.vy -= node.y * 0.06 * alpha;
+        if (node.fx == null) node.x += node.vx *= 0.6; else { node.x = node.fx; node.vx = 0; }
+        if (node.fy == null) node.y += node.vy *= 0.6; else { node.y = node.fy; node.vy = 0; }
+      }
+    };
+    const frameStep = () => { tick(); onTick(); frame = alpha < 0.001 ? 0 : requestAnimationFrame(frameStep); };
+    const layout = {
+      tick: () => { tick(); return layout; },
+      alpha: (value: number) => { alpha = value; return layout; },
+      // Above zero while a thing is dragged, so the layout keeps moving around it.
+      alphaTarget: (value: number) => { target = value; return layout; },
+      restart: () => { if (!frame) frame = requestAnimationFrame(frameStep); return layout; },
+      stop: () => { cancelAnimationFrame(frame); frame = 0; return layout; },
+    };
+    return layout;
+  }
+
   function createGraph(host: HTMLElement, inspector: HTMLElement, allNodes: GraphNode[], allEdges: GraphEdge[]): GraphController {
     const islands = smallIslands(allNodes, allEdges);
     const sourceNodes = state.islands ? allNodes : allNodes.filter((node) => !islands.has(node.id));
     const sourceEdges = allEdges;
-    const nodes = sourceNodes.map((node) => ({ ...node }) as SimNode);
+    const nodes = sourceNodes.map((node) => ({ ...node, degree: 0, r: 0, x: 0, y: 0, vx: 0, vy: 0 }) as SimNode);
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const edges = sourceEdges.filter((edge) => byId.has(edge.a) && byId.has(edge.b)).map((edge) => ({ ...edge, source: byId.get(edge.a)!, target: byId.get(edge.b)! }));
     const around = new Map<number, SimEdge[]>(nodes.map((node) => [node.id, []]));
@@ -760,16 +810,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>The ba
         place(RELATION_LABEL[edge.type] ?? edge.type, (a.x + b.x) / 2 - 18, (a.y + b.y) / 2 + 4, 600, css(relationTone(edge.type), ink));
       }
     };
-    // d3-force: links pull related things together, many-body charge keeps them apart, collision keeps labels
-    // readable, a weak pull to the centre keeps separate clusters on screen.
-    const simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(edges).distance((edge) => 46 + (edge.source.r + edge.target.r)).strength(0.55))
-      .force("charge", d3.forceManyBody().strength((node) => -120 - node.degree * 28).distanceMax(520))
-      .force("collide", d3.forceCollide((node) => node.r + 14).iterations(2))
-      .force("x", d3.forceX(0).strength(0.045))
-      .force("y", d3.forceY(0).strength(0.06))
-      .alphaDecay(0.03)
-      .on("tick", draw);
+    const simulation = forceLayout(nodes, edges, draw);
     const select = (node: SimNode | undefined) => { selected = node; describe(node); draw(); };
     const resize = () => { width = host.clientWidth; height = host.clientHeight; const ratio = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.max(1, Math.floor(width * ratio)); canvas.height = Math.max(1, Math.floor(height * ratio)); context.setTransform(ratio, 0, 0, ratio, 0, 0); draw(); };
     const fit = () => { const list = nodes.filter(shown); if (!list.length) return; const xs = list.map((n) => n.x), ys = list.map((n) => n.y); const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys); view.x = (minX + maxX) / 2 + 40; view.y = (minY + maxY) / 2; view.scale = Math.min(2, Math.max(0.15, Math.min(width / (maxX - minX + 260), height / (maxY - minY + 120)))); draw(); };

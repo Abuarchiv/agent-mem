@@ -50,17 +50,23 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_mem"]
-# The wheel ships the built viewer script (ui/app.js); its TypeScript source stays in the sdist.
+# The wheel ships the viewer script built from ui/app.ts (hatch_build.py); the TypeScript source stays in the sdist.
 exclude = ["src/agent_mem/ui/app.ts", "src/agent_mem/ui/tsconfig.json"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+dependencies = ["nodejs-wheel-binaries==24.19.0"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "plugins" = "agent_mem/plugins"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_mem", "tests", "plugins", ".claude-plugin", ".agents", ".github/plugin", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+include = ["src/agent_mem", "tests", "plugins", "hatch_build.py", ".claude-plugin", ".agents", ".github/plugin", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
 
 [dependency-groups]
 dev = [
+  # the tests build the viewer script from ui/app.ts the way a wheel build does (hatch_build.py)
+  "hatchling>=1.32",
+  "nodejs-wheel-binaries==24.19.0",
   "pytest>=9.1",
   "ruff>=0.16",
   "pyright>=1.1.414",
@@ -76,6 +82,7 @@ markers = [
   "local: needs the observer extra and a cached embedding model; run by hand, not in CI (PLAN.md R9)",
 ]
 addopts = "-q"
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 120

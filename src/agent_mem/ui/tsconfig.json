@@ -6,7 +6,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "noEmitOnError": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
     "skipLibCheck": true
   },
   "files": ["app.ts"]
