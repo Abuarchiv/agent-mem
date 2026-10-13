@@ -71,8 +71,7 @@ def _explain(error: Exception) -> str:
         return f"{error.strerror or error}{f': {error.filename}' if error.filename else ''}"
     if isinstance(error, ModuleNotFoundError):
         return (
-            f"missing module {error.name}. Reinstall with the extras you need, e.g. "
-            "`uv tool install --reinstall 'agent-mem[semantic,observer]'`."
+            f"missing module {error.name}. Add the extras that need it: `agent-mem upgrade --extras semantic observer`."
         )
     return f"unexpected {type(error).__name__}: {error}. Run again with AGENT_MEM_DEBUG=1 for details and report it."
 
@@ -184,7 +183,8 @@ def _main(args: list[str]) -> int:
     group = p.add_mutually_exclusive_group()
     group.add_argument("--autostart", action="store_true", help="start the viewer at every login, and now")
     group.add_argument("--no-autostart", action="store_true", help="remove the login item")
-    sub.add_parser("upgrade", help="install the newest version from where this one came from, then `doctor --fix`")
+    p = sub.add_parser("upgrade", help="install the newest version from where this one came from, then `doctor --fix`")
+    p.add_argument("--extras", nargs="+", default=[], choices=["semantic", "observer"], help="also install these")
     sub.add_parser("mcp", help="run the stdio MCP server (used by plugins)")
     sub.add_parser("paths", help="show data locations")
 

@@ -471,6 +471,15 @@ def _hook_checks(fix: bool) -> list[Check]:
             # The path they already use (a checkout's `uv run` must not take them over), unless it is gone.
             install.write(harness, install.plugins_dir(), exe if Path(exe).is_file() else None)
             commands, fixed = install.hook_commands(harness), True
+        if harness == "claude" and install.claude_plugin_enabled():
+            checks.append(
+                Check(
+                    "claude registered once",
+                    False,
+                    "hooks in settings.json and the agent-mem plugin both run on every event",
+                    "Keep one: `agent-mem uninstall claude`, or `/plugin uninstall agent-mem@agent-mem` in Claude Code.",
+                )
+            )
         stale = install.stale(harness)
         detail = "match this release" + (", rewritten" if fixed else "")
         if fixed and harness == "codex":

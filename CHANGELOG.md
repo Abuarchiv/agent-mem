@@ -7,6 +7,10 @@
 - `agent-mem upgrade` installs the newest commit of the source this copy came from (extras and a branch or tag kept, a pinned commit dropped), then runs `doctor --fix` with the new code. It uses `uv tool install --upgrade`, which swaps the environment in place; `--reinstall` deletes it first, and in a measured run 258 of 332 hook calls during those 2.6 s found no binary.
 - `doctor` compares the hooks `setup --write` registered with the ones this release ships; `doctor --fix` rewrites them at the binary path they already use. Before, a changed event, matcher or timeout (such as the Codex SessionEnd timeout of 3 s) never reached existing installs.
 - Running the install script over an existing install prints old and new version and runs `doctor --fix`.
+- `agent-mem upgrade --extras semantic observer` adds extras to an existing install, keeping its source, and downloads the models they need; error messages about a missing extra point to it instead of `uv tool install --reinstall` from PyPI.
+- agent-mem is not on PyPI: the README installed it by its bare name, which fails today and would install whatever someone registers under that name. It now installs from the repository.
+- The install script connects every harness on PATH on a fresh machine (`agent-mem uninstall all` undoes it), using the copy it just installed even before PATH knows it.
+- `doctor` and `setup claude --write` report when the Claude Code plugin and `setup --write` are both active, because both then run every hook.
 - `agent-mem --version` names the commit of a git install (`1.0.0 (9436f94)`), because the version number stays the same between releases.
 
 ### Facts in the background (new)

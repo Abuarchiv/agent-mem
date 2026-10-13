@@ -544,6 +544,8 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
             print(f"  wrote {path}")
         if name == "codex":
             print("  Codex asks you to trust the hooks once: start codex and run /hooks.")
+        if name == "claude" and install.claude_plugin_enabled():
+            print("  The agent-mem plugin is enabled too; keep one: /plugin uninstall agent-mem@agent-mem.")
         if not found["extras"]["observer"]:
             continue
         if name == "opencode":
@@ -595,7 +597,7 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
 
     from agent_mem.cli import install
 
-    command = install.upgrade_command()
+    command = install.upgrade_command(ns.extras)
     if command is None:
         print(
             "This copy was not installed with `uv tool` (the install script uses it). Upgrade it the way you "
@@ -612,12 +614,18 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
     after = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout.strip()
     after = after.removeprefix("agent-mem ") or "?"
     if after == before:
-        print(f"agent-mem {after} is the newest version.")
+        added = f", now with {' and '.join(ns.extras)}" if ns.extras else ""
+        print(f"agent-mem {after} is the newest version{added}.")
     else:
         print(
             f"agent-mem {before} -> {after}. Hooks use it now; running sessions keep their MCP server until restart.",
             flush=True,
         )
-    # The new code finishes the job: it migrates the database and rewrites hooks of an older release.
-    print("$ agent-mem doctor --fix", flush=True)
-    return subprocess.run([exe, "--data-dir", str(config.data_dir), "doctor", "--fix"], check=False).returncode
+    # The new code finishes the job: models a new default or a new extra needs (a no-op when cached), then the
+    # database migration and hooks of an older release.
+    steps = [["models", "install"]] if install.extras()["semantic"] or "semantic" in ns.extras else []
+    code = 0
+    for step in [*steps, ["doctor", "--fix"]]:
+        print(f"$ agent-mem {' '.join(step)}", flush=True)
+        code = subprocess.run([exe, "--data-dir", str(config.data_dir), *step], check=False).returncode
+    return code

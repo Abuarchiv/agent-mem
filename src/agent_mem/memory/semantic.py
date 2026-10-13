@@ -101,7 +101,7 @@ def load_embedder_verbose(config: Config, *, allow_download: bool = False) -> tu
     try:
         import fastembed  # noqa: F401
     except ImportError:
-        return None, "the optional dependency is missing: install `agent-mem[semantic]`"
+        return None, "the optional dependency is missing: run `agent-mem upgrade --extras semantic`"
     if not allow_download and not model_cached(config):
         return None, "the model is not downloaded yet: run `agent-mem models install`"
     with contextlib.suppress(Exception):

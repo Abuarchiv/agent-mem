@@ -219,3 +219,53 @@ def test_upgrade_moves_to_the_head_of_the_source_and_keeps_extras(
 
     monkeypatch.setattr(install, "origin", dict)
     assert install.upgrade_command() == ["/bin/uv", "tool", "upgrade", "agent-mem"]
+
+
+def test_upgrade_adds_extras_on_request(homes: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None)
+    monkeypatch.setattr(install.sys, "prefix", str(tmp_path))
+    (tmp_path / "uv-receipt.toml").write_text("")
+    monkeypatch.setattr(install, "extras", lambda: {"semantic": False, "observer": False})
+    monkeypatch.setattr(install, "origin", lambda: {"url": "https://x/agent-mem", "vcs_info": {"vcs": "git"}})
+    assert install.upgrade_command(["observer"])[-1] == "agent-mem[observer] @ git+https://x/agent-mem"
+    assert install.upgrade_command()[-1] == "agent-mem @ git+https://x/agent-mem"
+    monkeypatch.setattr(install, "origin", dict)  # from an index: `uv tool upgrade` cannot add extras
+    assert install.upgrade_command(["semantic"]) == ["/bin/uv", "tool", "install", "--upgrade", "agent-mem[semantic]"]
+
+
+def test_plugin_and_setup_write_together_are_reported(homes: Path) -> None:
+    from agent_mem.cli.health import _hook_checks
+
+    install.write("claude", PLUGINS, EXE)
+    assert not install.claude_plugin_enabled()
+    settings = homes / ".claude" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"] = {"agent-mem@agent-mem": True, "other@x": True}
+    settings.write_text(json.dumps(data))
+    assert install.claude_plugin_enabled()
+    assert not {c.name: c for c in _hook_checks(fix=False)}["claude registered once"].ok
+
+
+def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch, capsys) -> None:
+    import argparse
+    import subprocess
+
+    from agent_mem.cli import commands
+
+    monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["/bin/uv", "tool", "install", "x"])
+    monkeypatch.setattr(install, "extras", lambda: {"semantic": True, "observer": True})
+    versions = iter(["1.0.0 (aaaaaaa)"])
+    monkeypatch.setattr(install, "version", lambda: next(versions))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        out = "agent-mem 1.0.0 (bbbbbbb)\n" if argv[-1] == "--version" else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=out)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
+    assert calls[0] == ["/bin/uv", "tool", "install", "x"]
+    assert [c[-2:] for c in calls[2:]] == [["models", "install"], ["doctor", "--fix"]]
+    assert all(c[0].endswith("agent-mem") for c in calls[1:])
+    assert "1.0.0 (aaaaaaa) -> 1.0.0 (bbbbbbb)" in capsys.readouterr().out

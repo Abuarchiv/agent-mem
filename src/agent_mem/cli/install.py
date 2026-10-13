@@ -285,6 +285,12 @@ def hook_commands(harness: str) -> list[str]:
     return sorted(set(found))
 
 
+def claude_plugin_enabled() -> bool:
+    """The marketplace plugin is on as well: then it and ``setup --write`` both run every hook."""
+    enabled = _read_json(claude_home() / "settings.json").get("enabledPlugins", {})
+    return any(name.split("@")[0] == MARK and on for name, on in enabled.items())
+
+
 def stale(harness: str) -> bool:
     """Our registered hooks differ from the ones this release ships (an event, matcher or timeout changed since
     ``setup --write``). Compared at the binary path they already use, so only the shipped content counts."""
@@ -330,23 +336,24 @@ def version() -> str:
     return f"{__version__} ({commit[:7]})" if commit else __version__
 
 
-def upgrade_command() -> list[str] | None:
-    """The uv call that moves this copy to the newest commit of its source, extras kept. None when it was not
+def upgrade_command(add: list[str] | tuple[str, ...] = ()) -> list[str] | None:
+    """The uv call that moves this copy to the newest commit of its source, extras kept plus ``add``. None when it was not
     installed with ``uv tool``. ``uv tool install --upgrade`` swaps the environment in place; ``--reinstall``
     deletes it first and hooks fired in those seconds find no binary (measured 2.6 s, 258 of 332 calls failed)."""
     uv = shutil.which("uv")
     if uv is None or not (Path(sys.prefix) / "uv-receipt.toml").exists():
         return None
+    present = extras()
+    wanted = [name for name in present if present[name] or name in add]
+    spec = f"agent-mem[{','.join(wanted)}]" if wanted else "agent-mem"
     source = origin()
     vcs = source.get("vcs_info", {})
     if vcs.get("vcs") != "git":
-        return [uv, "tool", "upgrade", "agent-mem"]
+        return [uv, "tool", "install", "--upgrade", spec] if add else [uv, "tool", "upgrade", "agent-mem"]
     url = source["url"]
     ref = vcs.get("requested_revision")
     if ref and ref != vcs.get("commit_id"):  # a branch or tag stays; a pinned commit would never move
         url += f"@{ref}"
-    wanted = [name for name, present in extras().items() if present]
-    spec = f"agent-mem[{','.join(wanted)}]" if wanted else "agent-mem"
     return [uv, "tool", "install", "--upgrade", f"{spec} @ git+{url}"]
 
 

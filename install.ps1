@@ -22,13 +22,16 @@ $before = if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem -
 uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
 if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem (network or git missing?). The error above names the cause." }
 uv tool update-shell | Out-Null
+$exe = Join-Path (uv tool dir --bin) "agent-mem.exe"  # the copy just installed, even before PATH knows it
 if ($before) {
-  Write-Host "Updated: $before -> $(agent-mem --version)"
-  agent-mem doctor --fix  # migrates the database, rewrites hooks an older release wrote
+  Write-Host "Updated: $before -> $(& $exe --version)"
+  & $exe doctor --fix  # migrates the database, rewrites hooks an older release wrote
   exit 0
 }
 Write-Host ""
-Write-Host "Installed. Next steps:"
-Write-Host "  agent-mem setup all --write       # every harness on PATH; or one: claude, codex, copilot, opencode"
-Write-Host "  agent-mem doctor"
+Write-Host "Installed. Connecting every harness on PATH..."
+& $exe setup all --write
+if ($LASTEXITCODE -ne 0) { Write-Host "No harness connected yet. Later: agent-mem setup all --write (or: claude, codex, copilot, opencode)" }
+Write-Host ""
+Write-Host "Undo with: agent-mem uninstall all. Check with: agent-mem doctor"
 Write-Host "If 'agent-mem' is not found, open a new terminal (uv added it to your PATH)."

@@ -18,13 +18,15 @@ before=$(agent-mem --version 2>/dev/null || true)
 uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
   || fail "uv could not install agent-mem (network or git missing?). The error above names the cause."
 uv tool update-shell >/dev/null 2>&1 || true
+exe="$(uv tool dir --bin)/agent-mem"  # the copy just installed, even before PATH knows it
 if [ -n "$before" ]; then
-  echo "Updated: $before -> $(agent-mem --version)"
-  agent-mem doctor --fix || true  # migrates the database, rewrites hooks an older release wrote
+  echo "Updated: $before -> $("$exe" --version)"
+  "$exe" doctor --fix || true  # migrates the database, rewrites hooks an older release wrote
   exit 0
 fi
 echo
-echo "Installed. Next steps:"
-echo "  agent-mem setup all --write       # every harness on PATH; or one: claude, codex, copilot, opencode"
-echo "  agent-mem doctor"
+echo "Installed $("$exe" --version). Connecting every harness on PATH..."
+"$exe" setup all --write || echo "No harness connected yet. Later: agent-mem setup all --write (or: claude, codex, copilot, opencode)"
+echo
+echo "Undo with: agent-mem uninstall all. Check with: agent-mem doctor"
 echo "If 'agent-mem' is not found, open a new terminal (uv added it to your PATH)."

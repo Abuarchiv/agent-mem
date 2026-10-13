@@ -7,10 +7,12 @@ Agent Mem records what your coding agents do through their native hooks, turns i
 ## Install
 
 ```sh
-uv tool install "agent-mem[semantic,observer]"      # or: pipx install "agent-mem[semantic,observer]"
+uv tool install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
 agent-mem setup all --write                         # every harness on PATH; or one: claude, codex, copilot, opencode
 agent-mem doctor
 ```
+
+agent-mem is not on PyPI; install it from the repository, never by its bare name (a package registered there under that name would not be ours). `pipx install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"` works too.
 
 `setup --write` registers the hooks and the MCP server with the **absolute path** of the binary, so sessions started from an IDE find it too. It downloads the embedding model (about 220 MB) and prints what it detected: harnesses, providers, extras. Start a session, finish one turn, and the next session begins with the facts from the first.
 
@@ -24,7 +26,7 @@ Three sizes:
 | `agent-mem[semantic]` | plus 220 MB model | vector search (`paraphrase-multilingual-MiniLM-L12-v2`, ONNX, no PyTorch) |
 | `agent-mem[semantic,observer]` | plus about 400 MB | background facts, work log, lessons, daily review of duplicates and outdated facts (mem0, Qdrant local mode, spaCy) |
 
-Update with `agent-mem upgrade`: it installs the newest commit of the source you installed from (extras kept), then runs `agent-mem doctor --fix`, which migrates the database and rewrites hooks that an older release wrote (Codex asks you to trust changed hooks once more with `/hooks`). Running the install script again does the same. Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no binary.
+Update with `agent-mem upgrade` (`--extras observer` adds an extra): it installs the newest commit of the source you installed from (extras kept), downloads a model the new release needs, then runs `agent-mem doctor --fix`, which migrates the database and rewrites hooks that an older release wrote (Codex asks you to trust changed hooks once more with `/hooks`). Running the install script again does the same. On a fresh machine the script also runs `agent-mem setup all --write` (every harness on PATH; `agent-mem uninstall all` undoes it). Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no binary.
 
 Uninstall with `agent-mem uninstall <harness>` (removes hooks and MCP entries, keeps data) and `agent-mem purge --all` (deletes data).
 
@@ -75,7 +77,7 @@ Search fuses SQLite FTS5, MiniLM vectors and the graph with reciprocal rank fusi
 
 ```
 agent-mem status [--json] | doctor [--fix] [--json] | paths
-agent-mem setup all|<harness> [--write] [--no-models] | uninstall all|<harness> | upgrade
+agent-mem setup all|<harness> [--write] [--no-models] | uninstall all|<harness> | upgrade [--extras ...]
 agent-mem observe [--drain] [--once] [--status] [--retry-failed] [--reprocess-raw] [--reindex]
 agent-mem search "query" [--project DIR] [--all-projects] [--limit N] [--json]
 agent-mem show T12 M3 | view [--project DIR] [--output FILE|FOLDER] [--no-open]
@@ -104,7 +106,7 @@ It listens on this machine only (no login; turn it off on shared machines). `age
 | You see | Do |
 | --- | --- |
 | `agent-mem: the database is damaged` | `agent-mem doctor`, then `agent-mem restore --latest` (the old file is kept as `memory.db.replaced`) |
-| `semantic: unavailable` in `status` | `uv tool install --reinstall 'agent-mem[semantic,observer]'`, then `agent-mem models install` |
+| `semantic: unavailable` in `status` | `agent-mem upgrade --extras semantic` (installs the extra and downloads the model) |
 | facts never appear | `agent-mem observe --status`; the harness CLI (`claude`, `codex`, `copilot`) must be on PATH and logged in |
 | Codex captures nothing | start `codex`, run `/hooks` and trust the agent-mem hooks once |
 | `Cannot start the viewer on 127.0.0.1:37778` | another program uses the port; set `"viewer": {"port": <free port>}` |
