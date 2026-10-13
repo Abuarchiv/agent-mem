@@ -180,32 +180,43 @@ def ingest(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
             store.supersede(conn, memory_id, None)
             counts["retired"] += 1
         for memory_id, source in revived:
-            _replace(conn, source, memory_id)
-            conn.execute("UPDATE memories SET invalid_at = NULL, superseded_by = NULL WHERE id = ?", (memory_id,))
-            title, body = conn.execute("SELECT title, body FROM memories WHERE id = ?", (memory_id,)).fetchone()
-            store.set_search_key(conn, "m", memory_id, f"native_note: {title}\n{body}")
+            _revive(conn, memory_id, source)
         for project, origin, cwd, path, text, mtime, dedupe in new:
             identity.register_project(conn, project, cwd)
-            title, body = _title_body(text, path)
-            memory_id = store.add_memory(
-                conn,
-                project_id=project.id,
-                kind="native_note",
-                title=title,
-                body=body,
-                source="native",
-                trust="agent",
-                importance=0.4,
-                origin=origin,
-                dedupe=dedupe,
-                at=timeutil.iso(datetime.fromtimestamp(mtime, UTC)),
-            )
-            if memory_id is None:
-                counts["unchanged"] += 1
-                continue
-            _replace(conn, dedupe.split(":")[1], memory_id)
-            counts["stored"] += 1
+            stored_id = _store(conn, project.id, origin, path, text, mtime, dedupe)
+            counts["stored" if stored_id is not None else "unchanged"] += 1
     return counts
+
+
+def _revive(conn: sqlite3.Connection, memory_id: int, source: str) -> None:
+    """A note that came back (restored, or changed back to an earlier version) is current again."""
+    _replace(conn, source, memory_id)
+    conn.execute("UPDATE memories SET invalid_at = NULL, superseded_by = NULL WHERE id = ?", (memory_id,))
+    title, body = conn.execute("SELECT title, body FROM memories WHERE id = ?", (memory_id,)).fetchone()
+    store.set_search_key(conn, "m", memory_id, f"native_note: {title}\n{body}")
+
+
+def _store(
+    conn: sqlite3.Connection, project_id: str, origin: str, path: Path, text: str, mtime: float, dedupe: str
+) -> int | None:
+    """Store a new note version and retire the older ones; None when the same version is already stored."""
+    title, body = _title_body(text, path)
+    memory_id = store.add_memory(
+        conn,
+        project_id=project_id,
+        kind="native_note",
+        title=title,
+        body=body,
+        source="native",
+        trust="agent",
+        importance=0.4,
+        origin=origin,
+        dedupe=dedupe,
+        at=timeutil.iso(datetime.fromtimestamp(mtime, UTC)),
+    )
+    if memory_id is not None:
+        _replace(conn, dedupe.split(":")[1], memory_id)
+    return memory_id
 
 
 def _replace(conn: sqlite3.Connection, source: str, memory_id: int) -> None:
