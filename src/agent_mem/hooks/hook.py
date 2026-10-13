@@ -163,7 +163,7 @@ def job_name(component: str) -> str:
     kind, _, harness = component.partition(":")
     if not harness:
         return _JOB_NAME.get(component, component)
-    return f"{inject.AGENT_NAMES.get(harness, harness)} {'hooks' if kind == 'hook' else kind}"
+    return f"{inject.AGENT_NAMES.get(harness, harness)} {'hooks' if kind == 'hook' else 'connection'}"
 
 
 def problems(conn: sqlite3.Connection) -> list[str]:

@@ -188,7 +188,7 @@ interface GraphController {
   const COMPONENT_LABEL: Record<string, string> = { indexer: "Search index", semantic: "Search by meaning", observer: "Writing facts", consolidation: "Cleanup" };
   const componentLabel = (name: string) => {
     if (name.startsWith("hook:")) return `${harnessLabel(name.slice(5))} hooks`;
-    if (name.startsWith("setup:")) return `${harnessLabel(name.slice(6))} setup`;
+    if (name.startsWith("setup:")) return `${harnessLabel(name.slice(6))} connection`;
     return COMPONENT_LABEL[name] ?? readable(name);
   };
   // "error" means a command failed and nothing later fixed it; the turn itself usually still finished.

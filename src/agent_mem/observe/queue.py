@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import timedelta
+from typing import Any
 
 from agent_mem.core import timeutil
 
@@ -111,7 +112,7 @@ def reprocess_raw(conn: sqlite3.Connection) -> int:
     return cursor.rowcount
 
 
-def status(conn: sqlite3.Connection) -> dict[str, object]:
+def status(conn: sqlite3.Connection) -> dict[str, Any]:
     counts = {
         str(row[0]): int(row[1])
         for row in conn.execute("SELECT state, COUNT(*) FROM observe_queue GROUP BY state").fetchall()

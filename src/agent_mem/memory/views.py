@@ -10,8 +10,10 @@ from agent_mem.core.signals import first_line, request_text
 from agent_mem.memory import consolidate, learn, search
 from agent_mem.memory.store import owner_label, parse_owner
 
+AGENT_FOOTER = "Use mem_get with ids for details, mem_timeline for context."
 
-def search_lines(hits: list[search.Hit], weak: list[search.Hit] | None = None) -> str:
+
+def search_lines(hits: list[search.Hit], weak: list[search.Hit] | None = None, footer: str = AGENT_FOOTER) -> str:
     """Confident hits; without any, the weak candidates under a header that says so."""
     if not hits and not weak:
         return "No matching memories."
@@ -28,7 +30,7 @@ def search_lines(hits: list[search.Hit], weak: list[search.Hit] | None = None) -
         lines.append(
             f"{hit.label} · {timeutil.day(hit.ts)} · {origin} · score {hit.score:.2f}{stale}\n  {first_line(hit.title or hit.text, 160)}"
         )
-    lines.append("Use mem_get with ids for details, mem_timeline for context.")
+    lines.append(footer)
     return "\n".join(lines)
 
 
@@ -76,7 +78,7 @@ def _turn_details(conn: sqlite3.Connection, turn_id: int) -> str | None:
     if row is None:
         return None
     header = (
-        f"T{row['id']} · {row['started_at']} · {row['harness']} · project {row['project'] or '-'}"
+        f"T{row['id']} · {timeutil.local(row['started_at'])} · {row['harness']} · project {row['project'] or '-'}"
         f"{' · branch ' + row['branch'] if row['branch'] else ''} · outcome {row['outcome']} · source: recorded session"
     )
     parts = [header, f"request: {row['prompt'][:3000]}"]
@@ -115,7 +117,7 @@ def _memory_details(conn: sqlite3.Connection, memory_id: int) -> str | None:
             status += f" (superseded by M{row['superseded_by']})"
     provenance = f" · from T{row['turn_id']}" if row["turn_id"] else ""
     return (
-        f"M{row['id']} · {row['kind']} · {row['created_at']} · project {row['project'] or 'global'} · "
+        f"M{row['id']} · {row['kind']} · {timeutil.local(row['created_at'])} · project {row['project'] or 'global'} · "
         f"source {row['source']}/{row['origin'] or '-'} · trust {row['trust']}{provenance}{status}\n"
         f"{row['title']}" + ("" if row["body"].strip() == row["title"].strip() else f"\n{row['body'][:4000]}")
     )

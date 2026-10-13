@@ -329,8 +329,7 @@ def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
             Check(
                 f"{LABELS[harness]} recording",
                 not failing,
-                f"last {timeutil.local(row['last_ok_at'])}; errors {row['error_count']}"
-                + (f" (last: {row['last_error']})" if failing else ""),
+                f"last {timeutil.local(row['last_ok_at'])}" + (f" (last: {row['last_error']})" if failing else ""),
                 "See logs/hook.log in the data folder (`agent-mem paths`).",
             )
         )
@@ -397,9 +396,9 @@ def _viewer_checks(config: Config, fix: bool) -> list[Check]:
     if login is not None:
         checks.append(
             Check(
-                "viewer autostart",
+                "viewer starts at login",
                 login.exists(),
-                str(login) if login.exists() else "not registered; the viewer starts with the first agent session",
+                "yes" if login.exists() else "no; it starts with the first agent session",
                 "Run `agent-mem serve --autostart` or `agent-mem doctor --fix`.",
                 warn_only=True,
             )
@@ -438,7 +437,7 @@ def _missing_queue_check(conn: sqlite3.Connection, error: sqlite3.Error) -> Chec
         "facts queue",
         False,
         f"{error}; database version {db.user_version(conn)} without the facts tables",
-        "Move the data directory aside (`agent-mem paths`); a new one gets the queue table from migration 002.",
+        "Move the data folder aside (`agent-mem paths` shows where); agent-mem then starts a new one.",
     )
 
 
@@ -507,9 +506,9 @@ def _fact_index_check(conn: sqlite3.Connection, config: Config) -> Check | None:
     size_mb = sum(p.stat().st_size for p in qdrant.rglob("*") if p.is_file()) / 1_000_000
     facts = int(conn.execute("SELECT COUNT(*) FROM memories WHERE kind = 'fact' AND invalid_at IS NULL").fetchone()[0])
     return Check(
-        "fact index",
+        "fact store",
         facts < 50_000,
-        f"{facts} facts, qdrant {size_mb:.0f} MB (opens in under a second up to about 20k facts)",
+        f"{facts} facts, {size_mb:.0f} MB",
         "Run `agent-mem purge --before` to trim old facts.",
         warn_only=True,
     )

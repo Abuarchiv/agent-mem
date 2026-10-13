@@ -112,10 +112,9 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         print(f"Recording paused until {timeutil.local(data['paused_until'])}")
     print("Background jobs:")
     for component, info in sorted(data["components"].items()):
-        print(
-            f"  {job_name(component)}: ok {info['ok_count']} (last {timeutil.local(info['last_ok_at'])}), errors {info['error_count']}"
-            + (f" (last: {info['last_error']})" if info["error_count"] else "")
-        )
+        failing = info["last_error_at"] and (not info["last_ok_at"] or info["last_error_at"] > info["last_ok_at"])
+        state = f"failing: {info['last_error']}" if failing else f"working, last {timeutil.local(info['last_ok_at'])}"
+        print(f"  {job_name(component)}: {state}")
     for warning in data["config_warnings"]:
         print(f"! {warning}")
     return 0
@@ -155,7 +154,7 @@ def cmd_search(ns: argparse.Namespace, config: Config) -> int:
             )
         else:
             views.prime_anchor_states(conn, hits)
-            print(views.search_lines(hits))
+            print(views.search_lines(hits, footer=f"Details: agent-mem show {hits[0].label if hits else '<id>'}"))
     return 0
 
 
@@ -366,7 +365,11 @@ def _purge_before(ns: argparse.Namespace, config: Config, conn: sqlite3.Connecti
 def cmd_consolidate(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.memory.indexer import run
 
-    print(json.dumps(run(config, force_consolidate=True, allow_download=False), indent=2, default=str))
+    stats = run(config, force_consolidate=True, allow_download=False)
+    if ns.json:
+        print(json.dumps(stats, indent=2, default=str))
+    else:
+        print(f"Not done: {stats['skipped']}, try again shortly." if "skipped" in stats else "Cleanup done.")
     return 0
 
 
@@ -698,7 +701,11 @@ def cmd_paths(ns: argparse.Namespace, config: Config) -> int:
         "logs": config.log_dir,
         "models": config.model_dir,
     }
-    print(json.dumps({name: str(path) for name, path in locations.items()}, indent=2))
+    if ns.json:
+        print(json.dumps({name: str(path) for name, path in locations.items()}, indent=2))
+        return 0
+    for label, path in zip(("Data folder", "Database", "Settings", "Logs", "Models"), locations.values(), strict=True):
+        print(f"{label + ':':13} {path}")
     return 0
 
 
@@ -713,18 +720,45 @@ def cmd_observe(ns: argparse.Namespace, config: Config) -> int:
         from agent_mem.observe import queue
 
         with _conn(config) as conn:
-            print(json.dumps(queue.status(conn), indent=2, ensure_ascii=False, default=str))
+            data = queue.status(conn)
+        if ns.json:
+            print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+            return 0
+        states = data["queue"]
+        print(
+            f"Requests: {states.get('pending', 0) + states.get('running', 0)} waiting, {states.get('done', 0)} with facts,"
+            f" {states.get('raw', 0)} saved word for word, {states.get('failed', 0)} failed"
+        )
+        for call in data["calls_today"]:
+            failed = call["n"] - (call["ok"] or 0)
+            print(
+                f"  today {call['provider']} ({call['purpose']}): {call['n']} calls"
+                + (f", {failed} failed" if failed else "")
+            )
+        for error in data["recent_errors"]:
+            print(f"  T{error['turn_id']}: {str(error['last_error'])[:160]}")
+        if data["recent_errors"]:
+            print("Try them again with `agent-mem observe --retry-failed`.")
         return 0
     if ns.reindex:
         from agent_mem.observe.worker import reindex
 
-        print(json.dumps(reindex(config), indent=2))
+        done = reindex(config)
+        print(json.dumps(done, indent=2) if ns.json else f"Fact store rebuilt from {done['facts']} facts.")
         return 0
     from agent_mem.observe.worker import run
 
     stats = run(config, drain=not ns.once, retry_failed=ns.retry_failed, reprocess_raw=ns.reprocess_raw)
-    if not ns.quiet:
+    if ns.json:
         print(json.dumps(stats, indent=2, default=str))
+    elif "skipped" in stats:
+        print("Already running in the background.")
+    elif not ns.quiet:
+        print(
+            f"Done: {stats['facts']} new facts from {stats['bundles']} batches of requests"
+            + (f", {stats['failed']} failed (`agent-mem observe --status`)" if stats["failed"] else "")
+            + "."
+        )
     return 0
 
 
@@ -734,8 +768,14 @@ def cmd_index(ns: argparse.Namespace, config: Config) -> int:
 
     stats = run(config, allow_download=not ns.no_download)
     record_setup_health(config)
-    if not ns.quiet:
+    if ns.json:
         print(json.dumps(stats, indent=2, default=str))
+    elif not ns.quiet:
+        print(
+            f"Not updated: {stats['skipped']}, try again shortly."
+            if "skipped" in stats
+            else "Search index is up to date."
+        )
     return 0
 
 

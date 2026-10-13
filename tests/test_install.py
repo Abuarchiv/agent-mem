@@ -298,14 +298,14 @@ def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Pa
     conn = db.connect(config)
     try:
         shown = problems(conn)
-        assert any("Claude Code setup" in line and "doctor --fix" in line for line in shown)
+        assert any("Claude Code connection" in line and "doctor --fix" in line for line in shown)
     finally:
         conn.close()
 
     assert main([*data_dir, "doctor", "--fix"]) in (0, 1)
     conn = db.connect(config)
     try:
-        assert not any("Claude Code setup" in line for line in problems(conn))
+        assert not any("Claude Code connection" in line for line in problems(conn))
     finally:
         conn.close()
 

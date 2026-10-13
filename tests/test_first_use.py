@@ -12,7 +12,19 @@ from pathlib import Path
 import pytest
 
 # Words the screen no longer uses (they confused users); the model-facing context block may still use them.
-JARGON = ("harness", "spool", "injected", "dead end", "redo", "lexical", " turn ", " turns ", "capture")
+JARGON = (
+    "harness",
+    "spool",
+    "injected",
+    "dead end",
+    "redo",
+    "lexical",
+    " turn ",
+    " turns ",
+    "capture",
+    "mem_get",
+    "qdrant",
+)
 
 
 @pytest.fixture
@@ -64,6 +76,7 @@ def _plain(text: str) -> str:
 
 
 def _no_jargon(text: str) -> None:
+    assert not text.lstrip().startswith(("{", "[")), text  # raw JSON is for `--json`, not for people
     lowered = f" {_plain(text).lower()} "
     found = [word for word in JARGON if word in lowered]
     assert not found, (found, text)
@@ -96,6 +109,8 @@ def test_a_first_day_from_setup_to_purge(home: dict[str, str], project: Path) ->
         ["lessons"],
         ["models"],
         ["observe", "--status"],
+        ["index", "--no-download"],
+        ["consolidate"],
         ["paths"],
         ["pause", "--for", "1h"],
         ["resume"],

@@ -135,10 +135,13 @@ def _parser() -> argparse.ArgumentParser:
         "--reindex", action="store_true", help="rebuild the mem0 index from the facts in SQLite (no model call)"
     )
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("index", help="update the search index now (runs by itself)")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--no-download", action="store_true")
-    sub.add_parser("consolidate", help="merge duplicates and remove outdated memories now (runs by itself)")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("consolidate", help="merge duplicates and remove outdated memories now (runs by itself)")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("rules", help="rules learned from your corrections, e.g. pnpm instead of npm")
     p.add_argument("action", choices=["list", "enable", "disable", "delete"], nargs="?", default="list")
     p.add_argument("rule_id", nargs="?", type=_rule_id)
@@ -190,7 +193,8 @@ def _parser() -> argparse.ArgumentParser:
     p = sub.add_parser("upgrade", help="update to the newest version, then run `doctor --fix`")
     p.add_argument("--extras", nargs="+", default=[], choices=["semantic", "observer"], help="also install these")
     sub.add_parser("mcp", help="run the MCP server (your agent starts it)")
-    sub.add_parser("paths", help="show where the data is stored")
+    p = sub.add_parser("paths", help="show where the data is stored")
+    p.add_argument("--json", action="store_true")
 
     return parser
 
