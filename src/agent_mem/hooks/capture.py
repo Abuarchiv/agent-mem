@@ -364,6 +364,10 @@ def _on_session_start(conn, config, event, project, project_id, session_id, even
 def _on_prompt(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
     prompt = str(payload.get("prompt") or "")
     previous = _open_turn(conn, session_id)
+    if previous is not None and signals.continues_turn(prompt) and previous["started_at"] <= event.ts:
+        # Claude Code delivers a finished background task as a prompt while the turn runs: it belongs to that turn.
+        conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (int(previous["id"]), event_id))
+        return
     # A prompt replayed from the spool after a later one must not close that later turn, which is still running.
     if previous is not None and previous["started_at"] <= event.ts:
         _close_turn(conn, config, int(previous["id"]), "unknown", event.ts)

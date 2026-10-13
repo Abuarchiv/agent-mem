@@ -297,3 +297,20 @@ def test_the_briefing_shows_an_old_recorded_command_as_it_can_be_run(driver: Dri
         inject._profile_line(conn, project_id)
         == "- Commands that worked here: test: `uv run --with pytest python3 -m pytest -q`"
     )
+
+
+def test_a_background_task_notice_continues_the_running_turn(driver: Driver, conn):
+    """Claude Code delivers a finished background task as a prompt `<task-notification>…` while the turn runs. It
+    closed the user's turn as `unknown` and took over its actions and answer: 30 such turns in live data."""
+    notice = "<task-notification>\n<task-id>b1</task-id>\n<summary>Background command finished</summary>\n</task-notification>"
+    driver.prompt("s1", "Run the server and fix the failing test")
+    driver.bash("s1", "uv run pytest -q", "1 failed", failed=True)
+    driver.prompt("s1", notice)
+    driver.bash("s1", "uv run pytest -q", "2 passed")
+    driver.stop("s1", "Fixed; the tests pass.")
+    turns = [tuple(r) for r in conn.execute("SELECT prompt, outcome, answer FROM turns")]
+    assert turns == [("Run the server and fix the failing test", "ok", "Fixed; the tests pass.")]
+    # with no turn running, the notice starts one: the agent works on it
+    driver.prompt("s1", notice)
+    driver.stop("s1", "Noted.")
+    assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2
