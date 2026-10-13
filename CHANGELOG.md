@@ -6,7 +6,7 @@
 
 - No more backups: the daily copies, `agent-mem backup`, `agent-mem restore`, the pre-migration copy and the `retention.backup_*` settings are gone. Migrations run in one transaction; a damaged database is moved aside as `memory.db.corrupt-<time>` with its WAL. `doctor --fix` (and so `agent-mem upgrade`) deletes the `backups` folder older releases wrote; `purge` does too.
 - The viewer names sessions by their title (or first request) instead of "Claude Code" again and again, and Timeline is now **Sessions**. **Memories** groups memories by the session they came from, preferences and lessons first, in collapsible groups; the agents' own memory files get their own groups. The relevance bars that were all the same, "not used yet" on every card and trust/importance numbers are gone.
-- The **Connections** graph is gone: its concepts told little about the work.
+- The **Connections** graph is gone: its concepts told little about the work. The worker no longer mirrors mem0's concepts into SQLite; the spaCy model stays for mem0's own entity linking.
 - A request's actions show the agent's own description and the command or file, not just "Bash grep". A turn whose command failed is marked "with errors" instead of "failed", because the turn itself usually finished.
 - A `Write` of a script containing `exit 1` was read as a failed command: exit codes are now read from shell output only, in Claude Code, Copilot and OpenCode.
 - The terminal panel at session start opens with the last session and its next steps, shows five recent turns and groups memories by kind with the three newest each (about 30 lines instead of 64).

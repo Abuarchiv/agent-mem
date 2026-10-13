@@ -113,23 +113,6 @@ def test_migration_005_adds_concept_tables_to_a_v4_database(config) -> None:
     conn.close()
 
 
-def test_concept_variants_are_one_concept_and_a_new_key_relinks(conn) -> None:
-    from agent_mem.core import db
-    from agent_mem.memory import store
-    from agent_mem.observe import concepts
-
-    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
-    for body in ("agent_mem stores facts.", "Agent-Mem runs hooks."):
-        store.add_memory(conn, project_id="p", kind="fact", title="", body=body, source="agent", trust="user")
-    words = {"agent_mem stores facts.": "agent_mem", "Agent-Mem runs hooks.": "Agent-Mem"}
-    concepts.link_new(conn, lambda text: [("IDENTIFIER", words[text])])
-    rows = conn.execute("SELECT key, (SELECT COUNT(*) FROM concept_links) FROM concepts").fetchall()
-    assert [tuple(row) for row in rows] == [("agent-mem", 2)]
-    db.set_meta(conn, "concepts.version", "old")
-    assert concepts.link_new(conn, lambda text: [("IDENTIFIER", words[text])]) == 2  # relinked from scratch
-    assert conn.execute("SELECT COUNT(*) FROM concept_links").fetchone()[0] == 2
-
-
 def test_concept_model_downloads_into_the_model_dir_and_checks_its_checksum(config, tmp_path, monkeypatch) -> None:
     import hashlib
     import zipfile
@@ -155,11 +138,3 @@ def test_concept_model_downloads_into_the_model_dir_and_checks_its_checksum(conf
     config.observe.entity_model = "../../etc"
     with pytest.raises(ValueError, match="not a spaCy model name"):
         concepts.download_model(config)
-
-
-def test_a_path_split_by_spacy_is_one_concept() -> None:
-    from agent_mem.observe import concepts
-
-    assert concepts.normalize("docs PLAN.md") == concepts.normalize("docs/PLAN.md") == "docs/plan.md"
-    assert concepts.path_form("tests in test_ui.py") == "tests in test_ui.py"  # a phrase, not a path
-    assert concepts.path_form("Viewer test_ui.py") == "Viewer test_ui.py"

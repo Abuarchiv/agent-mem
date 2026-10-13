@@ -1,8 +1,5 @@
-"""The concepts mem0 links to each memory, mirrored into SQLite for the viewer's graph (docs/PLAN.md B.31).
-
-mem0 extracts them with spaCy when it stores a fact (its entity store). The worker runs the same extractor
-(``mem0.utils.entity_extraction``) over memories it has not linked yet, user notes included, and records the
-concepts per project. Two memories that share a concept are connected through it.
+"""The spaCy model mem0 uses for entity linking and lemmatisation (``observe.entity_model``), downloaded into
+agent-mem's model directory so a reinstall of the tool keeps it.
 """
 
 from __future__ import annotations
@@ -10,34 +7,12 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
-import sqlite3
 import tempfile
 import urllib.request
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
 
-from agent_mem.core import db
 from agent_mem.core.config import Config
-from agent_mem.memory.search import STOPWORDS
-
-BATCH = 200
-_META = "concepts.last_memory_id"
-# Raised when the key changes; the next run then links every memory again (a few seconds for a few hundred).
-VERSION = "3"
-# A concept needs a letter and three characters; numbers, ports and single symbols connect nothing.
-_USEFUL = re.compile(r"(?=.*[^\W\d_]).{3,}")
-
-
-_SHAPE = re.compile(r"\s|[-._/0-9]|[A-Z].*[A-Z]")
-
-
-def specific(surface: str, kind: str, names: set[str]) -> bool:
-    """A concrete thing, as agentmemory asks its model for: code, a quoted term, a compound or named thing.
-    German capitalises every noun, so mem0 calls "Fehler" a proper noun; only spaCy's proper-noun tag in the
-    sentence (``names``) or the word's shape tells "Codex" from "Fehler"."""
-    return kind.lower() in {"identifier", "quoted"} or bool(_SHAPE.search(surface)) or surface.lower() in names
-
 
 # spaCy's packaged models, downloaded into agent-mem's model directory so a reinstall of the tool keeps them.
 SPACY_VERSION = "3.8.0"
@@ -83,99 +58,3 @@ def download_model(config: Config) -> Path:
     if path is None:
         raise ValueError(f"{name}: the download holds no model directory")
     return path
-
-
-def normalize(text: str) -> str:
-    """mem0's own normalisation (``Memory._normalize_entity_text``), plus code quotes removed; "agent_mem",
-    "agent-mem" and "Agent Mem" are one concept."""
-    key = " ".join(path_form(text).lower().split())
-    return key if "/" in key or "." in key else re.sub(r"[\s_-]+", "-", key)
-
-
-_SPLIT_PATH = re.compile(r"(?:[a-z_][\w.-]* ){1,4}[\w.-]+")  # directory names start lowercase
-
-
-def path_form(text: str) -> str:
-    """spaCy hands ``docs/PLAN.md`` back as "docs PLAN.md"; words ending in a file name are a path again."""
-    text = text.strip().strip("`'\"")
-    parts = text.split()
-    linking = {"in", "im", "on", "at", "to", "of", "for", "and", "und", "the", "der", "die", "das", "mit", "von"}
-    if _SPLIT_PATH.fullmatch(text) and re.search(r"\.[A-Za-z]{1,5}$", text) and not linking & set(parts[:-1]):
-        return "/".join(parts)
-    return text
-
-
-def link_new(
-    conn: sqlite3.Connection,
-    extract: Callable[[str], list[tuple[str, str]]] | None = None,
-    base: Callable[[str], str] = str,
-    names: Callable[[str], set[str]] = lambda text: set(),
-) -> int:
-    """Link concepts for up to ``BATCH`` memories newer than the last run. Returns memories processed.
-
-    Without an extractor (spaCy model missing) nothing is marked as done, so the memories are linked once the
-    model is installed."""
-    if extract is None:
-        from mem0.utils import spacy_models
-        from mem0.utils.entity_extraction import extract_entities
-
-        nlp = spacy_models.get_nlp_full()
-        if nlp is None:
-            return 0
-        extract = extract_entities
-        # "Hooks" and "Hook" are one concept: the model's base form of each word.
-        base = lambda text: " ".join(token.lemma_ for token in nlp(text))  # noqa: E731
-        names = lambda text: {token.text.lower() for token in nlp(text) if token.pos_ == "PROPN"}  # noqa: E731
-
-    if db.get_meta(conn, "concepts.version") != VERSION:
-        with db.transaction(conn):
-            conn.execute("DELETE FROM concept_links")
-            conn.execute("DELETE FROM concepts")
-            db.set_meta(conn, _META, "0")
-            db.set_meta(conn, "concepts.version", VERSION)
-    last = int(db.get_meta(conn, _META) or 0)
-    rows = conn.execute(
-        "SELECT id, project_id, title, body FROM memories WHERE id > ? ORDER BY id LIMIT ?", (last, BATCH)
-    ).fetchall()
-    # spaCy first, without a lock: inside the write transaction it held every hook of every session for seconds
-    # (200 memories took 8 s, a hook gives up after 400 ms and its event goes to the spool).
-    found: list[tuple[int, str, list[tuple[str, str, str, int]]]] = []
-    for row in rows:
-        seen: set[str] = set()
-        concepts: list[tuple[str, str, str, int]] = []
-        text_of_memory = f"{row['title'] or ''}\n{row['body'] or ''}".strip()
-        proper = names(text_of_memory)
-        for kind, text in extract(text_of_memory):
-            surface = path_form(text)
-            # Only a single plain word gets its base form; the lemmatizer splits paths ("src -- agent_mem")
-            # and cuts compounds ("SQLite-Such").
-            label = (base(surface) or surface) if surface.isalpha() else surface
-            if label.lower() == surface.lower():
-                label = surface  # same word, keep its spelling ("Viewer", not "viewer")
-            key = normalize(label)
-            # "When" opening an English sentence is tagged as a proper noun; question and filler words never
-            # name a thing.
-            if key in seen or key in STOPWORDS or not _USEFUL.fullmatch(key) or len(key) > 80:
-                continue
-            seen.add(key)
-            concepts.append((key, label, kind.lower(), int(specific(surface, kind, proper))))
-        found.append((int(row["id"]), row["project_id"] or "", concepts))
-    with db.transaction(conn):
-        for memory_id, project_id, concepts in found:
-            if conn.execute("SELECT 1 FROM memories WHERE id = ?", (memory_id,)).fetchone() is None:
-                continue  # forgotten meanwhile
-            for key, label, kind, is_specific in concepts:
-                conn.execute(
-                    "INSERT INTO concepts(project_id, key, label, type, specific) VALUES (?, ?, ?, ?, ?) "
-                    "ON CONFLICT(project_id, key) DO UPDATE SET specific = max(specific, excluded.specific)",
-                    (project_id, key, label, kind, is_specific),
-                )
-                concept = conn.execute(
-                    "SELECT id FROM concepts WHERE project_id = ? AND key = ?", (project_id, key)
-                ).fetchone()[0]
-                conn.execute(
-                    "INSERT OR IGNORE INTO concept_links(concept_id, memory_id) VALUES (?, ?)", (concept, memory_id)
-                )
-        if rows:
-            db.set_meta(conn, _META, str(rows[-1]["id"]))
-    return len(rows)

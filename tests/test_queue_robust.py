@@ -299,39 +299,8 @@ def test_forgetting_a_turn_takes_what_was_drawn_from_it(config: Config, project:
     conn.close()
 
 
-def test_linking_concepts_never_holds_the_write_lock_while_spacy_runs(config: Config):
-    import sqlite3
-
-    from agent_mem.memory import store
-    from agent_mem.observe import concepts
-
-    conn = db.connect(config)
-    store.add_memory(
-        conn, project_id=None, kind="fact", title="Codex runs the Viewer", body="x", source="agent", trust="observer"
-    )
-    blocked: list[bool] = []
-
-    def extract(text: str) -> list[tuple[str, str]]:
-        other = sqlite3.connect(config.db_path, timeout=0, isolation_level=None)  # a hook in another session
-        try:
-            other.execute("BEGIN IMMEDIATE")
-            other.execute("ROLLBACK")
-            blocked.append(False)
-        except sqlite3.OperationalError:
-            blocked.append(True)
-        finally:
-            other.close()
-        return [("PROPER", "Codex"), ("PROPER", "Viewer")]
-
-    assert concepts.link_new(conn, extract, str, lambda text: {"codex", "viewer"}) == 1
-    assert blocked == [False]
-    assert sorted(r[0] for r in conn.execute("SELECT label FROM concepts")) == ["Codex", "Viewer"]
-    conn.close()
-
-
 def test_forgetting_a_memory_removes_concepts_no_other_memory_names(config: Config):
     from agent_mem.memory import store
-    from agent_mem.observe import concepts
 
     conn = db.connect(config)
     secret = store.add_memory(
@@ -340,10 +309,15 @@ def test_forgetting_a_memory_removes_concepts_no_other_memory_names(config: Conf
     store.add_memory(
         conn, project_id=None, kind="fact", title="Codex reads it", body="y", source="agent", trust="observer"
     )
-    words = {"Client Muellerbau pays\nx": ["Muellerbau", "Codex"], "Codex reads it\ny": ["Codex"]}
-    concepts.link_new(
-        conn, lambda text: [("PROPER", w) for w in words[text]], str, lambda text: {"muellerbau", "codex"}
-    )
+    other = conn.execute("SELECT id FROM memories WHERE id != ?", (secret,)).fetchone()[0]
+    # Concepts mirrored by releases with the graph view stay until no memory names them.
+    for key, memory_ids in (("muellerbau", [secret]), ("codex", [secret, other])):
+        concept = conn.execute(
+            "INSERT INTO concepts(project_id, key, label, type) VALUES ('', ?, ?, 'proper') RETURNING id",
+            (key, key.capitalize()),
+        ).fetchone()[0]
+        for memory_id in memory_ids:
+            conn.execute("INSERT INTO concept_links VALUES (?, ?)", (concept, memory_id))
     with db.transaction(conn):
         store.delete_owner(conn, "m", int(secret or 0))
     assert [r[0] for r in conn.execute("SELECT label FROM concepts")] == ["Codex"]  # still named by the other one
