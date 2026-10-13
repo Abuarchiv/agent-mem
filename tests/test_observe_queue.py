@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_mem.core import db
 from agent_mem.core.config import Config
 from agent_mem.hooks import hook
@@ -261,3 +263,57 @@ def test_observer_writes_corrections_the_hook_only_marks_them(config: Config, pr
     _turn(config, project, "s1", "nein, keine lokalen Modelle", "ok")  # bare "keine X" stays with the observer
     assert {r[0] for r in conn.execute("SELECT pattern FROM rules")} == {"npm", "pip"}
     conn.close()
+
+
+def test_claude_reports_its_failures_on_stdout_and_they_are_classified(monkeypatch) -> None:
+    """`claude -p` prints the readable error on stdout; stderr carries only a tag (measured 2026-10-13)."""
+    import sys
+
+    from agent_mem.observe import providers
+
+    script = (
+        "import sys; sys.stdin.read(); "
+        'print("There\'s an issue with the selected model (x). It may not exist or you may not have access to it."); '
+        'print(\'[claude-code:unrecognized_model] {"model":"x"}\', file=sys.stderr); sys.exit(1)'
+    )
+    with pytest.raises(providers.ProviderError) as caught:
+        providers._run([sys.executable, "-c", script], "prompt")
+    assert providers._NO_MODEL.search(str(caught.value))
+
+    limit = 'import sys; sys.stdin.read(); print("You\'ve hit your limit · resets 5pm"); sys.exit(1)'
+    with pytest.raises(providers.ProviderError) as caught:
+        providers._run([sys.executable, "-c", limit], "prompt")
+    assert caught.value.kind == "quota"
+
+
+def test_error_lines_win_over_echoed_prompt_text() -> None:
+    """codex echoes the prompt into stderr; a turn mentioning quotas must not pause the stage."""
+    from agent_mem.observe import providers
+
+    stderr = "user please check the quota code and the login flow\nERROR: stream disconnected before completion"
+    assert providers._error_text("", stderr) == "ERROR: stream disconnected before completion"
+    assert providers.ProviderError(providers._error_text("", stderr)).kind == "other"
+
+
+def test_a_too_long_prompt_is_not_a_quota_pause() -> None:
+    from agent_mem.observe import providers
+
+    assert providers.classify("claude exit 1: maximum context length exceeded") == "other"
+    assert providers.classify("Prompt is too long") == "other"
+    assert providers.classify("rate limit exceeded") == "quota"
+
+
+def test_codex_observer_runs_without_hooks_or_memories(monkeypatch) -> None:
+    from agent_mem.observe import providers
+
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], prompt: str) -> str:
+        calls.append(cmd)
+        Path(cmd[cmd.index("-o") + 1]).write_text("ok")
+        return ""
+
+    monkeypatch.setattr(providers, "_run", run)
+    assert providers.make_llm("codex", "").generate_response([{"role": "user", "content": "x"}]) == "ok"
+    cmd = " ".join(calls[0])
+    assert "--disable hooks" in cmd and "--disable memories" in cmd

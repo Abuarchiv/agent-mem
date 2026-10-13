@@ -33,8 +33,10 @@ class ProviderError(RuntimeError):
         self.kind = kind or classify(message)
 
 
-_QUOTA = re.compile(r"rate.?limit|usage limit|quota|too many requests|\b429\b|limit reached|exceeded", re.I)
+# "exceeded" alone also matches "context length exceeded", which is about the turn, not the plan.
+_QUOTA = re.compile(r"rate.?limit|usage limit|quota|too many requests|\b429\b|limit reached|hit your limit", re.I)
 _LOGIN = re.compile(r"not logged in|unauthori[sz]ed|login|authenticat|\b401\b|\b403\b|invalid api key", re.I)
+_ERROR_LINE = re.compile(r"^\s*(?:ERROR|Error|error)\b.*$", re.M)
 
 
 def classify(message: str) -> str:
@@ -93,9 +95,18 @@ def _run(cmd: list[str], prompt: str) -> str:
                 process.communicate(timeout=5)
             raise ProviderError(f"{cmd[0]}: timeout after {TIMEOUT_S}s") from exc
     if process.returncode != 0:
-        # The tail: codex prints a banner first, the error comes last.
-        raise ProviderError(f"{cmd[0]} exit {process.returncode}: {stderr.strip()[-300:]}")
+        raise ProviderError(f"{cmd[0]} exit {process.returncode}: {_error_text(stdout, stderr)}")
     return stdout
+
+
+def _error_text(stdout: str, stderr: str) -> str:
+    """The part of a failed run that says why. codex echoes the prompt into stderr before its ``ERROR:``
+    line, so explicit error lines win; ``claude -p`` prints its error on stdout and only a tag on stderr
+    (measured 2026-10-13), so otherwise both tails count."""
+    lines = _ERROR_LINE.findall(stderr) or _ERROR_LINE.findall(stdout)
+    if lines:
+        return "\n".join(line.strip() for line in lines[-3:])[-600:]
+    return " | ".join(part.strip()[-300:] for part in (stdout, stderr) if part.strip())
 
 
 def _kill_group(process: subprocess.Popen[str]) -> None:
@@ -110,7 +121,9 @@ def _kill_group(process: subprocess.Popen[str]) -> None:
 
 # A plan without the model, or an older CLI without the flag (``--auto-tier``, ``-c``).
 _NO_MODEL = re.compile(
-    r"model\b.{0,80}\bnot (?:available|supported)|unexpected argument|unknown (?:option|argument)", re.I | re.S
+    r"model\b.{0,80}\bnot (?:available|supported)|unexpected argument|unknown (?:option|argument)"
+    r"|unrecognized_model|issue with the selected model",
+    re.I | re.S,
 )
 
 
@@ -168,6 +181,11 @@ class CodexCliLLM(LLMBase):
                 "exec",
                 "--ephemeral",
                 "--ignore-user-config",
+                # Plugin hooks (claude-mem, agent-mem itself) and Codex memories would capture the bundle.
+                "--disable",
+                "hooks",
+                "--disable",
+                "memories",
                 "-s",
                 "read-only",
                 "--skip-git-repo-check",
