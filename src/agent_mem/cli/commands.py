@@ -159,9 +159,16 @@ def cmd_search(ns: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_show(ns: argparse.Namespace, config: Config) -> int:
+    from agent_mem.memory.store import parse_owner
+
     with _conn(config) as conn:
         print(views.details(conn, ns.ids))
-    return 0
+        owners = [owner for owner in map(parse_owner, ns.ids[:10]) if owner is not None]
+        found = any(
+            conn.execute(f"SELECT 1 FROM {'turns' if kind == 't' else 'memories'} WHERE id = ?", (number,)).fetchone()
+            for kind, number in owners
+        )
+    return 0 if found else 1  # like grep: a script sees that nothing was found
 
 
 def _duration(text: str) -> timedelta:
