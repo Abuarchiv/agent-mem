@@ -322,7 +322,9 @@ class Worker:
                 queue.defer(self.conn, b.turn_ids, wait.until)
                 continue
             except providers.ProviderError as error:
-                if providers.any_left(self.config, b.harness, self.conn):
+                if until := providers.resumes_at(self.config, b.harness, self.conn):
+                    queue.defer(self.conn, b.turn_ids, until)  # the failure paused the stage: wait, keep the attempt
+                elif providers.any_left(self.config, b.harness, self.conn):
                     queue.fail(self.conn, b.turn_ids, str(error))
                     self.stats["failed"] += 1
                 else:
@@ -409,6 +411,9 @@ class Worker:
     def graph_due(self, batches: int = GRAPH_BATCHES) -> None:
         """Read new memories into the graph (``observe/relations.py``), a few batches per run so a backlog
         fills over several runs instead of holding the worker for minutes."""
+        held = db.get_meta(self.conn, "observe.graph_hold")
+        if held and held > timeutil.iso():
+            return
         for _ in range(batches):
             todo = relations.pending(self.conn)
             if not todo or _calls_today(self.conn) >= self.config.observe.daily_limit:
@@ -439,6 +444,8 @@ class Worker:
                     [],
                     f"{type(error).__name__}: {error}"[:300],
                 )
+                # A timed-out batch was sent again on every worker run, after every turn, up to 120 s each.
+                db.set_meta(self.conn, "observe.graph_hold", timeutil.iso(timeutil.now() + timedelta(hours=1)))
                 return
             _record_call(self.conn, name, "graph", time.perf_counter() - started, True, 0, [], None)
             self.stats["graph_relations"] += stored

@@ -454,3 +454,24 @@ def test_copilot_observer_runs_in_a_private_home(monkeypatch) -> None:
     assert providers.make_llm("copilot", "").generate_response([{"role": "user", "content": "x"}]) == "ok"
     ((home, copied),) = seen
     assert copied and Path(home) != own and not Path(home).exists()  # removed after the call
+
+
+def test_a_failed_graph_batch_waits_an_hour(config: Config, monkeypatch) -> None:
+    """A timed-out batch was sent again on every worker run, after every turn, up to 120 s each."""
+    from agent_mem.observe import providers, relations, worker
+
+    monkeypatch.setattr(providers, "available", lambda name: True)
+    monkeypatch.setattr(relations, "pending", lambda conn: [("p1", [])])
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append(1)
+        raise providers.ProviderError("claude: timeout after 120s")
+
+    monkeypatch.setattr(relations, "extract", timeout)
+    conn = db.connect(config)
+    w = worker.Worker(config, conn)
+    for _ in range(3):
+        w.graph_due()
+    assert len(calls) == 1
+    conn.close()

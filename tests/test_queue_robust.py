@@ -465,7 +465,14 @@ def test_a_usage_limit_wrapped_by_mem0_pauses_the_stage(config: Config, project:
                 raise LLMError(f"LLM extraction failed: {error}") from error
 
     worker.Worker(config, conn, adapter=Adapter()).step()  # type: ignore[arg-type]
-    assert providers.paused_until(conn, "claude")
+    until = providers.paused_until(conn, "claude")
+    assert until
+    # The turn that hit the limit waits for the pause too, without spending an attempt.
+    assert tuple(conn.execute("SELECT state, attempts, next_try FROM observe_queue").fetchone()) == (
+        "pending",
+        0,
+        until,
+    )
     conn.close()
 
 
