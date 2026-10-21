@@ -15,16 +15,32 @@ import { spawn } from "node:child_process"
 
 const TIMEOUT_MS = 2000
 
+// Hooks run one after another: a session.start child must have written its row before the
+// chat.message child looks the session up, and both are separate processes.
+let queue: Promise<void> = Promise.resolve()
+
 function callHook(event: string, payload: Record<string, unknown>): void {
-  try {
-    const child = spawn("agent-mem", ["hook", "opencode", event], { stdio: ["pipe", "ignore", "ignore"] })
-    const timer = setTimeout(() => child.kill(), TIMEOUT_MS)
-    child.on("error", () => clearTimeout(timer))
-    child.on("close", () => clearTimeout(timer))
-    child.stdin.end(JSON.stringify({ event, ts: Date.now(), ...payload }))
-  } catch {
-    // never surface memory errors
-  }
+  queue = queue.then(
+    () =>
+      new Promise<void>((resolve) => {
+        try {
+          const child = spawn("agent-mem", ["hook", "opencode", event], { stdio: ["pipe", "ignore", "ignore"] })
+          const done = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+          const timer = setTimeout(() => {
+            child.kill()
+            resolve()
+          }, TIMEOUT_MS)
+          child.on("error", done)
+          child.on("close", done)
+          child.stdin.end(JSON.stringify({ event, ts: Date.now(), ...payload }))
+        } catch {
+          resolve() // never surface memory errors
+        }
+      }),
+  )
 }
 
 type StreamEvent = { type?: string; data?: Record<string, any> }
@@ -33,6 +49,7 @@ const AgentMemPlugin: Plugin = define({
   id: "agent-mem",
   setup(context) {
     const cwd = context.location.directory
+    const started = new Set<string>() // sessions this instance has announced to agent-mem
     const answer = new Map<string, string>() // accumulated assistant text per session
     const toolName = new Map<string, string>() // tool name per call, from session.tool.input.started
     const toolInput = new Map<string, unknown>() // input per call, from session.tool.called
@@ -42,14 +59,14 @@ const AgentMemPlugin: Plugin = define({
       try {
         for await (const event of context.event.subscribe({ signal: controller.signal })) {
           const { type, data } = event as StreamEvent
-          if (!type || !data) continue
-          const eventCwd = data.location?.directory ?? cwd
-          if (eventCwd !== cwd) continue // another plugin instance records this session
+          if (!type || !data?.sessionID) continue
+          if ((data.location?.directory ?? cwd) !== cwd) continue // another plugin instance records this session
+          if (!started.has(data.sessionID)) {
+            // session.created can race plugin setup, so the first event of a session starts it.
+            started.add(data.sessionID)
+            callHook("session.start", { sessionID: data.sessionID, cwd })
+          }
           switch (type) {
-            case "session.created":
-              answer.delete(data.sessionID)
-              callHook("session.start", { sessionID: data.sessionID, cwd })
-              break
             case "session.inbox.enqueued":
               if (data.item?.type === "user") {
                 answer.set(data.sessionID, "") // new turn resets the accumulated answer
