@@ -249,7 +249,18 @@ class OpencodeCliLLM(LLMBase):
     def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
         wants_json = kwargs.get("response_format") is not None
         out = _run_model(list(self.CMD), ["--model", self.model], _flatten(messages, wants_json))
-        return _clean_json(out) if wants_json else out.strip()
+        if not wants_json:
+            return out.strip()
+        # opencode run sometimes echoes the answer twice; the first JSON object in the stream is the answer.
+        start = out.find("{")
+        if start >= 0:
+            try:
+                obj, end = json.JSONDecoder().raw_decode(out[start:])
+                if isinstance(obj, dict):
+                    return out[start : start + end]
+            except ValueError:
+                pass
+        return _clean_json(out)
 
 
 class FakeLLM(LLMBase):

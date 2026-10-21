@@ -139,6 +139,10 @@ def test_opencode_provider_runs_standalone_with_model(monkeypatch) -> None:
     # An empty model falls back to the provider default, not to the CLI default.
     assert providers.make_llm("opencode", "").generate_response(msgs) == "ok"
     assert calls[-1][-1] == "opencode/big-pickle"
+    # opencode run can echo the JSON answer twice; the first object wins.
+    monkeypatch.setattr(providers, "_run", lambda *a, **k: '{"memory": [{"text": "a"}]}\n{"memory": [{"text": "a"}]}\n')
+    doubled = providers.make_llm("opencode").generate_response(msgs, response_format={"type": "json"})
+    assert json.loads(doubled) == {"memory": [{"text": "a"}]}
 
 
 def test_cheapest_model_falls_back_to_cli_default(monkeypatch) -> None:
