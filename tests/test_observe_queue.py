@@ -100,11 +100,11 @@ def test_chain_is_vendor_faithful_by_default(config: Config, monkeypatch) -> Non
     conn = db.connect(config)
     assert providers.chain(config, "claude", conn) == ["claude"]
     assert providers.chain(config, "codex", conn) == ["codex"]
-    assert providers.chain(config, "opencode", conn) == []  # raw stage unless ollama is opted in
+    assert providers.chain(config, "opencode", conn) == ["opencode"]
     config.observe.providers.append("ollama")
-    assert providers.chain(config, "opencode", conn) == ["ollama"]
+    assert providers.chain(config, "opencode", conn) == ["opencode", "ollama"]
     config.observe.cross_vendor = True
-    assert providers.chain(config, "claude", conn) == ["claude", "codex", "copilot", "ollama"]
+    assert providers.chain(config, "claude", conn) == ["opencode", "claude", "codex", "copilot", "ollama"]
     providers.note_failure(conn, config, "claude", providers.ProviderError("claude exit 1: usage limit reached"))
     assert "claude" not in providers.chain(config, "claude", conn)
     assert providers.ProviderError("Not logged in").kind == "login"
@@ -121,6 +121,24 @@ def test_only_installed_cli_handles_its_own_turns(config: Config, monkeypatch) -
     assert providers.chain(config, "claude", conn) == []  # raw, the Claude turn never goes to OpenAI
     assert providers.chain(config, "copilot", conn) == []
     conn.close()
+
+
+def test_opencode_provider_runs_standalone_with_model(monkeypatch) -> None:
+    from agent_mem.observe import providers
+
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -> str:
+        calls.append(cmd)
+        return "ok"
+
+    monkeypatch.setattr(providers, "_run", run)
+    msgs = [{"role": "user", "content": "x"}]
+    assert providers.make_llm("opencode", "opencode/big-pickle").generate_response(msgs) == "ok"
+    assert calls[-1] == ["opencode", "run", "--standalone", "--agent", "plan", "--model", "opencode/big-pickle"]
+    # An empty model falls back to the provider default, not to the CLI default.
+    assert providers.make_llm("opencode", "").generate_response(msgs) == "ok"
+    assert calls[-1][-1] == "opencode/big-pickle"
 
 
 def test_cheapest_model_falls_back_to_cli_default(monkeypatch) -> None:

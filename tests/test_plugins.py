@@ -69,7 +69,8 @@ def test_opencode_plugin_events_match_normalizer():
     source = (PLUGINS / "opencode" / "agent-mem.ts").read_text()
     used = set(re.findall(r'callHook\("([a-z.]+)"', source))
     assert used <= set(opencode._KINDS)
-    assert {"session.start", "chat.message", "tool.before", "tool.after", "session.idle"} <= used
+    # v2 has no pre-tool hook, so tool.before cannot be forwarded from the OpenCode plugin.
+    assert {"session.start", "chat.message", "tool.after", "session.idle"} <= used
 
 
 def test_mcp_configs_start_the_server():

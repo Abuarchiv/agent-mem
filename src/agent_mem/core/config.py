@@ -103,13 +103,15 @@ class Observe:
     enabled: bool = True
     # Provider chain in order; a stage is skipped when its binary is missing, paused or over budget.
     # "ollama" (local model) is opt-in: add it here to use it as a fallback stage.
-    providers: list[str] = field(default_factory=lambda: ["claude", "codex", "copilot"])
+    providers: list[str] = field(default_factory=lambda: ["opencode", "claude", "codex", "copilot"])
     # Default: a turn only goes to the vendor that already saw it, then raw.
     cross_vendor: bool = False
     claude_model: str = "haiku"
     # Cheapest per CLI; a plan without the model falls back to the CLI's default.
     codex_model: str = "gpt-6-luna"
     copilot_model: str = "auto"
+    # The free OpenCode model used for OpenCode turns.
+    opencode_model: str = "opencode/big-pickle"
     ollama_model: str = "qwen3.5:4b-mlx"
     # spaCy model for mem0's entity linking. mem0's default is English;
     # use the language your facts are written in, e.g. "de_core_news_sm". Installed with the tool (README).

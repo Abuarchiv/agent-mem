@@ -189,11 +189,12 @@ Agents use these MCP tools: `mem_search`, `mem_timeline`, `mem_get`, `mem_rememb
   "semantic": {"enabled": true, "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
   "observe": {
     "enabled": true,
-    "providers": ["claude", "codex", "copilot"],
+    "providers": ["opencode", "claude", "codex", "copilot"],
     "cross_vendor": false,
     "claude_model": "haiku",
     "codex_model": "gpt-6-luna",
     "copilot_model": "auto",
+    "opencode_model": "opencode/big-pickle",
     "entity_model": "en_core_web_sm",
     "daily_limit": 300,
     "bundle_turns": 5,
@@ -236,16 +237,17 @@ The model is the CLI you already pay for, started under your login without tools
 
 | Request came from | Model |
 | --- | --- |
+| OpenCode | Big Pickle, free (`opencode run --standalone --agent plan --model opencode/big-pickle`) |
 | Claude Code | Claude Haiku (`claude -p --model haiku`) |
 | Codex | GPT-6-Luna, low effort (`codex exec -m gpt-6-luna`) |
 | Copilot CLI | Auto, efficiency tier, resolves to GPT-6-Luna (`copilot -s --model auto`) |
-| OpenCode, or no CLI found | none; the request is saved word for word |
+| No CLI found | none; the request is saved word for word |
 
 - A request never leaves its vendor: a Claude request is not sent to OpenAI.
 - Each uses the cheapest model of its CLI (as of 2026-10-12). If your plan does not offer it, the CLI's own default is tried once.
 - With only one CLI installed, its requests get facts and the others are saved word for word.
 - A usage limit or a missing login pauses facts for an hour; the requests wait.
-- Ollama can be added as a local fallback with `"observe": {"providers": ["claude", "codex", "copilot", "ollama"]}`. It is off by default because local models put load on the machine.
+- Ollama can be added as a local fallback with `"observe": {"providers": ["opencode", "claude", "codex", "copilot", "ollama"]}`. It is off by default because local models put load on the machine.
 
 ### How ranking learns (no model needed)
 

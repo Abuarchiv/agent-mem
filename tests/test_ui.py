@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -48,7 +49,7 @@ def test_snapshot_holds_turns_actions_and_learning(conn, config: Config, driver:
     agents = {row["harness"]: row for row in snapshot["agents"]}
     assert set(agents) == {"claude", "codex", "copilot", "opencode"}
     assert all(row["enabled"] and "connected" in row and "facts_ok_today" in row for row in agents.values())
-    assert agents["opencode"]["stage"] is None  # its turns are kept as written unless ollama is opted in
+    assert agents["opencode"]["stage"] == ("opencode" if shutil.which("opencode") else None)
     # what the hooks gave the agent, per session: a second session's prompt recalls the first session's fix
     driver.start("s2")
     driver.prompt("s2", "the failing search tests again, what was the ranking fix")

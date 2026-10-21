@@ -51,8 +51,8 @@ def classify(message: str) -> str:
 
 
 # Which stage a harness's turns may use without leaving their vendor (cross_vendor=False).
-VENDOR_OF_HARNESS = {"claude": "claude", "codex": "codex", "copilot": "copilot"}
-BINARY = {"claude": "claude", "codex": "codex", "copilot": "copilot", "ollama": "ollama"}
+VENDOR_OF_HARNESS = {"claude": "claude", "codex": "codex", "copilot": "copilot", "opencode": "opencode"}
+BINARY = {"claude": "claude", "codex": "codex", "copilot": "copilot", "opencode": "opencode", "ollama": "ollama"}
 
 
 def _flatten(messages: list[dict[str, Any]], wants_json: bool) -> str:
@@ -234,6 +234,24 @@ class CopilotCliLLM(LLMBase):
         return _clean_json(out) if wants_json else out.strip()
 
 
+class OpencodeCliLLM(LLMBase):
+    """Stage for OpenCode turns: ``opencode run`` with the configured model, e.g. the free
+    ``opencode/big-pickle``. ``--standalone`` uses a private server, so the run does not attach to the
+    shared service; ``AGENT_MEM_INTERNAL`` (set by ``_run``) makes agent-mem's own OpenCode plugin skip it.
+    ``--agent plan`` keeps the extractor read-only."""
+
+    CMD: ClassVar[tuple[str, ...]] = ("opencode", "run", "--standalone", "--agent", "plan")
+
+    def __init__(self, config: BaseLlmConfig | None = None) -> None:
+        super().__init__(config or BaseLlmConfig(model="opencode/big-pickle"))
+        self.model = str(self.config.model or "opencode/big-pickle")
+
+    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
+        wants_json = kwargs.get("response_format") is not None
+        out = _run_model(list(self.CMD), ["--model", self.model], _flatten(messages, wants_json))
+        return _clean_json(out) if wants_json else out.strip()
+
+
 class FakeLLM(LLMBase):
     """Test double. Reads canned answers from the file named in ``AGENT_MEM_FAKE_LLM`` (JSON list,
     consumed in order, last one repeats). Without the file it extracts one fact per user message."""
@@ -258,7 +276,7 @@ class FakeLLM(LLMBase):
 
 
 def make_llm(kind: str, model: str | None = None) -> LLMBase:
-    """``claude``, ``codex`` or ``copilot`` (harness binaries), ``ollama`` (local) or ``fake`` (tests)."""
+    """``claude``, ``codex``, ``copilot`` or ``opencode`` (harness binaries), ``ollama`` (local) or ``fake`` (tests)."""
     if kind == "fake":
         return FakeLLM()
     if kind == "claude":
@@ -267,6 +285,8 @@ def make_llm(kind: str, model: str | None = None) -> LLMBase:
         return CodexCliLLM(BaseLlmConfig(model=model or ""))
     if kind == "copilot":
         return CopilotCliLLM(BaseLlmConfig(model=model or ""))
+    if kind == "opencode":
+        return OpencodeCliLLM(BaseLlmConfig(model=model or ""))
     if kind == "ollama":
         from mem0.llms.ollama import OllamaLLM
 
@@ -282,6 +302,7 @@ def model_for(config: Any, name: str) -> str | None:
         "claude": config.observe.claude_model,
         "codex": config.observe.codex_model,
         "copilot": config.observe.copilot_model,
+        "opencode": config.observe.opencode_model,
         "ollama": config.observe.ollama_model,
     }.get(name) or None
 

@@ -472,7 +472,7 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
             paused = f", not logged in, retry at {until}" if login else f", usage limit, paused until {until}"
             logged_out += [name] if login else []
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
-    remedy = 'Install Claude Code, Codex or Copilot CLI, or add "ollama" to observe.providers.'
+    remedy = 'Install Claude Code, Codex, Copilot CLI or OpenCode, or add "ollama" to observe.providers.'
     if logged_out:
         remedy = f"Start {' and '.join(f'`{name}`' for name in logged_out)} once and log in."
     return Check(
