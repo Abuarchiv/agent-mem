@@ -77,10 +77,10 @@ RUN uv tool install "agent-mem[semantic,observer] @ git+https://github.com/Abuar
 ```
 
 ```sh
-docker run -it -v agent-mem-data:/home/node/.agent-mem <your-image>
+docker run -it -v agent-mem-data:/home/node/.agent-mem -v claude-home:/home/node/.claude <your-image>
 ```
 
-- Log in to the agent inside the container once; agent-mem writes facts through that login.
+- Log in to the agent inside the container once; agent-mem writes facts through that login. The `claude-home` volume keeps the login and the hooks across restarts.
 - The page from `agent-mem view` listens on 127.0.0.1 inside the container, so open it there, not from the host.
 
 ### Update
