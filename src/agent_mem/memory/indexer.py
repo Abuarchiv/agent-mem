@@ -180,6 +180,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     with db.transaction(conn):
         stats["retired_unindexed"] = store.drop_retired_keys(conn)
         stats["commits_backfilled"] = store.backfill_commits(conn)
+        stats["defines_backfilled"] = store.backfill_defines(conn)
     # Outside the transaction: it runs git (about 25 ms per repository), and hooks wait 150 ms for the write lock.
     stats["identity_aliases"] = identity.record_aliases(conn)
     _mark_guards(conn, config)

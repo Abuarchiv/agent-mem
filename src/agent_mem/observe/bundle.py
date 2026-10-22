@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -41,33 +40,17 @@ class Bundle:
         return sum(len(m["content"]) for m in self.messages)
 
 
-# Functions and classes a change writes: Python, JavaScript/TypeScript (also arrow functions), Go, Rust.
-_DEFINES = re.compile(
-    r"\b(?:def|class|function|func|fn)\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w{2,})"
-    r"|\b(?:const|let|var)\s+([A-Za-z_]\w{2,})\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>"
-)
-
-
 def _defines_line(payload: dict, files: list[str]) -> str | None:
-    """The names a change defines, new ones first ("[edit] ui/app.js: defines drawEdges, drawNodes"): the change
-    itself stays out, but "which function does X" is answered by these names. Scripts that rewrite files count."""
-    category = payload.get("category")
-    if payload.get("failed") or category not in {"edit", "shell"} or any(store.scratch_path(f) for f in files):
+    """The names a change defines ("[edit] ui/app.js: defines drawEdges, drawNodes"): the change itself stays out,
+    but "which function does X" is answered by these names. Scripts that rewrite files count."""
+    category = str(payload.get("category") or "")
+    if payload.get("failed") or any(store.scratch_path(f) for f in files):
         return None
     try:
         tool_input = json.loads(payload.get("input") or "null")
     except ValueError:
         tool_input = payload.get("input")
-    if isinstance(tool_input, dict):
-        before = str(tool_input.get("old_string") or tool_input.get("oldString") or "")
-        text = " ".join(str(v) for k, v in tool_input.items() if k not in {"old_string", "oldString"})
-    else:
-        before, text = "", str(tool_input or "")
-    if category == "shell" and "<<" not in text and "write_text" not in text:
-        return None  # only a script that writes code defines something
-    old = {a or b for a, b in _DEFINES.findall(before)}
-    names = list(dict.fromkeys(a or b for a, b in _DEFINES.findall(text)))
-    names = [n for n in names if n not in old] + [n for n in names if n in old]
+    names = signals.defined_names(category, tool_input)
     if not names:
         return None
     where = f"[edit] {files[0]}" if category == "edit" and files else "[script]"

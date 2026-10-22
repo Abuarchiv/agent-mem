@@ -99,6 +99,7 @@ def index_turn(conn: sqlite3.Connection, turn_id: int) -> None:
     commands = _json_list(turn["commands_json"])
     errors = _json_list(turn["errors_json"])
     commits = _json_list(turn["commits_json"])
+    defines = _json_list(turn["defines_json"])
     head = f"[{turn['harness']}{' · ' + turn['branch'] if turn['branch'] else ''} · {timeutil.day(turn['started_at'])}]"
     parts = [head, turn["prompt"], turn["answer"]]
     if files:
@@ -109,6 +110,8 @@ def index_turn(conn: sqlite3.Connection, turn_id: int) -> None:
         parts.append("errors: " + " | ".join(errors))
     if commits:
         parts.append("commits: " + " | ".join(commits))
+    if defines:
+        parts.append("defines: " + ", ".join(defines))
     set_search_key(conn, "t", turn_id, "\n".join(p for p in parts if p))
 
     project_id = turn["project_id"]
@@ -365,6 +368,40 @@ def learn_rule(
             ).fetchall():
                 if str(old["dedupe_key"] or "").startswith(prefix):
                     supersede(conn, int(old["id"]), new_id)
+
+
+def backfill_defines(conn: sqlite3.Connection) -> int:
+    """Once per database: the names the changes of turns recorded before ``turns.defines_json`` existed defined, read
+    from the tool input their events still hold. Returns the turns updated."""
+    if db.get_meta(conn, "defines_backfilled"):
+        return 0
+    found: dict[int, list[str]] = {}
+    for turn_id, payload in conn.execute(
+        "SELECT e.turn_id, e.payload FROM events e JOIN turns t ON t.id = e.turn_id WHERE e.kind = 'tool' "
+        "AND e.trimmed = 0 AND t.defines_json = '[]' ORDER BY e.id"
+    ).fetchall():
+        data = json.loads(payload)
+        if data.get("failed") or data.get("category") not in {"edit", "shell"}:
+            continue
+        try:
+            tool_input = json.loads(data.get("input") or "null")
+        except ValueError:
+            tool_input = data.get("input")
+        files = json.loads(conn.execute("SELECT files_json FROM turns WHERE id = ?", (turn_id,)).fetchone()[0])
+        if data.get("category") == "edit" and any(scratch_path(f) for f in files):
+            continue
+        names = found.setdefault(int(turn_id), [])
+        names += [n for n in signals.defined_names(data["category"], tool_input)[:12] if n not in names]
+    updated = 0
+    for turn_id, names in found.items():
+        if not names:
+            continue
+        conn.execute("UPDATE turns SET defines_json = ? WHERE id = ?", (json.dumps(names[-30:]), turn_id))
+        updated += 1
+        if conn.execute("SELECT indexed_at FROM turns WHERE id = ?", (turn_id,)).fetchone()[0]:
+            index_turn(conn, turn_id)
+    db.set_meta(conn, "defines_backfilled", timeutil.iso())
+    return updated
 
 
 def backfill_commits(conn: sqlite3.Connection) -> int:

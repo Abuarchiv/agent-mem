@@ -587,6 +587,28 @@ def commits_made(output: str | None, command: str | None = None) -> list[str]:
     return [f"{sha} {subject.strip()[:160]}" for sha, subject in found][:5]
 
 
+# Functions and classes a change writes: Python, JavaScript/TypeScript (also arrow functions), Go, Rust.
+_DEFINES = re.compile(
+    r"\b(?:def|class|function|func|fn)\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w{2,})"
+    r"|\b(?:const|let|var)\s+([A-Za-z_]\w{2,})\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>"
+)
+
+
+def defined_names(category: str, tool_input: Any) -> list[str]:
+    """The names an edit or a file-writing script defines, new ones first: "which function does X" is answered by
+    them, and they are only in the change itself. The replaced text's names count last."""
+    if isinstance(tool_input, dict):
+        before = str(tool_input.get("old_string") or tool_input.get("oldString") or "")
+        text = " ".join(str(v) for k, v in tool_input.items() if k not in {"old_string", "oldString"})
+    else:
+        before, text = "", str(tool_input or "")
+    if category not in {"edit", "shell"} or (category == "shell" and "<<" not in text and "write_text" not in text):
+        return []
+    old = {a or b for a, b in _DEFINES.findall(before)}
+    names = list(dict.fromkeys(a or b for a, b in _DEFINES.findall(text)))
+    return [n for n in names if n not in old] + [n for n in names if n in old]
+
+
 def looks_like_error(line: str) -> bool:
     """True when the line names an error; a bare non-zero exit (grep without match, `| head`) does not."""
     return bool(_ERROR_START.search(line)) and not _ERROR_FRAME.match(line.strip())

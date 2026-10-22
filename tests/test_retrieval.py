@@ -469,3 +469,31 @@ def test_a_name_only_in_a_tool_output_is_found_by_the_agents_search(driver: Driv
     # The hook's path stays an index lookup: no scan of the events within its deadline.
     hits = search.search(conn, config, search.Query(text=question, project_id=_pid(conn)))
     assert all(not h.passage for h in hits)
+
+
+def test_the_functions_a_change_defined_find_its_turn(driver: Driver, conn, config: Config):
+    """Which functions did the graph drawing get split into? The names are only in the change itself."""
+    driver.prompt("s1", "teile das Zeichnen im Viewer auf")
+    driver.send(
+        "s1",
+        "tool",
+        tool="Edit",
+        tool_use_id="e1",
+        tool_input={
+            "file_path": f"{driver.cwd}/ui/app.js",
+            "old_string": "const draw = () => {",
+            "new_string": "const drawEdges = (focus) => {\n};\nconst drawNodes = (focus) => {\n};\nconst draw = () => {",
+        },
+        tool_output="ok",
+        raw_kind="PostToolUse",
+    )
+    driver.stop("s1", "Aufgeteilt.")
+    turn = conn.execute("SELECT id, defines_json FROM turns").fetchone()
+    assert json.loads(turn[1]) == ["drawEdges", "drawNodes", "draw"]
+    store.index_turn(conn, turn[0])
+    hits = semantic.Retriever(conn, config).search("Wo steht drawEdges?", _pid(conn), record_shown=False)
+    assert hits and "defines drawEdges" in inject.hit_line(hits[0])
+    # A turn recorded before the column existed gets its names once, from the input its events still hold.
+    conn.execute("UPDATE turns SET defines_json = '[]'")
+    assert store.backfill_defines(conn) == 1 and store.backfill_defines(conn) == 0
+    assert "drawEdges" in conn.execute("SELECT defines_json FROM turns").fetchone()[0]

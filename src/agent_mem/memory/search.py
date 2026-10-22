@@ -368,6 +368,7 @@ class Hit:
     importance: float = 0.1
     files: list[str] = field(default_factory=list)
     commits: list[str] = field(default_factory=list)  # "hash subject" of the commits a turn made
+    defines: list[str] = field(default_factory=list)  # functions and classes its changes defined
     coverage: float = 0.0
     matched_terms: int = 0
     origin: str | None = None
@@ -515,7 +516,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
         placeholders = ",".join("?" for _ in turn_ids)
         for row in conn.execute(
             f"SELECT t.id, t.session_id, t.project_id, t.started_at, t.prompt, t.answer, t.importance, t.trust, "
-            f"t.files_json, t.commands_json, t.errors_json, t.commits_json, t.outcome, s.harness FROM turns t "
+            f"t.files_json, t.commands_json, t.errors_json, t.commits_json, t.defines_json, t.outcome, s.harness FROM turns t "
             f"JOIN sessions s ON s.id = t.session_id WHERE t.id IN ({placeholders})",
             turn_ids,
         ):
@@ -531,6 +532,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                     " ".join(files),
                     " ".join(json.loads(row["errors_json"] or "[]")),
                     " ".join(commits),
+                    " ".join(json.loads(row["defines_json"] or "[]")),
                 )
                 if part
             )
@@ -550,6 +552,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                 importance=row["importance"],
                 files=files,
                 commits=commits,
+                defines=json.loads(row["defines_json"] or "[]"),
             )
     if mem_ids:
         placeholders = ",".join("?" for _ in mem_ids)
