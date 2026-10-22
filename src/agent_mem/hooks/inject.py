@@ -436,9 +436,10 @@ def prompt_hints(
         if len(part) >= 3:
             prompt = re.sub(rf"\b{re.escape(part)}\b", " ", prompt, flags=re.IGNORECASE)
     terms = search.query_terms(prompt)
-    # One plain word is an instruction ("mache weiter", "push", "verbessere noch mehr"), not a question: it matched
-    # some old turn with the same word in 20 of 39 such prompts. One code name ("drawEdges", "db.py") still asks.
-    if not terms or (len(terms) == 1 and not _CODE_WORD.search(prompt)):
+    # One plain word without a question mark is an instruction ("mache weiter", "push", "verbessere noch mehr"): it
+    # matched some old turn with the same word in 20 of 39 such prompts. "Wo liegt das Dockerfile?" or one code
+    # name ("drawEdges", "db.py") still asks.
+    if not terms or (len(terms) == 1 and "?" not in prompt and not _CODE_WORD.search(prompt)):
         return None
     query = search.Query(
         text=prompt,

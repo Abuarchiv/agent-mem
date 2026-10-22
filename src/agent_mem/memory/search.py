@@ -699,12 +699,12 @@ RARE_NAME_TURNS, PASSAGE_CHARS = 25, 400
 
 
 def output_candidates(
-    conn: sqlite3.Connection, projects: list[str | None], terms: Sequence[str]
+    conn: sqlite3.Connection, projects: list[str | None], terms: Sequence[str], everywhere: bool = False
 ) -> tuple[list[Owner], dict[Owner, str]]:
     """Turns whose tool output names a file or identifier of the question, with the passage around it. A name in
     dozens of turns (inject.py) says nothing about which one; a rare one (006_work_tokens.sql) is the question.
     Output from outside (web pages) stays out: it is shown verbatim."""
-    where, params = _in("t.project_id", projects)
+    where, params = ("1 = 1", ()) if everywhere else _in("t.project_id", projects)
     owners: list[Owner] = []
     passages: dict[Owner, str] = {}
     # A version (0.162) is in every banner and changelog of its tool: names need a letter.
@@ -750,7 +750,7 @@ def search(
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
     passages: dict[Owner, str] = {}
     if tool_outputs:
-        lists["output"], passages = output_candidates(conn, projects, terms)
+        lists["output"], passages = output_candidates(conn, projects, terms, query.include_other_projects)
     # The graph says how strongly a hit is tied to the files and commands the question names. It only reorders the
     # hits the text and the vectors found: as a list of its own in the fusion it would outvote exact matches with
     # whatever touched such a file last.
@@ -764,7 +764,10 @@ def search(
     if not fused:
         return []
     hits = load_hits(conn, list(fused))
-    max_rrf = len([name for name, owners in lists.items() if owners]) / (config.retrieval.rrf_k + 1)
+    # The output list only joins when a question names a rare file: counted here, it would lower every other hit's
+    # score below the gate whenever some tool happened to print that name.
+    counted = len([name for name, owners in lists.items() if owners and name != "output"]) or 1
+    max_rrf = counted / (config.retrieval.rrf_k + 1)
     candidates: list[Hit] = []
     for owner, (score, sources) in fused.items():
         hit = hits.get(owner)

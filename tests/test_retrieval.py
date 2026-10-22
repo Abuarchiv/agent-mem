@@ -526,3 +526,28 @@ def test_a_one_word_instruction_gets_no_memories_but_a_code_name_does(driver: Dr
     for prompt in ("mache weiter", "push", "verbessere noch mehr"):
         assert inject.prompt_hints(conn, config, pid, "s2", prompt, "claude") is None, prompt
     assert inject.prompt_hints(conn, config, pid, "s2", "parser.py", "claude") is not None
+
+
+def test_a_rare_tool_output_list_does_not_lower_the_other_hits(driver: Driver, conn, config: Config):
+    """The output list joins only when some tool printed the asked file: it must not move every score."""
+    driver.prompt("s1", "pytest.ini Konfiguration für die Einblendung prüfen")
+    driver.stop("s1", "Konfiguration der Einblendung geprüft.")
+    driver.prompt("s2", "zeige die Dateien")
+    driver.bash("s2", "ls", "pytest.ini\nsetup.cfg")
+    driver.stop("s2", "Gelistet.")
+    for row in conn.execute("SELECT id FROM turns").fetchall():
+        store.index_turn(conn, row[0])
+    query = search.Query(text="pytest.ini Konfiguration Einblendung", project_id=_pid(conn))
+    plain = {h.owner: h.score for h in search.search(conn, config, query)}
+    with_output = {h.owner: h.score for h in search.search(conn, config, query, tool_outputs=True)}
+    first = next(o for o in plain if o[0] == "t")
+    assert with_output[first] >= plain[first]
+
+
+def test_a_one_word_question_still_asks(driver: Driver, conn, config: Config):
+    driver.prompt("s1", "lege ein Dockerfile an")
+    driver.edit("s1", "Dockerfile")
+    driver.stop("s1", "Dockerfile angelegt.")
+    store.index_turn(conn, conn.execute("SELECT id FROM turns").fetchone()[0])
+    assert inject.prompt_hints(conn, config, _pid(conn), "s2", "Dockerfile?", "claude") is not None
+    assert inject.prompt_hints(conn, config, _pid(conn), "s3", "Dockerfile", "claude") is None  # an instruction
