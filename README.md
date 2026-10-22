@@ -62,6 +62,7 @@ agent-mem is not on PyPI. Always install it from the repository, never by its ba
 - The install script installs uv first and, on a fresh machine, runs `agent-mem setup all --write`.
 - The marketplace plugin only registers the hooks. Install the `agent-mem` command first with `uv tool install` and skip `setup --write`, or every hook fails with "command not found".
 - `setup --write` writes the **full path** of `agent-mem` into each agent's settings, so sessions started from an editor find it too.
+- There is no Docker image. Your agents start `agent-mem` on every request, it reads facts through the agent's own login, and the page only answers on 127.0.0.1. Inside a container all three would break. The install script already brings its own Python through uv.
 
 ### Update
 
