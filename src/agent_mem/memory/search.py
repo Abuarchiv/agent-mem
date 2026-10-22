@@ -491,12 +491,19 @@ def owners_for_entities(conn: sqlite3.Connection, weights: dict[int, float], lim
     return ranked[:limit]
 
 
+# A vector hit counts half: at full weight loosely related facts pushed the turn that names the asked file or
+# command out of the top five (real coding questions: 34 of 56 with vectors, 36 without; at half weight 36, with
+# two paraphrased questions found that words alone miss).
+LIST_WEIGHTS = {"vector": 0.5}
+
+
 def rrf(lists: dict[str, list[Owner]], k: int) -> dict[Owner, tuple[float, set[str]]]:
     fused: dict[Owner, tuple[float, set[str]]] = {}
     for name, owners in lists.items():
+        weight = LIST_WEIGHTS.get(name, 1.0)
         for rank, owner in enumerate(owners):
             score, sources = fused.get(owner, (0.0, set()))
-            fused[owner] = (score + 1.0 / (k + rank + 1), sources | {name})
+            fused[owner] = (score + weight / (k + rank + 1), sources | {name})
     return fused
 
 

@@ -56,9 +56,9 @@ class Retrieval:
     max_per_session: int = 3
     rrf_k: int = 60
     current_project_boost: float = 1.2
-    # Cosine similarity floor for vector candidates, calibrated per embedder:
-    # MiniLM-L12-v2 0.3, multilingual-e5-small 0.78.
-    min_vector_score: float = 0.3
+    # Cosine similarity floor for vector candidates, calibrated per embedder: multilingual MiniLM-L12-v2 0.45
+    # (questions about other work reach 0.3–0.45; LongMemEval-40 unchanged from 0.3), multilingual-e5-small 0.78.
+    min_vector_score: float = 0.45
 
 
 @dataclass
