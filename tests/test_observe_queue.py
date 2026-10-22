@@ -549,3 +549,14 @@ def test_the_extractor_learns_which_names_a_change_defines(driver, conn, config:
     assert "[edit] ui/app.js: defines drawEdges, drawNodes" in text
     assert "defines _claude_usage" in text
     assert "size" not in text.split("defines", 1)[1].split("\n")[0]  # a constant is not a function
+
+
+def test_every_cli_answer_keeps_its_first_json_object() -> None:
+    """`claude -p` and `opencode run` sometimes print more after the answer; the first object is the answer."""
+    from agent_mem.observe import providers
+
+    assert providers._clean_json('```json\n{"facts": ["a"]}\n```') == '{"facts": ["a"]}'
+    assert providers._clean_json('{"facts": ["a"]}\n\n{"facts": ["a"]}') == '{"facts": ["a"]}'
+    assert providers._clean_json('Here it is: {"facts": []} done') == '{"facts": []}'
+    with pytest.raises(ValueError):
+        providers._clean_json("no json at all")

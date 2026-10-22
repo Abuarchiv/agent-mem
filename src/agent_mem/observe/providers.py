@@ -65,7 +65,15 @@ def _flatten(messages: list[dict[str, Any]], wants_json: bool) -> str:
 
 
 def _clean_json(text: str) -> str:
+    """The answer's JSON object. CLIs sometimes add something after it (``claude -p`` a second line, ``opencode
+    run`` the whole answer again) or prose before it: the first object in the stream is the answer."""
     text = _FENCE.sub("", text.strip()).strip()
+    start = text.find("{")
+    if start >= 0:
+        with contextlib.suppress(ValueError):
+            obj, end = json.JSONDecoder().raw_decode(text[start:])
+            if isinstance(obj, dict):
+                return text[start : start + end]
     json.loads(text)  # raises on invalid output; mem0 handles the exception and keeps the turn
     return text
 
@@ -248,18 +256,7 @@ class OpencodeCliLLM(LLMBase):
     def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
         wants_json = kwargs.get("response_format") is not None
         out = _run_model(list(self.CMD), ["--model", self.model], _flatten(messages, wants_json))
-        if not wants_json:
-            return out.strip()
-        # opencode run sometimes echoes the answer twice; the first JSON object in the stream is the answer.
-        start = out.find("{")
-        if start >= 0:
-            try:
-                obj, end = json.JSONDecoder().raw_decode(out[start:])
-                if isinstance(obj, dict):
-                    return out[start : start + end]
-            except ValueError:
-                pass
-        return _clean_json(out)
+        return _clean_json(out) if wants_json else out.strip()
 
 
 class FakeLLM(LLMBase):
