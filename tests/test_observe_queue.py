@@ -560,3 +560,45 @@ def test_every_cli_answer_keeps_its_first_json_object() -> None:
     assert providers._clean_json('Here it is: {"facts": []} done') == '{"facts": []}'
     with pytest.raises(ValueError):
         providers._clean_json("no json at all")
+
+
+def test_mirror_drops_notes_about_the_extraction_and_line_numbers(config: Config, project: Path) -> None:
+    """Line numbers are wrong after the next change; a note about the extraction itself is no project fact."""
+    from agent_mem.observe import bundle, worker
+    from agent_mem.observe.mem0_adapter import Fact
+
+    _turn(config, project, "s1", "Kannst du agent-mem verbessern", "Done.")
+    conn = db.connect(config)
+    turn, project_id = conn.execute("SELECT id, project_id FROM turns").fetchone()
+    b = bundle.Bundle(turn_ids=[turn], session_id="s", project_id=project_id, harness="opencode", messages=[])
+    facts = [
+        Fact(id="a", text="[fact] `agent-mem purge --id` (`cli/commands.py:302-311`) löscht eine Erinnerung.", metadata={}),
+        Fact(id="b", text="[rule] Die Eingabe ist eine allgemeine Arbeitsanweisung, hier wird nichts Neues festgehalten.", metadata={}),
+    ]  # fmt: skip
+    assert len(worker.mirror(conn, config, b, facts)) == 1
+    body = conn.execute("SELECT body FROM memories WHERE source = 'agent'").fetchone()[0]
+    assert body == "`agent-mem purge --id` (`cli/commands.py`) löscht eine Erinnerung."
+    conn.close()
+
+
+def test_stored_observer_facts_are_cleaned_once(config: Config, project: Path) -> None:
+    from agent_mem.memory import store
+
+    _turn(config, project, "s1", "prüfe purge", "Done.")
+    conn = db.connect(config)
+    project_id = conn.execute("SELECT project_id FROM turns").fetchone()[0]
+
+    def fact(body: str) -> int:
+        memory_id = store.add_memory(
+            conn, project_id=project_id, kind="fact", title=body, body=body, source="agent", trust="observer"
+        )
+        assert memory_id
+        return memory_id
+
+    lines = fact("`purge --id` steht in `cli/commands.py:302-311`.")
+    note = fact("Die Eingabe ist allgemein, hier wird nichts Neues festgehalten.")
+    assert store.clean_observer_facts(conn) == 2 and store.clean_observer_facts(conn) == 0
+    (body,) = conn.execute("SELECT body FROM memories WHERE id = ?", (lines,)).fetchone()
+    assert body == "`purge --id` steht in `cli/commands.py`."
+    assert conn.execute("SELECT invalid_at FROM memories WHERE id = ?", (note,)).fetchone()[0]
+    conn.close()

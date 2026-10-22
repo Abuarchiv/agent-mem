@@ -370,6 +370,31 @@ def learn_rule(
                     supersede(conn, int(old["id"]), new_id)
 
 
+def clean_observer_facts(conn: sqlite3.Connection) -> int:
+    """Once per database: facts the observer wrote before ``worker.mirror`` filtered them lose their line numbers,
+    and its notes about the extraction itself are retired. Returns the facts changed."""
+    if db.get_meta(conn, "observer_facts_cleaned"):
+        return 0
+    changed = 0
+    for row in conn.execute(
+        "SELECT id, kind, title, body FROM memories WHERE source = 'agent' AND trust = 'observer' AND invalid_at IS NULL"
+    ).fetchall():
+        if signals.about_extraction(row["body"]):
+            supersede(conn, int(row["id"]), None)
+            changed += 1
+            continue
+        body = signals.without_line_refs(row["body"])
+        if body == row["body"]:
+            continue
+        title = signals.without_line_refs(row["title"])
+        conn.execute("UPDATE memories SET title = ?, body = ? WHERE id = ?", (title, body, row["id"]))
+        set_search_key(conn, "m", int(row["id"]), f"{row['kind']}: {title}\n{body}")
+        conn.execute("DELETE FROM vectors WHERE owner_type = 'm' AND owner_id = ?", (row["id"],))  # embedded anew
+        changed += 1
+    db.set_meta(conn, "observer_facts_cleaned", timeutil.iso())
+    return changed
+
+
 def backfill_defines(conn: sqlite3.Connection) -> int:
     """Once per database: the names the changes of turns recorded before ``turns.defines_json`` existed defined, read
     from the tool input their events still hold. Returns the turns updated."""

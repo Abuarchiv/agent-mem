@@ -29,6 +29,10 @@ Do not record:
 - The same memory twice: if the input repeats something, record it once.
 - File contents, code snippets, stack traces or raw tool output copied as they are. State in one
   sentence what they showed and name the file or command.
+- Line numbers ("`cli/commands.py:302-311`"): they are wrong after the next change. Name the file and
+  the function instead.
+- Notes about this extraction itself ("nothing new to record here", "the input is a general
+  instruction"): when nothing matters later, return no memory.
 - Secrets, tokens, passwords or keys, even if they appear in the text.
 
 Start every memory with exactly one tag: [decision] for a choice and its reason, [rule] for how the

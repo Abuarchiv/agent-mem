@@ -129,6 +129,9 @@ def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: 
     ids = []
     for fact in facts:
         kind, text = split_tag(fact.text)
+        if signals.about_extraction(text):
+            continue
+        text = signals.without_line_refs(text)
         title = signals.headline(text, 160) if text else "fact"
         memory_id = store.add_memory(
             conn,

@@ -609,6 +609,23 @@ def defined_names(category: str, tool_input: Any) -> list[str]:
     return [n for n in names if n not in old] + [n for n in names if n in old]
 
 
+# A line reference is stale after the next change; the file name stays ("`cli/commands.py:302-311`" -> path).
+_LINE_REF = re.compile(r"(\.[A-Za-z]{1,4}):\d+(?:[-–]\d+)?(?:[,/]\d+(?:[-–]\d+)?)*")
+# The extraction model talking about its own task instead of the project ("nothing new is recorded here").
+_ABOUT_EXTRACTION = re.compile(
+    r"(?i)\b(memory[- ]extra\w*|memory-extraktion|nichts neues festgehalten|keine neuen dauerhaften|"
+    r"nothing (new )?(to|is|will be) (record|remember|stor)\w*|no (new )?(durable|lasting) facts?)\b"
+)
+
+
+def without_line_refs(text: str) -> str:
+    return _LINE_REF.sub(r"\1", text)
+
+
+def about_extraction(text: str) -> bool:
+    return bool(_ABOUT_EXTRACTION.search(text))
+
+
 def looks_like_error(line: str) -> bool:
     """True when the line names an error; a bare non-zero exit (grep without match, `| head`) does not."""
     return bool(_ERROR_START.search(line)) and not _ERROR_FRAME.match(line.strip())
