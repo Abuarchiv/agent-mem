@@ -62,7 +62,26 @@ agent-mem is not on PyPI. Always install it from the repository, never by its ba
 - The install script installs uv first and, on a fresh machine, runs `agent-mem setup all --write`.
 - The marketplace plugin only registers the hooks. Install the `agent-mem` command first with `uv tool install` and skip `setup --write`, or every hook fails with "command not found".
 - `setup --write` writes the **full path** of `agent-mem` into each agent's settings, so sessions started from an editor find it too.
-- There is no Docker image. Your agents start `agent-mem` on every request, it reads facts through the agent's own login, and the page only answers on 127.0.0.1. Inside a container all three would break. The install script already brings its own Python through uv.
+- There is no separate agent-mem container. Your agent starts `agent-mem` on every request and it writes facts through the agent's own login, so both have to sit in the same place.
+
+### Agent in a container (Docker, Dev Containers)
+
+If your agent runs in a container, install agent-mem into that same image and keep its data on a volume:
+
+```dockerfile
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+USER node
+ENV PATH=/home/node/.local/bin:$PATH AGENT_MEM_DATA_DIR=/home/node/.agent-mem
+RUN uv tool install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
+ && agent-mem setup claude --write
+```
+
+```sh
+docker run -it -v agent-mem-data:/home/node/.agent-mem <your-image>
+```
+
+- Log in to the agent inside the container once; agent-mem writes facts through that login.
+- The page from `agent-mem view` listens on 127.0.0.1 inside the container, so open it there, not from the host.
 
 ### Update
 
