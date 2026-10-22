@@ -6,6 +6,7 @@ import numpy as np
 
 from agent_mem.core import db, timeutil
 from agent_mem.core.config import Config
+from agent_mem.hooks import inject
 from agent_mem.memory import consolidate, search, semantic, store
 from tests.conftest import Driver
 
@@ -54,6 +55,33 @@ def test_time_window_parsing():
         assert start == datetime(2026, 4, 8, tzinfo=UTC) and end - start == timedelta(days=1), phrase
     assert semantic.time_window("am 24.12.", now)[0].year == 2025  # type: ignore[index]  # past, not future
     assert semantic.time_window("may i ask three things", now) is None
+
+
+def test_a_commit_is_found_by_its_hash_and_its_subject(driver: Driver, conn, config: Config):
+    """The hash of a commit is only in git's output; a later "which commit did X" needs it in the turn."""
+    driver.prompt("s1", "teile build_snapshot auf und committe")
+    driver.edit("s1", "src/ui/__init__.py")
+    driver.bash(
+        "s1",
+        'git add -A && git commit -q -m "Viewer: build_snapshot aufgeteilt, ungenutztes CSS entfernt"',
+        "[main 8760496] Viewer: build_snapshot aufgeteilt, ungenutztes CSS entfernt\n 2 files changed",
+    )
+    driver.bash("s1", "git commit -m wip", "[main 1a2b3c4] wip", failed=True)  # a failed commit made none
+    driver.stop("s1", "Aufgeteilt und lokal committet.")
+    store.index_turn(conn, conn.execute("SELECT id FROM turns").fetchone()[0])
+    assert json.loads(conn.execute("SELECT commits_json FROM turns").fetchone()[0]) == [
+        "8760496 Viewer: build_snapshot aufgeteilt, ungenutztes CSS entfernt"
+    ]
+    retriever = semantic.Retriever(conn, config)
+    for question in ("In welchem Commit wurde build_snapshot aufgeteilt?", "was steht in 8760496"):
+        hits = retriever.search(question, _pid(conn), record_shown=False)
+        assert hits and "8760496" in hits[0].topic, question
+    assert "commit 8760496" in inject.hit_line(hits[0])
+    # A turn recorded before the column existed gets its commits once, from the output its events still hold.
+    conn.execute("UPDATE turns SET commits_json = '[]'")
+    assert store.backfill_commits(conn) == 1 and store.backfill_commits(conn) == 0
+    assert "8760496" in conn.execute("SELECT commits_json FROM turns").fetchone()[0]
+    assert retriever.search("was steht in 8760496", _pid(conn), record_shown=False)
 
 
 def test_time_window_lists_every_turn_of_that_day(driver: Driver, conn, config: Config):

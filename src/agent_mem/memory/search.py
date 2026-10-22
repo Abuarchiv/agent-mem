@@ -313,6 +313,7 @@ class Hit:
     trust: str = "user"
     importance: float = 0.1
     files: list[str] = field(default_factory=list)
+    commits: list[str] = field(default_factory=list)  # "hash subject" of the commits a turn made
     coverage: float = 0.0
     matched_terms: int = 0
     origin: str | None = None
@@ -331,7 +332,8 @@ def query_terms(text: str, limit: int = 12) -> list[str]:
     for match in _TOKEN.finditer(text.lower()):
         token = match.group(0).strip(".-/")
         for part in token.split("-") if _COMPOUND.fullmatch(token) else [token]:
-            if len(part) < 3 or part in STOPWORDS or part.isdigit() or part in terms:
+            # A number is a count or a year, not a topic; from seven digits on it is an id (a commit like 8760496).
+            if len(part) < 3 or part in STOPWORDS or (part.isdigit() and len(part) < 7) or part in terms:
                 continue
             terms.append(part)
             if len(terms) >= limit:
@@ -449,11 +451,12 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
         placeholders = ",".join("?" for _ in turn_ids)
         for row in conn.execute(
             f"SELECT t.id, t.session_id, t.project_id, t.started_at, t.prompt, t.answer, t.importance, t.trust, "
-            f"t.files_json, t.commands_json, t.errors_json, t.outcome, s.harness FROM turns t "
+            f"t.files_json, t.commands_json, t.errors_json, t.commits_json, t.outcome, s.harness FROM turns t "
             f"JOIN sessions s ON s.id = t.session_id WHERE t.id IN ({placeholders})",
             turn_ids,
         ):
             files = json.loads(row["files_json"] or "[]")
+            commits = json.loads(row["commits_json"] or "[]")
             commands = " ".join(json.loads(row["commands_json"] or "[]"))
             topic = "\n".join(
                 part
@@ -463,6 +466,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                     (row["answer"] or "")[:TOPIC_ANSWER_CHARS],
                     " ".join(files),
                     " ".join(json.loads(row["errors_json"] or "[]")),
+                    " ".join(commits),
                 )
                 if part
             )
@@ -481,6 +485,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                 trust=row["trust"],
                 importance=row["importance"],
                 files=files,
+                commits=commits,
             )
     if mem_ids:
         placeholders = ",".join("?" for _ in mem_ids)

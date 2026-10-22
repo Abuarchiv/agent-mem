@@ -616,6 +616,10 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
         _append_json(conn, turn_id, "files_json", files)
     if tool_signal.command:
         _append_json(conn, turn_id, "commands_json", [privacy.clean_text(tool_signal.command, 200)])
+    if tool_signal.command_kind == "commit" and not event.tool_failed:
+        _append_json(
+            conn, turn_id, "commits_json", signals.commits_made(payload.get("output"), tool_signal.command), cap=20
+        )
     if payload.get("error_line") and payload.get("trust") != "tool_external":
         _append_json(conn, turn_id, "errors_json", [str(payload["error_line"])[:200]], cap=10)
 

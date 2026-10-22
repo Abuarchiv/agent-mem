@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import PurePosixPath
 
-from agent_mem.core import paths, privacy, signals, timeutil
+from agent_mem.core import db, paths, privacy, signals, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import learn
 
@@ -98,6 +98,7 @@ def index_turn(conn: sqlite3.Connection, turn_id: int) -> None:
     files = _json_list(turn["files_json"])
     commands = _json_list(turn["commands_json"])
     errors = _json_list(turn["errors_json"])
+    commits = _json_list(turn["commits_json"])
     head = f"[{turn['harness']}{' · ' + turn['branch'] if turn['branch'] else ''} · {timeutil.day(turn['started_at'])}]"
     parts = [head, turn["prompt"], turn["answer"]]
     if files:
@@ -106,6 +107,8 @@ def index_turn(conn: sqlite3.Connection, turn_id: int) -> None:
         parts.append("commands: " + " | ".join(commands))
     if errors:
         parts.append("errors: " + " | ".join(errors))
+    if commits:
+        parts.append("commits: " + " | ".join(commits))
     set_search_key(conn, "t", turn_id, "\n".join(p for p in parts if p))
 
     project_id = turn["project_id"]
@@ -362,3 +365,28 @@ def learn_rule(
             ).fetchall():
                 if str(old["dedupe_key"] or "").startswith(prefix):
                     supersede(conn, int(old["id"]), new_id)
+
+
+def backfill_commits(conn: sqlite3.Connection) -> int:
+    """Once per database: the commits of turns recorded before ``turns.commits_json`` existed, read from the git
+    output their events still hold (``retention.payload_days``). Returns the turns updated."""
+    if db.get_meta(conn, "commits_backfilled"):
+        return 0
+    found: dict[int, list[str]] = {}
+    for turn_id, output, command in conn.execute(
+        "SELECT e.turn_id, json_extract(e.payload, '$.output'), "
+        "COALESCE(json_extract(e.payload, '$.input.command'), json_extract(e.payload, '$.input')) FROM events e JOIN turns t ON t.id = e.turn_id "
+        "WHERE e.kind = 'tool' AND e.trimmed = 0 AND json_extract(e.payload, '$.failed') IS NULL "
+        "AND json_extract(e.payload, '$.input') LIKE '%commit%' AND t.commits_json = '[]' ORDER BY e.id"
+    ).fetchall():
+        if signals.command_kind(str(command)) != "commit":
+            continue
+        for commit in signals.commits_made(output, command):
+            if commit not in found.setdefault(int(turn_id), []):
+                found[turn_id].append(commit)
+    for turn_id, commits in found.items():
+        conn.execute("UPDATE turns SET commits_json = ? WHERE id = ?", (json.dumps(commits[-20:]), turn_id))
+        if conn.execute("SELECT indexed_at FROM turns WHERE id = ?", (turn_id,)).fetchone()[0]:
+            index_turn(conn, turn_id)
+    db.set_meta(conn, "commits_backfilled", timeutil.iso())
+    return len(found)

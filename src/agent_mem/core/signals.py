@@ -571,6 +571,22 @@ def analyze_tool(tool: str, tool_input: Any) -> ToolSignal:
     )
 
 
+# git's report of a new commit: "[main 8760496] subject", "[main (root-commit) 2431488] subject".
+_COMMIT_MADE = re.compile(r"(?m)^\[[^\]\n]*?\b([0-9a-f]{7,40})\] (.+)$")
+
+
+_ONELINE = re.compile(r"(?m)^([0-9a-f]{7,40}) (\S.*)$")
+
+
+def commits_made(output: str | None, command: str | None = None) -> list[str]:
+    """``hash subject`` of each commit a ``git commit`` printed. Agents often commit quietly and print it after
+    (``git commit -q … && git log --oneline -1``): the newest line of that log is the new commit."""
+    found = _COMMIT_MADE.findall(output or "")
+    if not found and command and re.search(r"\bgit\s+log\b[^|;&]*--oneline", command):
+        found = _ONELINE.findall(output or "")[:1]
+    return [f"{sha} {subject.strip()[:160]}" for sha, subject in found][:5]
+
+
 def looks_like_error(line: str) -> bool:
     """True when the line names an error; a bare non-zero exit (grep without match, `| head`) does not."""
     return bool(_ERROR_START.search(line)) and not _ERROR_FRAME.match(line.strip())

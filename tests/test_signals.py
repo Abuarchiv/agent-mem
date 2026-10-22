@@ -235,3 +235,14 @@ def test_a_rule_sees_the_tool_each_part_of_a_command_runs():
     assert "pip" not in signals.tools_run('echo "we use uv, not pip"')
     assert "git push" in signals.tools_run("git add . && git push origin main")
     assert "npm" in signals.tools_run("cd web && npm install")
+
+
+def test_commits_made_reads_git_output():
+    assert signals.commits_made("[main (root-commit) 2431488] Erster Stand\n 3 files changed") == [
+        "2431488 Erster Stand"
+    ]
+    quiet = "git commit -q -m 'Aufräumen' && git log --oneline -3"
+    log = " M src/app.py\n8760496 Aufräumen\n5050025 OpenCode-Plugin\n74d1b9e Provider"
+    assert signals.commits_made(log, quiet) == ["8760496 Aufräumen"]  # the newest line is the new commit
+    assert signals.commits_made(log, "git log --oneline -3") == ["8760496 Aufräumen"]
+    assert signals.commits_made(log) == []  # without the command no log line counts

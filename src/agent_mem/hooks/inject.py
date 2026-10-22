@@ -101,6 +101,8 @@ def hit_line(hit: search.Hit, detail: int = 120) -> str:
         body = " ".join(hit.text.partition("\n")[2].split())
         if len(body) > len(title.rstrip("…")) + 20:
             line = f"- [{hit.label} · {day} · {origin}] {_clip(body, detail)}"
+    if hit.commits:
+        line += f" (commit {', '.join(c.split(' ', 1)[0] for c in hit.commits[:3])})"
     if hit.files:
         line += f" (files: {', '.join(hit.files[:3])})"
     return line
