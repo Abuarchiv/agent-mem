@@ -62,6 +62,11 @@ dependencies = ["nodejs-wheel-binaries==24.19.0"]
 [tool.hatch.build.targets.sdist]
 include = ["src/agent_mem", "tests", "plugins", "hatch_build.py", "install.sh", "install.ps1", ".claude-plugin", ".agents", ".github/plugin", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
 
+[tool.uv]
+# Installed from a folder (`uv tool install ./agent-mem`), uv rebuilds only when a cache key changes; its default
+# looks at pyproject.toml and the mtime of src/ itself, which an edit below it never moves. A new commit rebuilds.
+cache-keys = [{ file = "pyproject.toml" }, { file = "hatch_build.py" }, { git = { commit = true } }]
+
 [dependency-groups]
 dev = [
   # the tests build the viewer script from ui/app.ts the way a wheel build does (hatch_build.py)
