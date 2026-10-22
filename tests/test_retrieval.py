@@ -497,3 +497,20 @@ def test_the_functions_a_change_defined_find_its_turn(driver: Driver, conn, conf
     conn.execute("UPDATE turns SET defines_json = '[]'")
     assert store.backfill_defines(conn) == 1 and store.backfill_defines(conn) == 0
     assert "drawEdges" in conn.execute("SELECT defines_json FROM turns").fetchone()[0]
+
+
+def test_the_agents_search_finds_a_detail_deep_in_a_long_answer(driver: Driver, conn, config: Config):
+    """The opening of a long report says what was done; the asked detail is pages further down."""
+    filler = " ".join(f"Abschnitt {n} beschreibt Viewer, Hooks und Tests im Überblick." for n in range(40))
+    driver.prompt("s1", "liste alle Befehle auf")
+    driver.stop("s1", f"Hier die Liste. {filler} Mit `agent-mem view --no-open` erzeugt man die Seite, ohne Browser.")
+    driver.prompt("s2", "räume die README auf")
+    driver.stop("s2", "README gekürzt.")
+    for row in conn.execute("SELECT id FROM turns").fetchall():
+        store.index_turn(conn, row[0])
+    question = "Wie erzeugt man die Seite ohne Browser?"
+    hits = semantic.Retriever(conn, config).search(question, _pid(conn), record_shown=False)
+    assert hits and "--no-open" in hits[0].passage and hits[0].passage_from == "answer"
+    assert "answer: " in views.search_lines(hits)
+    hook_hits = search.search(conn, config, search.Query(text=question, project_id=_pid(conn)))
+    assert all(not h.passage for h in hook_hits)

@@ -379,6 +379,7 @@ class Hit:
     # The part of a tool's output that names the question's file or identifier ("…006_work_tokens.sql
     # 007_relations.sql…"): the detail is often only there, never in the request or the answer.
     passage: str = ""
+    passage_from: str = "output"  # or "answer": the part of a long answer that names the question
 
     @property
     def label(self) -> str:
@@ -587,6 +588,21 @@ def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
     return matched / len(terms), matched
 
 
+WINDOW_CHARS, WINDOW_STEP, WINDOW_MIN_TERMS = 360, 120, 3
+
+
+def best_window(text: str, terms: Sequence[str]) -> tuple[int, str]:
+    """The stretch of a long answer that names most of the question's words, and how many: a report's opening says
+    what was done, the detail asked for ("`--no-open`", "the longest path wins") is often pages further down."""
+    best, snippet = 0, ""
+    lowered = text.lower()
+    for start in range(0, max(1, len(text) - WINDOW_CHARS // 2), WINDOW_STEP):
+        _, matched = coverage(lowered[start : start + WINDOW_CHARS], terms)
+        if matched > best:
+            best, snippet = matched, " ".join(text[start : start + WINDOW_CHARS].split())
+    return best, snippet
+
+
 def _head(term: str) -> str:
     """The first word of a long compound: "installationsskripte" is about "install", "projektpfade" about
     "projekt". Shorter words stay whole (the result never matches anything then)."""
@@ -725,8 +741,10 @@ def search(
     record_shown: bool = False,
     now: datetime | None = None,
 ) -> list[Hit]:
-    """``tool_outputs`` also looks for the question's file and identifier names in what tools printed: a scan of
-    the events, too slow for a hook's deadline, fine for an agent's search."""
+    """``tool_outputs`` is the agent's search: it also looks for the question's file and identifier names in what
+    tools printed (a scan of the events, too slow for a hook's deadline) and judges a long answer by its best part,
+    shown as the passage. The hook keeps judging the opening: a passage per hit there grew every prompt's context
+    by a third for one more answer."""
     terms = query_terms(query.text)
     projects = scope(conn, query.project_id)
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
@@ -761,6 +779,11 @@ def search(
         # start.
         judged = hit.topic + "\n" + hit.passage if hit.owner[0] == "t" else hit.text[:800]
         hit.coverage, hit.matched_terms = coverage(judged, terms)
+        if tool_outputs and hit.owner[0] == "t" and not hit.passage and len(hit.answer) > TOPIC_ANSWER_CHARS:
+            matched, snippet = best_window(hit.answer[TOPIC_ANSWER_CHARS:], terms)
+            if matched >= WINDOW_MIN_TERMS and matched > hit.matched_terms:
+                hit.passage, hit.passage_from = snippet, "answer"
+                hit.coverage, hit.matched_terms = coverage(judged + "\n" + snippet, terms)
         candidates.append(hit)
     stats = learn.owner_stats(conn, [h.owner for h in candidates], now)
     for hit in candidates:
