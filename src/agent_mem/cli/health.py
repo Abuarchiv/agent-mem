@@ -17,6 +17,7 @@ from typing import Any
 from agent_mem.cli.install import claude_home, codex_home, copilot_home
 from agent_mem.core import db, spool, timeutil
 from agent_mem.core.config import Config
+from agent_mem.memory import work
 
 HARNESS_MARKERS = {
     "claude": [claude_home() / "plugins", claude_home() / "settings.json"],
@@ -164,18 +165,19 @@ def status(conn: sqlite3.Connection, config: Config) -> dict[str, Any]:
 
 def _injected(conn: sqlite3.Connection, days: int = 7) -> dict[str, Any]:
     """Blocks and estimated tokens injected into sessions today and over the last ``days`` days, the measured agent
-    work behind them (memory/work.py) and all work the memory was built from."""
+    work behind what they named, each memory once (memory/work.py), and all work the memory was built from."""
     today = timeutil.now()
     since = (today - timedelta(days=days - 1)).date().isoformat()
-    blocks = total = today_tokens = spent = today_work = 0
+    blocks = total = today_tokens = today_work = 0
     for row in conn.execute(
         "SELECT key, value FROM meta WHERE key >= ? AND key LIKE 'injected:%'", (f"injected:{since}",)
     ):
         n, tokens, behind = [*(int(x) for x in row["value"].split(",")), 0][:3]  # older days have no work column
-        blocks, total, spent = blocks + n, total + tokens, spent + behind
+        blocks, total = blocks + n, total + tokens
         if row["key"] == f"injected:{today.date().isoformat()}":
             today_tokens, today_work = tokens, behind
     sessions = int(conn.execute("SELECT COUNT(*) FROM sessions WHERE started_at >= ?", (since,)).fetchone()[0])
+    spent = work.reused(conn, since)
     turns, built = conn.execute(
         "SELECT COUNT(*), COALESCE(SUM(work_tokens), 0) FROM turns WHERE work_tokens IS NOT NULL"
     ).fetchone()

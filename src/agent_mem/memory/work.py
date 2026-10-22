@@ -24,7 +24,8 @@ from pathlib import Path
 from agent_mem.core import db, timeutil
 
 LOOKBACK_DAYS = 30  # Claude Code deletes transcripts after 30 days by default
-_ID = re.compile(r"\b([MT])(\d+)\b")
+# The label an entry starts with ("- [M12 · 2026-10-13 · fact]"); an id inside its text is only a mention.
+_ID = re.compile(r"\[([MT])(\d+) ·")
 
 
 def _claude_files(native_id: str) -> list[Path]:
@@ -208,21 +209,38 @@ def behind(conn: sqlite3.Connection, text: str) -> int:
     turns: set[int] = set()
     for kind, number in _ID.findall(text):
         (memories if kind == "M" else turns).add(int(number))
+    return _work_of(conn, memories, turns)
+
+
+def reused(conn: sqlite3.Connection, since: str) -> int:
+    """Measured work behind everything given to agents since ``since``, each memory and turn once however often it
+    was given: a fact shown in ten sessions was found out once."""
+    owners = conn.execute(
+        "SELECT DISTINCT owner_type, owner_id FROM accesses WHERE kind IN ('injected', 'warned') AND ts >= ?", (since,)
+    ).fetchall()
+    return _work_of(conn, {int(i) for t, i in owners if t == "m"}, {int(i) for t, i in owners if t == "t"})
+
+
+def _work_of(conn: sqlite3.Connection, memories: set[int], turns: set[int]) -> int:
     total = 0
-    if turns:
-        marks = ",".join("?" * len(turns))
+    for chunk in _chunks(sorted(turns)):
+        marks = ",".join("?" * len(chunk))
         total += int(
-            conn.execute(
-                f"SELECT COALESCE(SUM(work_tokens), 0) FROM turns WHERE id IN ({marks})", tuple(turns)
-            ).fetchone()[0]
+            conn.execute(f"SELECT COALESCE(SUM(work_tokens), 0) FROM turns WHERE id IN ({marks})", chunk).fetchone()[0]
         )
-    if memories:
-        marks = ",".join("?" * len(memories))
-        for turn_id, work, siblings in conn.execute(
+    for chunk in _chunks(sorted(memories)):
+        marks = ",".join("?" * len(chunk))
+        for turn_id, spent, siblings in conn.execute(
             "SELECT m.turn_id, t.work_tokens, (SELECT COUNT(*) FROM memories s WHERE s.turn_id = m.turn_id "
             f"AND s.kind != 'native_note') FROM memories m JOIN turns t ON t.id = m.turn_id WHERE m.id IN ({marks})",
-            tuple(memories),
+            chunk,
         ):
-            if turn_id not in turns and work:
-                total += int(work) // max(int(siblings), 1)
+            if turn_id not in turns and spent:
+                total += int(spent) // max(int(siblings), 1)
     return total
+
+
+def _chunks(ids: list[int], size: int = 500) -> Iterator[tuple[int, ...]]:
+    """SQLite allows a bounded number of ``?`` per statement; a week of injections names thousands of ids."""
+    for start in range(0, len(ids), size):
+        yield tuple(ids[start : start + size])

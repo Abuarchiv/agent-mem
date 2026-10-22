@@ -9,7 +9,7 @@ from pathlib import Path
 from agent_mem.cli.health import _injected
 from agent_mem.core import db
 from agent_mem.hooks import capture, inject
-from agent_mem.memory import store, work
+from agent_mem.memory import learn, store, work
 
 
 def _lines(path: Path, entries: list[dict]) -> None:
@@ -123,9 +123,12 @@ def test_an_injection_counts_a_turn_once_and_a_memory_by_its_share(conn) -> None
         conn.execute("UPDATE memories SET turn_id = ? WHERE id = ?", (turns[0], memory))
         ids.append(memory)
     assert work.behind(conn, f"- [M{ids[0]} · fact] first") == 3_000
-    assert work.behind(conn, f"M{ids[0]} M{ids[1]} T{turns[0]}") == 9_000  # the turn itself, not twice
-    assert work.behind(conn, f"M{ids[2]} T{turns[1]} T{turns[1]}") == 3_000 + 500
+    named = f"- [M{ids[0]} · fact] a\n- [M{ids[1]} · fact] b\n- [T{turns[0]} · work] c"
+    assert work.behind(conn, named) == 9_000  # the turn itself, not twice
+    assert work.behind(conn, f"- [M{ids[2]} · fact] a\n- [T{turns[1]} · work] b\n- [T{turns[1]} · work] c") == 3_500
     assert work.behind(conn, "nothing named") == 0
+    # An id inside an entry's text ("fixed in M12, see T4") is a mention, not something the agent was given.
+    assert work.behind(conn, f"- [T{turns[1]} · claude] done → the facts M{ids[0]} and T{turns[0]} were missing") == 500
 
 
 def test_migration_006_adds_work_tokens_to_a_v5_database(config) -> None:
@@ -147,8 +150,15 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     assert "100% reduction" not in inject.terminal(context, "shop", color=False, spent=10_000_000)  # 99.9 stays 99
     assert "savings" not in inject.terminal(context, "shop", color=False)  # nothing measured: no claim
 
+    turns = _session(conn, "claude", "s9", [("2026-10-13T09:00:00.000Z", "2026-10-13T09:10:00.000Z")] * 2)
+    conn.execute("UPDATE turns SET work_tokens = 5_000")
     db.set_meta(conn, f"injected:{db.timeutil.day(db.timeutil.iso())}", "2,300")  # a day written before the work column
     capture._count_injection(conn, db.timeutil.iso(), 100, 10_000)
+    # Three sessions were given the same turn, one of them a second turn too: each turn's work counts once.
+    for session in ("a", "b", "c"):
+        learn.record_access(conn, [("t", turns[0])], "injected", session)
+    learn.record_access(conn, [("t", turns[1])], "warned", "c")
+    learn.record_access(conn, [("t", turns[1])], "shown", "c", ts="2020-01-01T00:00:00.000Z")  # outside the week
     injected = _injected(conn)
     assert (injected["blocks"], injected["tokens"], injected["work"]) == (3, 400, 10_000)
     assert injected["saved_percent"] == 96  # 9,600 of 10,000
