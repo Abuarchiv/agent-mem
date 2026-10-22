@@ -5,7 +5,8 @@ output, ``observe.tool_output_chars`` each, ``observe.turn_tool_chars`` per turn
 one compact line with the commands, files and error lines the turn touched (from the ``turns`` columns,
 already cleaned by capture), plus the final answers of subagents that ran in the turn (``SubagentStop``).
 Without the outputs the extractor never learns what a file or command revealed ("`uv tool` keeps the
-install source in `direct_url.json`").
+install source in `direct_url.json`"). A change itself stays out; the functions and classes it defines come as
+one line each ("[edit] ui/app.js: defines drawEdges, drawNodes").
 Events with ``trust = 'tool_external'`` never contribute text. The whole bundle is
 capped at ``observe.bundle_tokens`` (4 characters per token); a bundle that would exceed it is split
 at turn boundaries, a single oversized turn is truncated.
@@ -15,13 +16,16 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 
 from agent_mem.core import privacy, signals
 from agent_mem.core.config import Config
+from agent_mem.memory import store
 
 CHARS_PER_TOKEN = 4
+DEFINES_CHARS = 2_000  # per turn, for the "[edit] … defines …" lines
 
 
 @dataclass
@@ -35,6 +39,39 @@ class Bundle:
     @property
     def chars(self) -> int:
         return sum(len(m["content"]) for m in self.messages)
+
+
+# Functions and classes a change writes: Python, JavaScript/TypeScript (also arrow functions), Go, Rust.
+_DEFINES = re.compile(
+    r"\b(?:def|class|function|func|fn)\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w{2,})"
+    r"|\b(?:const|let|var)\s+([A-Za-z_]\w{2,})\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>"
+)
+
+
+def _defines_line(payload: dict, files: list[str]) -> str | None:
+    """The names a change defines, new ones first ("[edit] ui/app.js: defines drawEdges, drawNodes"): the change
+    itself stays out, but "which function does X" is answered by these names. Scripts that rewrite files count."""
+    category = payload.get("category")
+    if payload.get("failed") or category not in {"edit", "shell"} or any(store.scratch_path(f) for f in files):
+        return None
+    try:
+        tool_input = json.loads(payload.get("input") or "null")
+    except ValueError:
+        tool_input = payload.get("input")
+    if isinstance(tool_input, dict):
+        before = str(tool_input.get("old_string") or tool_input.get("oldString") or "")
+        text = " ".join(str(v) for k, v in tool_input.items() if k not in {"old_string", "oldString"})
+    else:
+        before, text = "", str(tool_input or "")
+    if category == "shell" and "<<" not in text and "write_text" not in text:
+        return None  # only a script that writes code defines something
+    old = {a or b for a, b in _DEFINES.findall(before)}
+    names = list(dict.fromkeys(a or b for a, b in _DEFINES.findall(text)))
+    names = [n for n in names if n not in old] + [n for n in names if n in old]
+    if not names:
+        return None
+    where = f"[edit] {files[0]}" if category == "edit" and files else "[script]"
+    return f"{where}: defines {', '.join(names[:12])}"
 
 
 def _tool_line(payload: dict, per_call: int) -> str | None:
@@ -109,17 +146,27 @@ def build(conn: sqlite3.Connection, config: Config, turn_ids: list[int]) -> list
                 subagents.setdefault(int(event["turn_id"]), []).append(" ".join(answer.split()))
     tools: dict[int, list[str]] = {}
     used: dict[int, int] = {}
+    names: dict[int, list[str]] = {}
+    defined: dict[int, int] = {}
     for event in conn.execute(
-        f"SELECT turn_id, payload FROM events WHERE kind = 'tool' AND trust != 'tool_external' "
+        f"SELECT turn_id, payload, files_json FROM events WHERE kind = 'tool' AND trust != 'tool_external' "
         f"AND turn_id IN ({placeholders}) ORDER BY id",
         tuple(turn_ids),
     ):
         with contextlib.suppress(ValueError):
-            line = _tool_line(json.loads(event["payload"]), config.observe.tool_output_chars)
+            payload = json.loads(event["payload"])
             turn = int(event["turn_id"])
+            # Names are short and what outputs crowd out first: they have their own room, outputs the rest.
+            defines = _defines_line(payload, json.loads(event["files_json"] or "[]"))
+            if defines and defined.get(turn, 0) + len(defines) <= DEFINES_CHARS:
+                names.setdefault(turn, []).append(defines)
+                defined[turn] = defined.get(turn, 0) + len(defines)
+            line = _tool_line(payload, config.observe.tool_output_chars)
             if line and used.get(turn, 0) + len(line) <= config.observe.turn_tool_chars:
                 tools.setdefault(turn, []).append(line)
                 used[turn] = used.get(turn, 0) + len(line)
+    for turn, lines in names.items():
+        tools[turn] = [*lines, *tools.get(turn, [])]
     cap = config.observe.bundle_tokens * CHARS_PER_TOKEN
     bundles: list[Bundle] = []
     current: Bundle | None = None

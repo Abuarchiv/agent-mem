@@ -521,3 +521,31 @@ def test_one_statement_counts_once_although_hook_and_observer_both_read_it(confi
     conn = db.connect(config)
     assert [tuple(r) for r in conn.execute("SELECT pattern, evidence FROM rules")] == [("pip", 2)]
     conn.close()
+
+
+def test_the_extractor_learns_which_names_a_change_defines(driver, conn, config: Config) -> None:
+    """A change itself stays out of the bundle, but the functions it adds are what a later "which function" asks."""
+    from agent_mem.observe import bundle
+
+    driver.prompt("s1", "split the graph drawing")
+    driver.send(
+        "s1",
+        "tool",
+        tool="Edit",
+        tool_use_id="e1",
+        tool_input={
+            "file_path": str(driver.cwd) + "/ui/app.js",
+            "old_string": "const draw = () => {}",
+            "new_string": "const drawEdges = (focus, ink) => {\n}\nfunction drawNodes(focus) {}\nconst size = 3;",
+        },
+        tool_output="ok",
+        raw_kind="PostToolUse",
+    )
+    script = "python3 - <<'EOF'\ns = s.replace('x', \"def _claude_usage(path, offset=0):\\n    pass\")\nEOF"
+    driver.bash("s1", script, "OK")
+    driver.stop("s1", "split")
+    turn = conn.execute("SELECT id FROM turns ORDER BY id DESC LIMIT 1").fetchone()[0]
+    text = "\n".join(m["content"] for b in bundle.build(conn, config, [turn]) for m in b.messages)
+    assert "[edit] ui/app.js: defines drawEdges, drawNodes" in text
+    assert "defines _claude_usage" in text
+    assert "size" not in text.split("defines", 1)[1].split("\n")[0]  # a constant is not a function

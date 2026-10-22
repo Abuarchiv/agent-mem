@@ -14,6 +14,11 @@ Record:
   what it does, what a command prints or returns, how two parts interact, why a check fails. Name
   the exact file, function, flag or command ("`uv tool` stores the install source in
   `direct_url.json`", "`problems()` in `hooks/hook.py` collects the session-start warnings").
+- What a change built, by its exact names: the functions, classes, settings keys, database keys,
+  migrations or CLI flags it added, split, renamed or removed, and what each is for ("the graph
+  drawing in `ui/app.js` is split into `drawEdges`, `drawNodes` and `drawLabels`", "a failed graph
+  extraction is kept in `meta` under `graph.failed:<project>`"). Lines starting with `[edit]` or
+  `[script]` list the names a change defines.
 
 Do not record:
 - Generic programming knowledge the developer asked about (what a tuple is, how to reverse a string).
