@@ -70,6 +70,43 @@ def test_error_signature_is_stable_across_paths_and_numbers():
     assert a and b and c
     assert a[0] == b[0]
     assert a[0] != c[0]
+    assert a[1] == "ModuleNotFoundError: No module named 'requests'"
+
+
+def test_error_signature_names_the_error_not_the_header():
+    key_error = "Traceback (most recent call last):\n  File \"x.py\", line 3, in <module>\nKeyError: 'compliance'"
+    chained = (
+        'Traceback (most recent call last):\n  File "a.py", line 1\nValueError: bad\n\n'
+        "During handling of the above exception, another exception occurred:\n\n"
+        'Traceback (most recent call last):\n  File "b.py", line 2\nRuntimeError: wrapped'
+    )
+    pytest_run = (
+        ".................F.                                                      [100%]\n"
+        "=================================== FAILURES ===================================\n"
+        "_______ test_finish_closes_codex ________\n"
+        "tests/test_codex.py:461: in test_finish_closes_codex\n"
+        "    assert clients[0].interrupts == [('thread-1', 'turn-1')]\n"
+        "E   AssertionError: assert [] == [('thread-1', 'turn-1')]\n"
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/test_codex.py::test_finish_closes_codex\n"
+        "1 failed, 18 passed in 1.85s"
+    )
+    other_test = pytest_run.replace("test_finish_closes_codex", "test_start_opens_codex")
+    narrow = pytest_run.replace("test_finish_closes_codex\n1 failed", "test_finish_closes_codex - Ass...\n1 failed")
+    assert signals.error_signature(narrow)[0] == signals.error_signature(pytest_run)[0]  # type: ignore[index]
+    assert signals.error_signature(key_error)[1] == "KeyError: 'compliance'"  # type: ignore[index]
+    assert signals.error_signature(chained)[1] == "RuntimeError: wrapped"  # type: ignore[index]
+    assert signals.error_signature(pytest_run)[1] == "FAILED tests/test_codex.py::test_finish_closes_codex"  # type: ignore[index]
+    assert signals.error_signature(pytest_run)[0] != signals.error_signature(other_test)[0]  # type: ignore[index]
+    assert signals.error_signature(key_error)[0] != signals.error_signature(chained)[0]  # type: ignore[index]
+    bare = 'Traceback (most recent call last):\n  File "check.py", line 9, in verify_export\nAssertionError'
+    assert signals.error_signature(bare)[1] == "AssertionError in verify_export"  # type: ignore[index]
+    for header in (
+        "Traceback (most recent call last):",
+        "=" * 30 + " FAILURES " + "=" * 30,
+        "_____ ERROR at setup of t _____",
+    ):
+        assert not signals.looks_like_error(header), header
 
 
 def test_corrections_and_preferences():

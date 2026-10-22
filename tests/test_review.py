@@ -147,14 +147,15 @@ def test_review_comes_early_after_many_new_facts(conn):
     _facts(conn, TEXTS)
     review.review(conn, Answer({}), "p1")
     db.set_meta(conn, "reviewed_at:p1", "2026-10-20T00:00:00.000Z")  # after the fixture's dates
-    assert review.due_projects(conn) == []
+    now = timeutil.parse("2026-10-20T02:00:00.000Z")  # within EVERY_HOURS of that review
+    assert review.due_projects(conn, now=now) == []
     after = "2026-10-20T00:01:00.000Z"
     for memory_id in _facts(conn, [f"New fact {n}" for n in range(review.NEW_FACTS - 1)]):
         conn.execute("UPDATE memories SET created_at = ? WHERE id = ?", (after, memory_id))
-    assert review.due_projects(conn) == []
+    assert review.due_projects(conn, now=now) == []
     extra = _facts(conn, ["One more fact"])[0]
     conn.execute("UPDATE memories SET created_at = ? WHERE id = ?", (after, extra))
-    assert review.due_projects(conn) == ["p1"]
+    assert review.due_projects(conn, now=now) == ["p1"]
 
 
 def test_a_stated_replacement_brings_the_review_forward_at_most_hourly(conn):

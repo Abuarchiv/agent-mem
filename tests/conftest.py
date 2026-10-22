@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import os
 import subprocess
 from collections.abc import Iterator
@@ -66,6 +67,9 @@ def conn(config: Config) -> Iterator:
     connection.close()
 
 
+_CLOCK = itertools.count(1)  # one clock for every Driver: two of them never write the same timestamp
+
+
 class Driver:
     """Feeds normalized events through the real capture path."""
 
@@ -82,7 +86,12 @@ class Driver:
         from agent_mem.core import timeutil
 
         self.counter += 1
-        return timeutil.iso(timeutil.now() - timedelta(minutes=500) + timedelta(seconds=self.counter))
+        now = timeutil.now()
+        # In the past, but on today's UTC date: tests of "today" and "gestern" read the date of these events.
+        # ponytail: within the first 20 minutes after UTC midnight the events still fall on yesterday.
+        since_midnight = now - now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=1)
+        ago = max(timedelta(minutes=20), min(timedelta(minutes=500), since_midnight))
+        return timeutil.iso(now - ago + timedelta(seconds=next(_CLOCK)))
 
     def send(self, session: str, kind: str, **fields) -> capture.Response:
         event = Event(
