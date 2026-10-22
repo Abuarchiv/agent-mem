@@ -342,3 +342,13 @@ def load_project_settings(root: Path | None) -> ProjectSettings:
 
 def env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# The agent-mem image (Dockerfile): the fact-writing CLIs live in the container, logged in through the launcher.
+IN_DOCKER = env_flag("AGENT_MEM_IN_DOCKER")
+
+
+def login_hint(names: list[str]) -> str:
+    if IN_DOCKER:
+        return "Run " + " and ".join(f"`agent-mem login {name}`" for name in names) + " once."
+    return "Start " + " and ".join(f"`{name}`" for name in names) + " once and log in."

@@ -56,13 +56,33 @@ agent-mem is not on PyPI. Always install it from the repository, never by its ba
 | pipx | `pipx install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"` |
 | Install script (macOS, Linux) | `curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.sh \| sh` |
 | Install script (Windows PowerShell) | `irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install.ps1 \| iex` |
+| Docker (macOS, Linux) | `curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install-docker.sh \| sh` |
 | Claude Code marketplace | `/plugin marketplace add Abuarchiv/agent-mem`, then `/plugin install agent-mem@agent-mem` |
 | By hand | `agent-mem setup <agent>` without `--write` prints the steps |
 
 - The install script installs uv first and, on a fresh machine, runs `agent-mem setup all --write`.
 - The marketplace plugin only registers the hooks. Install the `agent-mem` command first with `uv tool install` and skip `setup --write`, or every hook fails with "command not found".
 - `setup --write` writes the **full path** of `agent-mem` into each agent's settings, so sessions started from an editor find it too.
-- There is no separate agent-mem container. Your agent starts `agent-mem` on every request and it writes facts through the agent's own login, so both have to sit in the same place.
+
+### Docker
+
+For people who want nothing but Docker on the computer. Your agents stay where they are; agent-mem runs in a container named `agent-mem`.
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install-docker.sh | sh
+agent-mem login claude                # once per agent that should write facts: claude, codex or copilot
+```
+
+1. The script builds the image (about 3 GB, a few minutes the first time) and starts the container. It restarts with Docker.
+2. It writes a small `agent-mem` command to `~/.local/bin`, which runs everything in the container.
+3. It connects every agent it finds here, as `setup all --write` does. Their hooks and MCP server use that command.
+
+- **Your memory** lives in the Docker volume `agent-mem-data`. The container reads your home folder (agent transcripts, git) but cannot change it.
+- **Facts** are written by the agent CLIs inside the container, so log each one in once with `agent-mem login <agent>`. Until then requests are recorded and searchable, and they wait for facts.
+- **Viewer:** `agent-mem view` opens http://localhost:37778/. Another port: `AGENT_MEM_PORT=37790` before the install line.
+- **Docker closed:** hooks end silently and your agent works without memory.
+- **Update:** run the install line again. **Remove:** `agent-mem uninstall all`, `docker rm -f agent-mem`, `rm ~/.local/bin/agent-mem`; `docker volume rm agent-mem-data` deletes the memory.
+- Every hook starts a `docker exec`: about 150 ms per event instead of about 70 ms. Windows: use the PowerShell install script.
 
 ### Agent in a container (Docker, Dev Containers)
 

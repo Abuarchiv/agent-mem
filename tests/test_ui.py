@@ -293,3 +293,19 @@ def test_viewer_cache_stays_bounded_whatever_the_address_says(config: Config, dr
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_viewer_in_a_container_listens_on_all_addresses(config: Config, monkeypatch):
+    """In Docker the port is published to the host's 127.0.0.1; inside, the viewer must listen beyond loopback.
+    The Host check stays: only 127.0.0.1 and localhost are answered."""
+    monkeypatch.setenv("AGENT_MEM_VIEWER_BIND", "0.0.0.0")
+    httpd = _serve(config)
+    try:
+        assert httpd.server_address[0] == "0.0.0.0"
+        assert _get(config, "/health")[0] == 200
+        assert _get(config, "/health", {"Host": f"evil.example:{config.viewer.port}"})[0] == 403
+        assert _get(config, "/health", {"Host": "localhost:37779"})[0] == 200  # published on another host port
+        assert _get(config, "/health", {"Host": "localhost"})[0] == 403
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

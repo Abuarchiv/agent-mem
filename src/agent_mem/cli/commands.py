@@ -585,6 +585,8 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
         print("Or let agent-mem write the files with absolute paths: `agent-mem setup " + ns.harness + " --write`.")
         print("\nDetected:\n" + _detect_table(found))
         return 0
+    # Docker install: setup runs in the container, where no agent is installed and the models ship in the image.
+    docker = bool(os.environ.get("AGENT_MEM_EXE"))
     for name in targets:
         touched = install.write(name, folder)
         print(f"{name}: hooks and MCP server registered with {found['binary']}.")
@@ -594,7 +596,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
             print("  Codex asks you to trust the hooks once: start codex and run /hooks.")
         if name == "claude" and install.claude_plugin_enabled():
             print("  The agent-mem plugin is enabled too; keep one: /plugin uninstall agent-mem@agent-mem.")
-        if not found["extras"]["observer"]:
+        if docker or not found["extras"]["observer"]:
             continue
         if name == "opencode":
             print('  facts: OpenCode requests are saved word for word unless you add "ollama" to observe.providers.')
@@ -603,6 +605,8 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
             print(f"  facts: written in the background by `{name}` ({model}), with your existing login.")
         else:
             print(f"  facts: `{name}` is not installed; its requests are saved word for word until it is.")
+    if docker:
+        return 0
     if found["extras"]["semantic"] and not ns.no_models:
         from agent_mem.memory import semantic
 

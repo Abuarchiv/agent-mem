@@ -24,8 +24,9 @@ MARK = "agent-mem"
 
 
 def binary() -> str:
-    """Absolute path of the installed ``agent-mem`` command (falls back to the running interpreter)."""
-    found = shutil.which("agent-mem")
+    """Absolute path of the installed ``agent-mem`` command (falls back to the running interpreter).
+    ``AGENT_MEM_EXE``: the Docker launcher on the host, since setup then runs inside the container."""
+    found = os.environ.get("AGENT_MEM_EXE") or shutil.which("agent-mem")
     if found:
         return str(Path(found).resolve())
     sibling = Path(sys.executable).with_name("agent-mem.exe" if sys.platform == "win32" else "agent-mem")

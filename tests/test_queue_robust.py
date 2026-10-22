@@ -497,3 +497,20 @@ def test_a_logged_out_cli_is_named_in_the_panel_and_in_doctor(config: Config, pr
     assert "usage limit" in (inject._facts_line(conn, config, "claude") or "")
     assert health._provider_check(conn, config).ok
     conn.close()
+
+
+def test_in_docker_the_login_hint_names_the_launcher(config: Config, monkeypatch):
+    """The fact-writing CLIs of a Docker install live in the container; `claude` on the host is the wrong one."""
+    from agent_mem.cli import health
+    from agent_mem.core import config as config_module
+    from agent_mem.hooks import inject
+    from agent_mem.observe import providers
+
+    monkeypatch.setattr(config_module, "IN_DOCKER", True)
+    monkeypatch.setattr(providers, "available", lambda name: name == "claude")
+    monkeypatch.setattr(health.shutil, "which", lambda name: f"/bin/{name}" if name == "claude" else None)
+    conn = db.connect(config)
+    providers.note_failure(conn, config, "claude", providers.ProviderError("claude exit 1: Not logged in"))
+    assert "`agent-mem login claude`" in (inject._facts_line(conn, config, "claude") or "")
+    assert health._provider_check(conn, config).fix == "Run `agent-mem login claude` once."
+    conn.close()

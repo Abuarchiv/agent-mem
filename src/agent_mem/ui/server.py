@@ -71,8 +71,9 @@ class _Server(http.server.ThreadingHTTPServer):
         self.restart = False  # set when the installed code changed: serve() then exits non-zero and is restarted
         self.cache: dict[str | None, tuple[tuple[int, ...], float, bytes]] = {}
         port = config.viewer.port
-        self.hosts = {f"{HOST}:{port}", f"localhost:{port}"}
-        super().__init__((HOST, port), _Handler)
+        self.hosts = {HOST, "localhost"}
+        # Docker publishes the port to the host's 127.0.0.1 only; inside the container loopback is unreachable.
+        super().__init__((os.environ.get("AGENT_MEM_VIEWER_BIND") or HOST, port), _Handler)
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -96,7 +97,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         # A foreign Host header means a page on another site resolved its own name to 127.0.0.1 (DNS rebinding).
-        if self.headers.get("Host") not in self.server.hosts:
+        # The name decides, not the port: Docker publishes the viewer on whatever host port was free.
+        name, _, port = (self.headers.get("Host") or "").rpartition(":")
+        if name not in self.server.hosts or not port.isdigit():
             self._send(HTTPStatus.FORBIDDEN, _message_page("Forbidden", f"Open {url(self.server.config)} instead."))
             return
         parts = urllib.parse.urlsplit(self.path)

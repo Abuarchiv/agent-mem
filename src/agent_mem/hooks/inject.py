@@ -12,6 +12,7 @@ import sqlite3
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
+from agent_mem.core import config as config_module
 from agent_mem.core import signals, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.signals import command_kind, first_line, looks_like_error, request_text
@@ -101,6 +102,8 @@ def hit_line(hit: search.Hit, detail: int = 120) -> str:
         body = " ".join(hit.text.partition("\n")[2].split())
         if len(body) > len(title.rstrip("…")) + 20:
             line = f"- [{hit.label} · {day} · {origin}] {_clip(body, detail)}"
+    if hit.defines:
+        line += f" (defines {', '.join(hit.defines[-10:])})"  # the last names are what the turn ended with
     if hit.commits:
         line += f" (commit {', '.join(c.split(' ', 1)[0] for c in hit.commits[:3])})"
     if hit.files:
@@ -634,7 +637,8 @@ def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str |
         until = when.astimezone().strftime("%H:%M") if when else paused[0]
         kind = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause_kind.{found[0]}",)).fetchone()
         if kind and kind[0] == "login":
-            return f"Facts: paused, `{found[0]}` is not logged in. Log in there once; requests wait (next try {until})."
+            hint = config_module.login_hint([found[0]]).rstrip(".")
+            return f"Facts: paused, `{found[0]}` is not logged in. {hint}; requests wait (next try {until})."
         return f"Facts: paused until {until}, the usage limit of {found[0]} is reached. Requests wait."
     return f"Facts written by {found[1]} ({found[0]})"
 

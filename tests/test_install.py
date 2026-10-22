@@ -336,3 +336,28 @@ def test_uninstall_leaves_no_copy_of_agent_mems_own_copilot_hooks(homes: Path) -
     assert (hooks / "agent-mem.json.agent-mem-backup").exists()
     install.remove("copilot")
     assert list(hooks.iterdir()) == []
+
+
+def test_docker_install_points_hooks_at_its_launcher(homes: Path, monkeypatch) -> None:
+    """setup runs inside the container for a Docker install; the hooks must start the launcher on the host."""
+    launcher = homes / ".local" / "bin" / "agent-mem"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("AGENT_MEM_EXE", str(launcher))
+    assert install.binary() == str(launcher)
+    install.write("claude", PLUGINS)
+    assert install.hook_commands("claude") == [f"{launcher} hook claude"]
+
+
+def test_docker_setup_says_only_what_holds_on_the_host(homes: Path, config, monkeypatch, capsys) -> None:
+    """Inside the container no agent is installed and there is no login item; setup must not claim either."""
+    import argparse
+
+    from agent_mem.cli import commands
+
+    monkeypatch.setenv("AGENT_MEM_EXE", str(homes / "agent-mem"))
+    ns = argparse.Namespace(harness="codex", write=True, no_models=False)
+    assert commands.cmd_setup(ns, config) == 0
+    out = capsys.readouterr().out
+    assert f"registered with {homes / 'agent-mem'}" in out
+    assert "Detected" not in out and "not installed" not in out and "autostart" not in out

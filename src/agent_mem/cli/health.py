@@ -488,7 +488,9 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
     remedy = 'Install Claude Code, Codex, Copilot CLI or OpenCode, or add "ollama" to observe.providers.'
     if logged_out:
-        remedy = f"Start {' and '.join(f'`{name}`' for name in logged_out)} once and log in."
+        from agent_mem.core import config as config_module
+
+        remedy = config_module.login_hint(logged_out)
     return Check(
         "facts model",
         bool(stages) and not logged_out,
