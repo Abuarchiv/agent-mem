@@ -119,12 +119,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except (_Outdated, db.SchemaTooNewError):
             # This process still runs the code from before an upgrade (and a newer one may have migrated the
             # database). Answer, then exit: launchd or the next session start runs the new code.
+            self.server.restart = True  # before the answer: whoever reads it may already check the flag
             self._send(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 _message_page("agent-mem was updated", "The viewer restarts with the new version; this page reloads."),
                 {"Refresh": "3"},
             )
-            self.server.restart = True
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
         except (sqlite3.Error, OSError, db.MigrationInProgressError) as error:

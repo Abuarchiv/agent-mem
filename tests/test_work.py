@@ -151,7 +151,7 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     assert "savings" not in inject.terminal(context, "shop", color=False)  # nothing measured: no claim
 
     turns = _session(conn, "claude", "s9", [("2026-10-13T09:00:00.000Z", "2026-10-13T09:10:00.000Z")] * 2)
-    conn.execute("UPDATE turns SET work_tokens = 5_000")
+    conn.execute("UPDATE turns SET work_tokens = 5000")  # SQLite before 3.46 knows no 5_000
     db.set_meta(conn, f"injected:{db.timeutil.day(db.timeutil.iso())}", "2,300")  # a day written before the work column
     capture._count_injection(conn, db.timeutil.iso(), 100, 10_000)
     # Three sessions were given the same turn, one of them a second turn too: each turn's work counts once.

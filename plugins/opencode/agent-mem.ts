@@ -10,7 +10,7 @@
 // v2 promise context exposes no pre-tool or system-transform hook. Upgrade to the v2/effect
 // format if those are needed.
 import { define } from "@opencode-ai/plugin/v2/promise"
-import type { Plugin } from "@opencode-ai/plugin/v2/promise"
+import type { Plugin, PluginContext } from "@opencode-ai/plugin/v2/promise"
 import { spawn } from "node:child_process"
 
 const TIMEOUT_MS = 2000
@@ -45,9 +45,15 @@ function callHook(event: string, payload: Record<string, unknown>): void {
 
 type StreamEvent = { type?: string; data?: Record<string, any> }
 
+// OpenCode passes these as well and calls the returned cleanup; @opencode-ai/plugin 1.19 declares neither.
+type Runtime = {
+  location: { directory: string }
+  event: { subscribe(options: { signal: AbortSignal }): AsyncIterable<unknown> }
+}
+
 const AgentMemPlugin: Plugin = define({
   id: "agent-mem",
-  setup(context) {
+  setup: ((context: PluginContext & Runtime) => {
     const cwd = context.location.directory
     const started = new Set<string>() // sessions this instance has announced to agent-mem
     const answer = new Map<string, string>() // accumulated assistant text per session
@@ -118,7 +124,7 @@ const AgentMemPlugin: Plugin = define({
     })()
 
     return () => controller.abort()
-  },
+  }) as unknown as Plugin["setup"],
 })
 
 export default AgentMemPlugin
