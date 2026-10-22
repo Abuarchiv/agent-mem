@@ -326,6 +326,18 @@ def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
                 Check(f"{LABELS[harness]} recording", False, "connected, nothing recorded yet", hint, warn_only=True)
             )
             continue
+        if not installed_here:
+            # Recorded once, hooks gone since (removed by hand or by another tool rewriting the settings).
+            checks.append(
+                Check(
+                    f"{LABELS[harness]} recording",
+                    False,
+                    f"off, no agent-mem hooks; last {timeutil.local(row['last_ok_at'])}",
+                    f"Run `agent-mem setup {harness} --write` to record it again.",
+                    warn_only=True,
+                )
+            )
+            continue
         failing = row["last_error_at"] and (not row["last_ok_at"] or row["last_error_at"] > row["last_ok_at"])
         checks.append(
             Check(

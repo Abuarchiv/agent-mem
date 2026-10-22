@@ -6,6 +6,7 @@ import pytest
 
 from agent_mem import cli
 from agent_mem.core import config as config_module
+from agent_mem.core import timeutil
 from agent_mem.core.config import Config
 from tests.conftest import Driver
 
@@ -148,3 +149,16 @@ def test_eval_runner_coding_life_and_injection(monkeypatch: pytest.MonkeyPatch, 
     small.write_text(json.dumps({"cases": picked}), encoding="utf-8")
     report = runner.fixture(small)
     assert report["injected_hit@1"] is not None and report["injected_abstention"] == 1.0
+
+
+def test_doctor_says_when_an_agent_that_recorded_has_no_hooks_any_more(driver: Driver, conn, monkeypatch):
+    """Hooks removed (by hand or by another tool) leave the last recording behind: it must not read as working."""
+    from agent_mem.cli import health
+
+    driver.prompt("s1", "hallo")
+    conn.execute("INSERT OR REPLACE INTO health(component, last_ok_at) VALUES ('hook:claude', ?)", (timeutil.iso(),))
+    monkeypatch.setattr(health, "harness_installed", lambda harness: False)
+    check = next(c for c in health._capture_checks(conn) if c.name == "Claude Code recording")
+    assert not check.ok and check.warn_only and check.detail.startswith("off, no agent-mem hooks")
+    monkeypatch.setattr(health, "harness_installed", lambda harness: True)
+    assert next(c for c in health._capture_checks(conn) if c.name == "Claude Code recording").ok
