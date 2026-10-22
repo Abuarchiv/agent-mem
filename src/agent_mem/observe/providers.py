@@ -22,6 +22,8 @@ from typing import Any, ClassVar
 from mem0.configs.llms.base import BaseLlmConfig
 from mem0.llms.base import LLMBase
 
+from agent_mem.core import proc
+
 TIMEOUT_S = 120
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -72,11 +74,6 @@ def _run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE")}
     env["AGENT_MEM_INTERNAL"] = "1"
     env.update(extra_env or {})
-    group: dict[str, Any] = (
-        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-        if sys.platform == "win32"
-        else {"start_new_session": True}
-    )
     with tempfile.TemporaryDirectory() as cwd:
         process = subprocess.Popen(
             cmd,
@@ -86,7 +83,7 @@ def _run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -
             text=True,
             cwd=cwd,
             env=env,
-            **group,
+            **proc.hidden(new_group=True),
         )
         try:
             stdout, stderr = process.communicate(prompt, timeout=TIMEOUT_S)
@@ -114,7 +111,9 @@ def _error_text(stdout: str, stderr: str) -> str:
 def _kill_group(process: subprocess.Popen[str]) -> None:
     with contextlib.suppress(OSError, subprocess.SubprocessError):
         if sys.platform == "win32":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False)
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False, **proc.hidden()
+            )
         else:
             os.killpg(process.pid, signal.SIGKILL)
     with contextlib.suppress(OSError):

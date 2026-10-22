@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_mem.core import timeutil
+from agent_mem.core import proc, timeutil
 
 
 @dataclass(frozen=True)
@@ -44,6 +44,7 @@ def _git(cwd: Path, *args: str) -> str | None:
             timeout=2,
             check=False,
             env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"},
+            **proc.hidden(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

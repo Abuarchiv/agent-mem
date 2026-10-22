@@ -20,7 +20,7 @@ import threading
 import time
 from typing import Any
 
-from agent_mem.core import db, logutil, spool, timeutil
+from agent_mem.core import db, logutil, proc, spool, timeutil
 from agent_mem.core.config import Config, env_flag, load
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture, inject
@@ -81,26 +81,7 @@ def render(harness: str, event: Event, response: capture.Response) -> dict[str, 
 
 
 def spawn_indexer(config: Config) -> bool:
-    env = {**os.environ, "AGENT_MEM_DATA_DIR": str(config.data_dir), "AGENT_MEM_INTERNAL": "1"}
-    kwargs: dict[str, Any] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
-        "env": env,
-    }
-    if sys.platform == "win32":
-        flags = 0
-        for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
-            flags |= getattr(subprocess, name, 0)
-        kwargs["creationflags"] = flags
-    else:
-        kwargs["start_new_session"] = True
-    try:
-        subprocess.Popen([sys.executable, "-m", "agent_mem", "index", "--quiet"], **kwargs)
-    except OSError:
-        return False
-    return True
+    return _spawn([sys.executable, "-m", "agent_mem", "index", "--quiet"], config)
 
 
 def _maybe_spawn(conn: sqlite3.Connection, config: Config, wanted: bool) -> None:
@@ -194,14 +175,8 @@ def _spawn(argv: list[str], config: Config) -> bool:
         "stderr": subprocess.DEVNULL,
         "close_fds": True,
         "env": env,
+        **proc.hidden(new_group=True),
     }
-    if sys.platform == "win32":
-        flags = 0
-        for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
-            flags |= getattr(subprocess, name, 0)
-        kwargs["creationflags"] = flags
-    else:
-        kwargs["start_new_session"] = True
     try:
         subprocess.Popen(argv, **kwargs)
     except OSError:
