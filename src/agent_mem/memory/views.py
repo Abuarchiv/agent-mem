@@ -30,6 +30,8 @@ def search_lines(hits: list[search.Hit], weak: list[search.Hit] | None = None, f
         lines.append(
             f"{hit.label} · {timeutil.day(hit.ts)} · {origin} · score {hit.score:.2f}{stale}\n  {first_line(hit.title or hit.text, 160)}"
         )
+        if hit.passage:
+            lines.append(f"  output: {hit.passage}")
     lines.append(footer)
     return "\n".join(lines)
 

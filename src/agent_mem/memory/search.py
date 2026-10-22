@@ -375,6 +375,9 @@ class Hit:
     # What a turn is about: request, answer, files, errors. Command lines are left out: their paths and
     # flags match almost any two words of a question ("tests" in tests/test_x.py).
     topic: str = ""
+    # The part of a tool's output that names the question's file or identifier ("…006_work_tokens.sql
+    # 007_relations.sql…"): the detail is often only there, never in the request or the answer.
+    passage: str = ""
 
     @property
     def label(self) -> str:
@@ -665,6 +668,42 @@ def _capped(candidates: list[Hit], limit: int, max_per_session: int) -> list[Hit
     return results
 
 
+_CODE_NAME = re.compile(r"\w[\w-]*(?:[._/]\w+)+")  # 006_work_tokens.sql, inject.py, _clean_json, core/db
+RARE_NAME_TURNS, PASSAGE_CHARS = 25, 400
+
+
+def output_candidates(
+    conn: sqlite3.Connection, projects: list[str | None], terms: Sequence[str]
+) -> tuple[list[Owner], dict[Owner, str]]:
+    """Turns whose tool output names a file or identifier of the question, with the passage around it. A name in
+    dozens of turns (inject.py) says nothing about which one; a rare one (006_work_tokens.sql) is the question.
+    Output from outside (web pages) stays out: it is shown verbatim."""
+    where, params = _in("t.project_id", projects)
+    owners: list[Owner] = []
+    passages: dict[Owner, str] = {}
+    # A version (0.162) is in every banner and changelog of its tool: names need a letter.
+    for name in [t for t in terms if _CODE_NAME.fullmatch(t) and re.search(r"[^\W\d]", t)][:3]:
+        rows = conn.execute(
+            f"SELECT e.turn_id, e.payload FROM events e JOIN turns t ON t.id = e.turn_id WHERE e.kind = 'tool' "
+            f"AND e.trust != 'tool_external' AND {where} AND instr(lower(e.payload), ?) > 0 ORDER BY e.id DESC",
+            (*params, name),
+        ).fetchall()
+        if len({row[0] for row in rows}) > RARE_NAME_TURNS:
+            continue
+        for row in rows:
+            owner: Owner = ("t", int(row[0]))
+            if owner in passages:
+                continue
+            output = str(json.loads(row[1]).get("output") or "")
+            at = output.lower().find(name)
+            if at < 0:
+                continue  # only the command names it
+            start = max(0, at - PASSAGE_CHARS // 4)
+            passages[owner] = " ".join(output[start : start + PASSAGE_CHARS].split())
+            owners.append(owner)
+    return owners, passages
+
+
 def search(
     conn: sqlite3.Connection,
     config: Config,
@@ -672,12 +711,18 @@ def search(
     *,
     vector_source: Callable[[str, int], list[Owner]] | None = None,
     graph_source: Callable[[sqlite3.Connection, str | None, list[str], int], list[Owner]] | None = None,
+    tool_outputs: bool = False,
     record_shown: bool = False,
     now: datetime | None = None,
 ) -> list[Hit]:
+    """``tool_outputs`` also looks for the question's file and identifier names in what tools printed: a scan of
+    the events, too slow for a hook's deadline, fine for an agent's search."""
     terms = query_terms(query.text)
     projects = scope(conn, query.project_id)
     lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
+    passages: dict[Owner, str] = {}
+    if tool_outputs:
+        lists["output"], passages = output_candidates(conn, projects, terms)
     # The graph says how strongly a hit is tied to the files and commands the question names. It only reorders the
     # hits the text and the vectors found: as a list of its own in the fusion it would outvote exact matches with
     # whatever touched such a file last.
@@ -701,9 +746,11 @@ def search(
             continue
         hit.rrf = score / max_rrf if max_rrf else 0.0
         hit.sources = sources
+        hit.passage = passages.get(owner, "")
         # A long memory (another harness's session summary) contains nearly any word; like a turn it is judged by its
         # start.
-        hit.coverage, hit.matched_terms = coverage(hit.topic if hit.owner[0] == "t" else hit.text[:800], terms)
+        judged = hit.topic + "\n" + hit.passage if hit.owner[0] == "t" else hit.text[:800]
+        hit.coverage, hit.matched_terms = coverage(judged, terms)
         candidates.append(hit)
     stats = learn.owner_stats(conn, [h.owner for h in candidates], now)
     for hit in candidates:

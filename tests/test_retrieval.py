@@ -7,7 +7,7 @@ import numpy as np
 from agent_mem.core import db, timeutil
 from agent_mem.core.config import Config
 from agent_mem.hooks import inject
-from agent_mem.memory import consolidate, search, semantic, store
+from agent_mem.memory import consolidate, search, semantic, store, views
 from tests.conftest import Driver
 
 
@@ -451,3 +451,21 @@ def test_an_old_answer_that_names_the_question_still_passes_the_gate(config: Con
     old = search.Hit(owner=("t", 1), score=0.2, matched_terms=3, coverage=0.75)
     vague = search.Hit(owner=("t", 2), score=0.2, matched_terms=2, coverage=0.5)
     assert search.confident(old, config, terms) and not search.confident(vague, config, terms)
+
+
+def test_a_name_only_in_a_tool_output_is_found_by_the_agents_search(driver: Driver, conn, config: Config):
+    """Which migration follows 006? The answer was only in what ls printed, never in the request or the answer."""
+    driver.prompt("s1", "prüfe die Nummern im Schema-Ordner")
+    driver.bash("s1", "ls src/core/schema", "001_init.sql\n005_concepts.sql\n006_work_tokens.sql\n007_relations.sql")
+    driver.stop("s1", "Keine doppelte Nummer.")
+    driver.prompt("s2", "räume die README auf")
+    driver.stop("s2", "README gekürzt.")
+    for row in conn.execute("SELECT id FROM turns").fetchall():
+        store.index_turn(conn, row[0])
+    question = "Welche Migration folgt auf 006_work_tokens.sql?"
+    hits = semantic.Retriever(conn, config).search(question, _pid(conn), record_shown=False)
+    assert hits and "007_relations.sql" in hits[0].passage
+    assert "output: " in views.search_lines(hits)
+    # The hook's path stays an index lookup: no scan of the events within its deadline.
+    hits = search.search(conn, config, search.Query(text=question, project_id=_pid(conn)))
+    assert all(not h.passage for h in hits)

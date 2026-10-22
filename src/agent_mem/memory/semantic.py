@@ -345,6 +345,7 @@ class Retriever:
             query,
             vector_source=self.vector_source(project_id) if self.embedder else None,
             graph_source=self.graph_source,
+            tool_outputs=True,
             record_shown=record_shown,
             now=now,
         )
