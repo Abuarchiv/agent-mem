@@ -5,19 +5,21 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system --add safe.directory '*'
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/
 
 # The agent CLIs that write facts, each logged in once inside the container (`agent-mem login <agent>`).
 # install-docker.sh passes only the agents found on your computer; each one is 180 to 370 MB.
 # They keep their login in /data/cli-home, so the read-only home folder of the host stays untouched.
 ARG AGENTS="claude codex copilot opencode"
+# Pinned: a new CLI release can change its flags or output; raise these on purpose and rebuild.
+ARG CLAUDE_VERSION=2.1.308 CODEX_VERSION=0.163.0 COPILOT_VERSION=1.0.102 OPENCODE_VERSION=2.1.2
 RUN mkdir -p /opt/cli-bin \
  && for agent in $AGENTS; do \
       case $agent in \
-        claude) npm install -g @anthropic-ai/claude-code ;; \
-        codex) npm install -g @openai/codex ;; \
-        copilot) npm install -g @github/copilot ;; \
-        opencode) curl -fsSL https://opencode.ai/v2/install | HOME=/opt/opencode bash >/dev/null \
+        claude) npm install -g @anthropic-ai/claude-code@$CLAUDE_VERSION ;; \
+        codex) npm install -g @openai/codex@$CODEX_VERSION ;; \
+        copilot) npm install -g @github/copilot@$COPILOT_VERSION ;; \
+        opencode) curl -fsSL https://opencode.ai/v2/install | HOME=/opt/opencode bash -s -- --version $OPENCODE_VERSION >/dev/null \
                   && ln -s /opt/opencode/.opencode/bin/opencode /usr/local/bin/opencode ;; \
         *) echo "unknown agent $agent" >&2; exit 1 ;; \
       esac || exit 1; \
