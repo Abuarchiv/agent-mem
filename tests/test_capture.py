@@ -313,3 +313,17 @@ def test_a_background_task_notice_continues_the_running_turn(driver: Driver, con
     driver.prompt("s1", notice)
     driver.stop("s1", "Noted.")
     assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2
+
+
+def test_a_plugin_that_reads_no_context_gets_none_built(conn, config, project):
+    """OpenCode's v2 plugin discards what the hook prints: no context is built, nothing counts as injected."""
+    from agent_mem.hooks import hook
+
+    oc = Driver(conn, config, project, harness="opencode")
+    oc.prompt("o1", "Port the scheduler to asyncio")
+    oc.stop("o1", "Ported.")
+    payload = {"sessionID": "o2", "cwd": str(project), "reads_context": False}
+    assert hook.run("opencode", "session.start", json.dumps(payload), config) == ""
+    assert hook.run("opencode", "chat.message", json.dumps({**payload, "prompt": "scheduler asyncio"}), config) == ""
+    assert conn.execute("SELECT COUNT(*) FROM accesses WHERE kind = 'injected'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM turns WHERE prompt = 'scheduler asyncio'").fetchone()[0] == 1

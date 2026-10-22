@@ -44,6 +44,8 @@ def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event |
         cwd=text_of(get(payload, "cwd")),
         raw_kind=name,
     )
+    if get(payload, "reads_context") is False:
+        event.extra["reads_context"] = False
     if kind == "session_start":
         event.source = text_of(get(payload, "source")) or "startup"
     elif kind == "prompt":

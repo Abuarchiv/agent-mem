@@ -35,7 +35,8 @@ function callHook(event: string, payload: Record<string, unknown>): void {
           }, TIMEOUT_MS)
           child.on("error", done)
           child.on("close", done)
-          child.stdin.end(JSON.stringify({ event, ts: Date.now(), ...payload }))
+          // stdout is ignored: agent-mem then records without building context nobody reads.
+          child.stdin.end(JSON.stringify({ event, ts: Date.now(), reads_context: false, ...payload }))
         } catch {
           resolve() // never surface memory errors
         }

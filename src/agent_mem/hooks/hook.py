@@ -214,7 +214,10 @@ class _Worker(threading.Thread):
         conn: sqlite3.Connection | None = None
         try:
             conn = db.connect(self.config, fresh_only=True)
-            self.response = capture.apply(conn, self.config, self.event)
+            # A plugin that discards the hook's output (OpenCode v2 has no context injection) says so: building
+            # context there would count memories as given to an agent that never saw them.
+            with_context = self.event.extra.get("reads_context") is not False
+            self.response = capture.apply(conn, self.config, self.event, with_context=with_context)
             _maybe_spawn(conn, self.config, self.response.wants_indexer)
             if self.event.kind in {"stop", "session_end"}:
                 spawn_observer(self.config)
