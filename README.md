@@ -272,7 +272,7 @@ After a request ends, agent-mem reads the agent's own transcript and stores the 
 | Copilot | `~/.copilot/session-state/<id>/events.jsonl` |
 | OpenCode | not measured |
 
-A memory carries its request's share (the request's work divided by the memories it produced), so several memories from one request count that request once.
+A memory carries its request's share (the request's work divided by the memories it produced), so several memories from one request count that request once. Over 7 days each memory counts once, however many sessions were given it.
 
 ## Supported versions
 
