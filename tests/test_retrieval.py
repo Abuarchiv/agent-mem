@@ -443,3 +443,11 @@ def test_an_exact_match_is_not_outvoted_by_recent_work_on_a_file_with_the_word_i
     query = search.Query(text="Wie geht die Viewer-Timeline mit Sessions ohne Turns um?", project_id=project_id)
     hits = search.search(conn, config, query)
     assert hits and hits[0].owner == ("m", exact)
+
+
+def test_an_old_answer_that_names_the_question_still_passes_the_gate(config: Config):
+    """Age and disuse lower the score; a hit naming most of the question's words is injected anyway."""
+    terms = ["datei", "historie", "harnesses", "commit"]
+    old = search.Hit(owner=("t", 1), score=0.2, matched_terms=3, coverage=0.75)
+    vague = search.Hit(owner=("t", 2), score=0.2, matched_terms=2, coverage=0.5)
+    assert search.confident(old, config, terms) and not search.confident(vague, config, terms)

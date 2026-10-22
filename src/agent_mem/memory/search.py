@@ -730,9 +730,15 @@ def search(
     return results
 
 
+NAMED_TERMS, NAMED_COVERAGE = 3, 0.6
+
+
 def confident(hit: Hit, config: Config, terms: Sequence[str]) -> bool:
     """Abstention gate for automatic injection: never inject weak matches."""
-    if hit.score < config.retrieval.inject_min_score:
+    # The score falls with age and disuse; a hit that names most of a question's words is still the answer, however
+    # old (a decision from last month must not give way to this week's unrelated work).
+    named = hit.matched_terms >= NAMED_TERMS and hit.coverage >= NAMED_COVERAGE
+    if hit.score < config.retrieval.inject_min_score and not named:
         return False
     # A semantic hit still has to share a third of the question's content words: unrelated questions share one
     # generic word of five or more, related ones at least one of three.
