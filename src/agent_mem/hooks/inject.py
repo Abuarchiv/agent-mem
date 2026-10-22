@@ -436,7 +436,9 @@ def prompt_hints(
         if len(part) >= 3:
             prompt = re.sub(rf"\b{re.escape(part)}\b", " ", prompt, flags=re.IGNORECASE)
     terms = search.query_terms(prompt)
-    if len(terms) < 1:
+    # One plain word is an instruction ("mache weiter", "push", "verbessere noch mehr"), not a question: it matched
+    # some old turn with the same word in 20 of 39 such prompts. One code name ("drawEdges", "db.py") still asks.
+    if not terms or (len(terms) == 1 and not _CODE_WORD.search(prompt)):
         return None
     query = search.Query(
         text=prompt,
@@ -459,6 +461,7 @@ def prompt_hints(
 
 
 PROMPT_HITS = 10
+_CODE_WORD = re.compile(r"\b[a-z]+[A-Z]\w*|\w+[_.]\w+|\b\w*\d\w*[A-Za-z]\w*")  # camelCase, snake_case, db.py, 006_x
 
 
 def _detail(budget_tokens: int, hits: int) -> int:

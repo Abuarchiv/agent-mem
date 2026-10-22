@@ -514,3 +514,15 @@ def test_the_agents_search_finds_a_detail_deep_in_a_long_answer(driver: Driver, 
     assert "answer: " in views.search_lines(hits)
     hook_hits = search.search(conn, config, search.Query(text=question, project_id=_pid(conn)))
     assert all(not h.passage for h in hook_hits)
+
+
+def test_a_one_word_instruction_gets_no_memories_but_a_code_name_does(driver: Driver, conn, config: Config):
+    """ "mache weiter" or "push" is an instruction: an old turn that says "weiter" is no answer to it."""
+    driver.prompt("s1", "mache weiter mit dem Parser")
+    driver.edit("s1", "src/parser.py")
+    driver.stop("s1", "Weiter umgebaut: parseLine liest jetzt Tabs.")
+    store.index_turn(conn, conn.execute("SELECT id FROM turns").fetchone()[0])
+    pid = _pid(conn)
+    for prompt in ("mache weiter", "push", "verbessere noch mehr"):
+        assert inject.prompt_hints(conn, config, pid, "s2", prompt, "claude") is None, prompt
+    assert inject.prompt_hints(conn, config, pid, "s2", "parser.py", "claude") is not None
