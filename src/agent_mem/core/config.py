@@ -190,7 +190,9 @@ class Config:
 
     @property
     def model_dir(self) -> Path:
-        return self.data_dir / "models"
+        # The Docker image keeps its models outside the memory volume, so a new image brings new ones.
+        override = os.environ.get("AGENT_MEM_MODEL_DIR")
+        return Path(override).expanduser() if override else self.data_dir / "models"
 
     @property
     def lock_path(self) -> Path:

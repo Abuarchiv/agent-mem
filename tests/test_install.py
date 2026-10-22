@@ -361,3 +361,10 @@ def test_docker_setup_says_only_what_holds_on_the_host(homes: Path, config, monk
     out = capsys.readouterr().out
     assert f"registered with {homes / 'agent-mem'}" in out
     assert "Detected" not in out and "not installed" not in out and "autostart" not in out
+
+
+def test_models_can_live_outside_the_data_folder(config, monkeypatch, tmp_path: Path) -> None:
+    """The Docker image ships the models; in the memory volume a newer image could never replace them."""
+    assert config.model_dir == config.data_dir / "models"
+    monkeypatch.setenv("AGENT_MEM_MODEL_DIR", str(tmp_path / "image-models"))
+    assert config.model_dir == tmp_path / "image-models"

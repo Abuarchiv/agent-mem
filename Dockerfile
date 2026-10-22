@@ -2,26 +2,35 @@
 # Build: docker build -t agent-mem https://github.com/Abuarchiv/agent-mem.git
 FROM node:22-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system --add safe.directory '*'
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/
 
 # The agent CLIs that write facts, each logged in once inside the container (`agent-mem login <agent>`).
+# install-docker.sh passes only the agents found on your computer; each one is 180 to 370 MB.
 # They keep their login in /data/cli-home, so the read-only home folder of the host stays untouched.
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot && npm cache clean --force \
- && mkdir -p /opt/cli-bin \
- && for cli in claude codex copilot; do \
-      printf '#!/bin/sh\nHOME=/data/cli-home exec /usr/local/bin/%s "$@"\n' "$cli" > /opt/cli-bin/$cli; \
+ARG AGENTS="claude codex copilot opencode"
+RUN mkdir -p /opt/cli-bin \
+ && for agent in $AGENTS; do \
+      case $agent in \
+        claude) npm install -g @anthropic-ai/claude-code ;; \
+        codex) npm install -g @openai/codex ;; \
+        copilot) npm install -g @github/copilot ;; \
+        opencode) curl -fsSL https://opencode.ai/v2/install | HOME=/opt/opencode bash >/dev/null \
+                  && ln -s /opt/opencode/.opencode/bin/opencode /usr/local/bin/opencode ;; \
+        *) echo "unknown agent $agent" >&2; exit 1 ;; \
+      esac || exit 1; \
+      printf '#!/bin/sh\nHOME=/data/cli-home exec /usr/local/bin/%s "$@"\n' "$agent" > /opt/cli-bin/$agent; \
     done \
- && chmod a+rx /opt/cli-bin/*
+ && npm cache clean --force && chmod -R a+rx /opt/cli-bin
 
-ENV UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/opt/uv/bin UV_PYTHON_INSTALL_DIR=/opt/uv/python \
-    AGENT_MEM_DATA_DIR=/data AGENT_MEM_VIEWER_BIND=0.0.0.0 AGENT_MEM_IN_DOCKER=1
+ENV UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/opt/uv/bin UV_PYTHON_INSTALL_DIR=/opt/uv/python UV_COMPILE_BYTECODE=1 \
+    AGENT_MEM_DATA_DIR=/data AGENT_MEM_MODEL_DIR=/opt/models AGENT_MEM_VIEWER_BIND=0.0.0.0 AGENT_MEM_IN_DOCKER=1
 ENV PATH=/opt/cli-bin:/opt/uv/bin:$PATH
 COPY . /tmp/agent-mem
 RUN uv tool install --python 3.12 "/tmp/agent-mem[semantic,observer]" && rm -rf /tmp/agent-mem /root/.cache \
- && agent-mem models install \
+ && agent-mem models install && rm -rf /data/* \
  && mkdir -p /data/cli-home && chmod 700 /data
 
 # The home folder of the host is mounted read-only; the container writes only to this volume.

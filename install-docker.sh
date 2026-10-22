@@ -21,8 +21,16 @@ if [ -e "$launcher" ] && ! grep -q "install-docker.sh" "$launcher" 2>/dev/null; 
   fail "$launcher is a normal agent-mem install. Keep using it, or remove it first: uv tool uninstall agent-mem"
 fi
 
-echo "Building the agent-mem image from $source (a few minutes the first time)..."
-docker build -t "$image" "$source" || fail "the image did not build. The error above names the cause."
+# Only the agents found here go into the image: each one adds 180 to 370 MB.
+agents=""
+for name in claude codex copilot opencode; do
+  command -v "$name" >/dev/null 2>&1 && agents="$agents $name"
+done
+agents=${AGENT_MEM_AGENTS:-${agents# }}
+[ -n "$agents" ] || agents="claude codex copilot opencode"
+echo "Building the agent-mem image with $agents from $source (a few minutes the first time)..."
+docker build -t "$image" --build-arg AGENTS="$agents" "$source" \
+  || fail "the image did not build. The error above names the cause."
 
 # The container reads your home folder (agent transcripts, git) but cannot change it; memory lives in the volume.
 docker rm -f agent-mem >/dev/null 2>&1 || true
@@ -37,6 +45,7 @@ cat > "$launcher" <<EOF
 image="$image"
 bin="$bin"
 port="$port"
+source="$source"
 EOF
 cat >> "$launcher" <<'EOF'
 case "${1:-}" in
@@ -51,7 +60,8 @@ case "${1:-}" in
       claude) exec docker exec -it agent-mem claude auth login ;;
       codex) exec docker exec -it agent-mem codex login --device-auth ;;
       copilot) exec docker exec -it agent-mem copilot login --device-code ;;
-      *) echo "usage: agent-mem login claude|codex|copilot (the agent that writes facts in the container)" >&2; exit 2 ;;
+      opencode) exec docker exec -it agent-mem opencode auth login ;;
+      *) echo "usage: agent-mem login claude|codex|copilot|opencode (the agent that writes facts in the container)" >&2; exit 2 ;;
     esac ;;
   setup|uninstall)
     # These write your agents' settings: the home folder writable, the hooks pointing at this file.
@@ -89,8 +99,11 @@ case "${1:-}" in
       exit 0
     fi ;;
   upgrade)
-    echo "Run install-docker.sh again: it builds the new image and keeps your memory."
-    exit 0 ;;
+    # A new image from the same source, same port; the memory volume and the logins stay.
+    script=https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install-docker.sh
+    curl -LsSf "$script" | AGENT_MEM_IMAGE="$image" AGENT_MEM_SOURCE="$source" AGENT_MEM_PORT="$port" \
+      AGENT_MEM_BIN_DIR="$bin" sh
+    exit $? ;;
 esac
 case "$PWD/" in "$HOME"/*) dir=$PWD ;; *) dir=/ ;; esac
 tty=""
@@ -108,9 +121,10 @@ echo "agent-mem runs in Docker. Connecting the agents on this computer..."
 "$launcher" setup all --write || echo "No agent connected yet. Later: agent-mem setup all --write"
 echo
 echo "Facts are written by your agent's CLI inside the container. Log it in once there:"
-for name in claude codex copilot; do
-  command -v "$name" >/dev/null 2>&1 && echo "  agent-mem login $name"
+for name in $agents; do
+  echo "  agent-mem login $name"
 done
 echo
-echo "Viewer: http://localhost:$port/  Check: agent-mem doctor  Undo: agent-mem uninstall all, then docker rm -f agent-mem"
+echo "Viewer: http://localhost:$port/  Check: agent-mem doctor  Update: agent-mem upgrade"
+echo "Undo: agent-mem uninstall all, then docker rm -f agent-mem"
 case ":$PATH:" in *":$bin:"*) ;; *) echo "Add $bin to your PATH to use the agent-mem command." ;; esac

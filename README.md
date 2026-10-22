@@ -70,10 +70,10 @@ For people who want nothing but Docker on the computer. Your agents stay where t
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/main/install-docker.sh | sh
-agent-mem login claude                # once per agent that should write facts: claude, codex or copilot
+agent-mem login claude                # once per agent that should write facts: claude, codex, copilot, opencode
 ```
 
-1. The script builds the image (about 3 GB, a few minutes the first time) and starts the container. It restarts with Docker.
+1. The script builds the image with the agent CLIs it finds here (1.5 to 3 GB, a few minutes the first time) and starts the container. It restarts with Docker.
 2. It writes a small `agent-mem` command to `~/.local/bin`, which runs everything in the container.
 3. It connects every agent it finds here, as `setup all --write` does. Their hooks and MCP server use that command.
 
@@ -81,7 +81,7 @@ agent-mem login claude                # once per agent that should write facts: 
 - **Facts** are written by the agent CLIs inside the container, so log each one in once with `agent-mem login <agent>`. Until then requests are recorded and searchable, and they wait for facts.
 - **Viewer:** `agent-mem view` opens http://localhost:37778/. Another port: `AGENT_MEM_PORT=37790` before the install line.
 - **Docker closed:** hooks end silently and your agent works without memory.
-- **Update:** run the install line again. **Remove:** `agent-mem uninstall all`, `docker rm -f agent-mem`, `rm ~/.local/bin/agent-mem`; `docker volume rm agent-mem-data` deletes the memory.
+- **Update:** `agent-mem upgrade` builds the new image; memory and logins stay. **Remove:** `agent-mem uninstall all`, `docker rm -f agent-mem`, `rm ~/.local/bin/agent-mem`; `docker volume rm agent-mem-data` deletes the memory.
 - Every hook starts a `docker exec`: about 150 ms per event instead of about 70 ms. Windows: use the PowerShell install script.
 
 ### Agent in a container (Docker, Dev Containers)
