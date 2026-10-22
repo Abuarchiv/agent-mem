@@ -108,6 +108,17 @@ def test_query_terms_drop_question_words_and_split_compounds():
         "parse.py",
     ]
     assert search.stem("deployt") == "deploy" and search.stem("installiere") == "installier"
+    # Words around the topic are no topic; seven digits and more are an id.
+    assert search.query_terms("Was merkt sich der Hook beim Start ohne Projekt, siehe 8760496?") == [
+        "merkt",
+        "hook",
+        "start",
+        "siehe",
+        "8760496",
+    ]
+    # A long compound is about its first word: the install scripts are install.sh and install.ps1.
+    assert search.coverage("`install.sh` und `install.ps1` liegen im sdist", ["installationsskripte"]) == (1.0, 1)
+    assert search.coverage("ein anderer Text", ["installationsskripte"]) == (0.0, 0)
     assert search.stem("branches") == "branch" and search.stem("code") == "code" and search.stem("v1.2") == "v1.2"
 
 

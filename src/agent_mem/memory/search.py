@@ -280,6 +280,60 @@ STOPWORDS = {
     "thanks",
     "get",
     "got",
+    # function words a question uses around its topic
+    "als",
+    "ans",
+    "aufs",
+    "beim",
+    "bis",
+    "bereits",
+    "deren",
+    "dessen",
+    "durch",
+    "eines",
+    "gegen",
+    "ihre",
+    "ihrem",
+    "ihren",
+    "ins",
+    "jede",
+    "jedem",
+    "jeden",
+    "jeder",
+    "jedes",
+    "jeweils",
+    "ohne",
+    "pro",
+    "seit",
+    "seine",
+    "seinem",
+    "seinen",
+    "seiner",
+    "sich",
+    "sondern",
+    "sowie",
+    "während",
+    "wobei",
+    "wodurch",
+    "woher",
+    "wohin",
+    "wonach",
+    "worin",
+    "worüber",
+    "wozu",
+    "zwischen",
+    "after",
+    "before",
+    "each",
+    "every",
+    "other",
+    "than",
+    "via",
+    "per",
+    "onto",
+    "upon",
+    "while",
+    "whose",
 }
 # "Logging-Bibliothek", "node-version": letters joined by hyphens are searched as their parts.
 _COMPOUND = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)+")
@@ -516,8 +570,17 @@ def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
     if not terms:
         return 0.0, 0
     lowered = text.lower()
-    matched = sum(1 for term in terms if stem(term) in lowered)
+    matched = sum(1 for term in terms if stem(term) in lowered or _head(term) in lowered)
     return matched / len(terms), matched
+
+
+def _head(term: str) -> str:
+    """The first word of a long compound: "installationsskripte" is about "install", "projektpfade" about
+    "projekt". Shorter words stay whole (the result never matches anything then)."""
+    return term[:COMPOUND_HEAD] if term.isalpha() and len(term) >= COMPOUND_MIN else "\0"
+
+
+COMPOUND_MIN, COMPOUND_HEAD = 12, 7
 
 
 def scope(conn: sqlite3.Connection, project_id: str | None) -> list[str | None]:
