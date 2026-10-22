@@ -594,15 +594,31 @@ _DEFINES = re.compile(
 )
 
 
+_CODE_SUFFIXES = (".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".go", ".rs")
+# A heredoc that writes a file or feeds an interpreter; a commit message in a heredoc defines nothing.
+_WRITING_HEREDOC = re.compile(r">\s*\S+\s*<<|<<[^\n]*>\s*\S|\b(?:python3?|node|tee)\b[^\n]*<<")
+
+
 def defined_names(category: str, tool_input: Any) -> list[str]:
     """The names an edit or a file-writing script defines, new ones first: "which function does X" is answered by
     them, and they are only in the change itself. The replaced text's names count last."""
-    if isinstance(tool_input, dict):
-        before = str(tool_input.get("old_string") or tool_input.get("oldString") or "")
-        text = " ".join(str(v) for k, v in tool_input.items() if k not in {"old_string", "oldString"})
+    if category == "edit" and isinstance(tool_input, dict):
+        path = str(tool_input.get("file_path") or tool_input.get("filePath") or tool_input.get("path") or "")
+        if path and not path.lower().endswith(_CODE_SUFFIXES):
+            return []  # prose in a README ("handles returns") is no definition
+        edits = [e for e in tool_input.get("edits") or [] if isinstance(e, dict)] or [tool_input]  # MultiEdit
+        before = " ".join(str(e.get("old_string") or e.get("oldString") or "") for e in edits)
+        text = " ".join(
+            str(v)
+            for e in edits
+            for k, v in e.items()
+            if k not in {"old_string", "oldString", "edits"} and isinstance(v, str)
+        )
+    elif category == "shell":
+        before, text = "", str(command_of(tool_input) or tool_input or "")
+        if not _WRITING_HEREDOC.search(text) and "write_text" not in text:
+            return []
     else:
-        before, text = "", str(tool_input or "")
-    if category not in {"edit", "shell"} or (category == "shell" and "<<" not in text and "write_text" not in text):
         return []
     old = {a or b for a, b in _DEFINES.findall(before)}
     names = list(dict.fromkeys(a or b for a, b in _DEFINES.findall(text)))
@@ -610,11 +626,18 @@ def defined_names(category: str, tool_input: Any) -> list[str]:
 
 
 # A line reference is stale after the next change; the file name stays ("`cli/commands.py:302-311`" -> path).
-_LINE_REF = re.compile(r"(\.[A-Za-z]{1,4}):\d+(?:[-–]\d+)?(?:[,/]\d+(?:[-–]\d+)?)*")
-# The extraction model talking about its own task instead of the project ("nothing new is recorded here").
+# Only after a source file's suffix: "myhost.dev:3000" or "github.com:22" keep their port.
+_LINE_REF = re.compile(
+    r"(\.(?:py|pyi|js|jsx|mjs|cjs|ts|tsx|go|rs|java|kt|rb|php|c|h|cc|cpp|hpp|cs|swift|sql|sh|md|toml|yaml|yml|json|css|html))"
+    r":\d+(?:[-–]\d+)?(?:\s*[,/]\s*\d+(?:[-–]\d+)?)*\b"
+)
+# The extraction model talking about its own task instead of the project ("nothing new is recorded here"): only
+# whole statements of that kind, never a fact that merely mentions extraction or storage.
 _ABOUT_EXTRACTION = re.compile(
-    r"(?i)\b(memory[- ]extra\w*|memory-extraktion|nichts neues festgehalten|keine neuen dauerhaften|"
-    r"nothing (new )?(to|is|will be) (record|remember|stor)\w*|no (new )?(durable|lasting) facts?)\b"
+    r"(?i)(hier wird nichts neues festgehalten|daher wird (hier )?nichts|keine neuen dauerhaften fakten|"
+    r"^\s*(nothing|no new (durable |lasting )?facts?) (new )?(to|is|are|will be) (record|remember|stor|extract)\w*|"
+    r"(enthält|contains) keine (neuen )?(dauerhaften )?(fakten|informationen)|"
+    r"\bno (new )?(durable|lasting) facts?\b)"
 )
 
 

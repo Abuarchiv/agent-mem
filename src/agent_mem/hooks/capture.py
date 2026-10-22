@@ -93,6 +93,16 @@ def exclude_globs(config: Config, project: identity.Project | None) -> list[str]
     return [*config.exclude_globs, *extra]
 
 
+def _excluded(project: identity.Project | None, files: tuple[str, ...] | list[str], globs: list[str]) -> list[str]:
+    """Files a privacy glob covers. Tools name absolute paths; "private/**" is written relative to the project."""
+    return [
+        f
+        for f in files
+        if privacy.path_excluded(f, globs)
+        or (project is not None and privacy.path_excluded(identity.relative_path(project.root, f), globs))
+    ]
+
+
 def apply(conn: sqlite3.Connection, config: Config, event: Event, *, with_context: bool = True) -> Response:
     if event.kind in {"pre_tool", "tool"} and event.is_own_tool:
         return Response()
@@ -208,7 +218,7 @@ def _payload(config: Config, event: Event, project: identity.Project | None) -> 
         data["category"] = tool_signal.category
         data["trust"] = "tool_external" if tool_signal.category in {"web", "mcp"} else "tool_local"
         globs = exclude_globs(config, project)
-        excluded = [f for f in tool_signal.files if privacy.path_excluded(f, globs)]
+        excluded = _excluded(project, tool_signal.files, globs)
         try:
             raw_input = (
                 event.tool_input
@@ -560,8 +570,9 @@ def _file_history(conn, config, project, project_id, session_id, tool_signal) ->
             )
     block = inject.file_history_block(lines, config)
     if block:
-        kind = "warned" if not reading else "shown"
-        learn.record_access(conn, block.owners, kind, session_id)
+        # Given to the agent like an injection (counted in the day's tokens and in the work it saved); "shown" is
+        # for search results the agent may not read.
+        learn.record_access(conn, block.owners, "warned", session_id)
     return block
 
 
@@ -616,8 +627,17 @@ def _on_tool(conn, config, event, project, project_id, session_id, event_id, pay
         _append_json(conn, turn_id, "files_json", files)
     if tool_signal.command:
         _append_json(conn, turn_id, "commands_json", [privacy.clean_text(tool_signal.command, 200)])
-    if not event.tool_failed and not any(store.scratch_path(f) for f in files):
-        names = signals.defined_names(tool_signal.category, event.tool_input)
+    if (
+        not event.tool_failed
+        and not any(store.scratch_path(f) for f in files)
+        and not _excluded(project, tool_signal.files, exclude_globs(config, project))
+    ):
+        tool_input = event.tool_input
+        if isinstance(tool_input, dict):
+            tool_input = {k: privacy.strip_private(v) if isinstance(v, str) else v for k, v in tool_input.items()}
+        elif isinstance(tool_input, str):
+            tool_input = privacy.strip_private(tool_input)
+        names = signals.defined_names(tool_signal.category, tool_input)
         _append_json(conn, turn_id, "defines_json", names[:12], cap=30)
     if tool_signal.command_kind == "commit" and not event.tool_failed:
         _append_json(

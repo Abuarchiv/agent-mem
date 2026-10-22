@@ -327,3 +327,26 @@ def test_a_plugin_that_reads_no_context_gets_none_built(conn, config, project):
     assert hook.run("opencode", "chat.message", json.dumps({**payload, "prompt": "scheduler asyncio"}), config) == ""
     assert conn.execute("SELECT COUNT(*) FROM accesses WHERE kind = 'injected'").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM turns WHERE prompt = 'scheduler asyncio'").fetchone()[0] == 1
+
+
+def test_names_from_an_excluded_file_are_not_kept(conn, config, project):
+    config.exclude_globs.append("private/**")
+    driver = Driver(conn, config, project)
+    driver.prompt("s1", "rechne die Gehälter")
+    driver.send(
+        "s1", "tool", tool="Edit", tool_use_id="e1", raw_kind="PostToolUse", tool_output="ok",
+        tool_input={"file_path": f"{project}/private/payroll.py", "old_string": "a", "new_string": "def ceo_salary(): pass"},
+    )  # fmt: skip
+    assert conn.execute("SELECT defines_json FROM turns").fetchone()[0] == "[]"
+
+
+def test_a_project_relative_exclusion_covers_the_absolute_path_a_tool_names(conn, config, project):
+    config.exclude_globs.append("private/**")
+    driver = Driver(conn, config, project)
+    driver.prompt("s1", "lies die Gehälter")
+    driver.send(
+        "s1", "tool", tool="Edit", tool_use_id="e2", raw_kind="PostToolUse", tool_output="ok",
+        tool_input={"file_path": f"{project}/private/payroll.py", "old_string": "a", "new_string": "CEO = 900000"},
+    )  # fmt: skip
+    payload = conn.execute("SELECT payload FROM events WHERE kind = 'tool'").fetchone()[0]
+    assert "900000" not in payload and "excluded by privacy rules" in payload

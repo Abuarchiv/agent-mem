@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -14,7 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from agent_mem.cli.install import claude_home, codex_home, copilot_home
+from agent_mem.cli.install import claude_home, codex_home, copilot_home, opencode_home
 from agent_mem.core import db, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import work
@@ -23,7 +24,6 @@ HARNESS_MARKERS = {
     "claude": [claude_home() / "plugins", claude_home() / "settings.json"],
     "codex": [codex_home() / "plugins", codex_home() / "hooks.json", codex_home() / "config.toml"],
     "copilot": [copilot_home() / "plugins", copilot_home() / "hooks"],
-    "opencode": [Path.home() / ".config" / "opencode"],
 }
 
 
@@ -36,10 +36,10 @@ class Check:
     warn_only: bool = False
 
 
-def _mentions(path: Path, needle: str, max_files: int = 400) -> bool:
+def _mentions(path: Path, needle: re.Pattern[str], max_files: int = 400) -> bool:
     if path.is_file():
         with contextlib.suppress(OSError):
-            return needle in path.read_text(encoding="utf-8", errors="ignore")
+            return bool(needle.search(path.read_text(encoding="utf-8", errors="ignore")))
         return False
     if not path.is_dir():
         return False
@@ -51,16 +51,21 @@ def _mentions(path: Path, needle: str, max_files: int = 400) -> bool:
         if count > max_files:
             break
         with contextlib.suppress(OSError):
-            if candidate.stat().st_size < 1_000_000 and needle in candidate.read_text(
-                encoding="utf-8", errors="ignore"
+            if candidate.stat().st_size < 1_000_000 and needle.search(
+                candidate.read_text(encoding="utf-8", errors="ignore")
             ):
                 return True
     return False
 
 
+# On Windows the command is `...\agent-mem.exe hook claude`; a path with spaces is quoted ("…/agent-mem" hook).
+_HOOK_COMMAND = re.compile(r"agent-mem(?:\.exe)?['\"]? hook")
+
+
 def harness_installed(harness: str) -> bool:
-    needle = "agent-mem hook" if harness != "opencode" else "agent-mem"
-    return any(_mentions(path, needle) for path in HARNESS_MARKERS[harness])
+    if harness == "opencode":  # read now: XDG_CONFIG_HOME moves its folder
+        return _mentions(opencode_home(), re.compile("agent-mem"))
+    return any(_mentions(path, _HOOK_COMMAND) for path in HARNESS_MARKERS[harness])
 
 
 LABELS = {"claude": "Claude Code", "codex": "Codex", "copilot": "Copilot CLI", "opencode": "OpenCode"}

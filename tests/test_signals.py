@@ -246,3 +246,24 @@ def test_commits_made_reads_git_output():
     assert signals.commits_made(log, quiet) == ["8760496 Aufräumen"]  # the newest line is the new commit
     assert signals.commits_made(log, "git log --oneline -3") == ["8760496 Aufräumen"]
     assert signals.commits_made(log) == []  # without the command no log line counts
+
+
+def test_defined_names_skip_commit_messages_and_prose_but_read_multiedit():
+    commit = {"command": "git commit -m \"$(cat <<'EOF'\nFix parsing handling\n\nThe def keyword in docs\nEOF\n)\""}
+    assert signals.defined_names("shell", commit) == []
+    assert signals.defined_names("shell", {"command": "cat > a.py <<'EOF'\ndef alpha(): pass\nEOF"}) == ["alpha"]
+    readme = {"file_path": "README.md", "old_string": "a", "new_string": "def handles returns"}
+    assert signals.defined_names("edit", readme) == []
+    multi = {
+        "file_path": "a.py",
+        "edits": [{"old_string": "x", "new_string": "def alpha():\n    pass\ndef beta(): pass"}],
+    }
+    assert signals.defined_names("edit", multi) == ["alpha", "beta"]
+
+
+def test_line_refs_and_extraction_notes():
+    text = "cli/commands.py:302-311, 20 und worker.py:239/352, myhost.dev:3000 und github.com:22"
+    assert signals.without_line_refs(text) == "cli/commands.py und worker.py, myhost.dev:3000 und github.com:22"
+    assert not signals.about_extraction("The memory extraction prompt lives in observe/coding_instructions.md")
+    assert not signals.about_extraction("nothing stored when the hook times out")
+    assert signals.about_extraction("Die Eingabe ist allgemein, daher wird hier nichts Neues festgehalten.")

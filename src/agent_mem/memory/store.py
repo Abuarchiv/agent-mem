@@ -401,8 +401,8 @@ def backfill_defines(conn: sqlite3.Connection) -> int:
     if db.get_meta(conn, "defines_backfilled"):
         return 0
     found: dict[int, list[str]] = {}
-    for turn_id, payload in conn.execute(
-        "SELECT e.turn_id, e.payload FROM events e JOIN turns t ON t.id = e.turn_id WHERE e.kind = 'tool' "
+    for turn_id, payload, event_files in conn.execute(
+        "SELECT e.turn_id, e.payload, e.files_json FROM events e JOIN turns t ON t.id = e.turn_id WHERE e.kind = 'tool' "
         "AND e.trimmed = 0 AND t.defines_json = '[]' ORDER BY e.id"
     ).fetchall():
         data = json.loads(payload)
@@ -412,8 +412,7 @@ def backfill_defines(conn: sqlite3.Connection) -> int:
             tool_input = json.loads(data.get("input") or "null")
         except ValueError:
             tool_input = data.get("input")
-        files = json.loads(conn.execute("SELECT files_json FROM turns WHERE id = ?", (turn_id,)).fetchone()[0])
-        if data.get("category") == "edit" and any(scratch_path(f) for f in files):
+        if any(scratch_path(f) for f in json.loads(event_files or "[]")):  # this event's files, as capture checks
             continue
         names = found.setdefault(int(turn_id), [])
         names += [n for n in signals.defined_names(data["category"], tool_input)[:12] if n not in names]
