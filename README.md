@@ -279,7 +279,7 @@ The model is the CLI you already pay for, started under your login without tools
 - **Links:** files, commands, errors and packages that occur together are linked and searched as a graph (Personalized PageRank).
 - **Cleanup:** daily: old unused memories rank lower, preferences that hold everywhere become global, replaced facts are retired.
 
-Search combines SQLite FTS5 (words), MiniLM vectors (meaning) and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the requests of that time first. A request keeps the commits it made (hash and subject, also after `git commit -q && git log --oneline -1`), so "which commit did X" finds the hash.
+Search combines SQLite FTS5 (words), MiniLM vectors (meaning) and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the requests of that time first. A request keeps the commits it made (hash and subject, also after `git commit -q && git log --oneline -1`), so "which commit did X" finds the hash. `mem_search` also looks for the file and code names of a question (`006_work_tokens.sql`, `_clean_json`) in what tools printed and shows the passage, because such details are often only there.
 
 ### Token savings, measured
 
