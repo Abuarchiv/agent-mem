@@ -101,8 +101,9 @@ REPLACED_GAP_HOURS = 1  # a correction waits at most about an hour; at most one 
 
 
 def due_projects(conn: sqlite3.Connection, now: datetime | None = None) -> list[str]:
-    """Projects with enough facts whose last review is older than ``EVERY_HOURS``, ``NEW_FACTS`` facts ago, or older
-    than ``REPLACED_GAP_HOURS`` with a new fact since that states a replacement."""
+    """Projects with enough facts and a new one since their last review, when that review is older than
+    ``EVERY_HOURS``, ``NEW_FACTS`` facts ago, or older than ``REPLACED_GAP_HOURS`` and a new fact states a
+    replacement."""
     now = now or timeutil.now()
     since = timeutil.iso(now - timedelta(hours=EVERY_HOURS))
     gap = timeutil.iso(now - timedelta(hours=REPLACED_GAP_HOURS))
@@ -113,7 +114,7 @@ def due_projects(conn: sqlite3.Connection, now: datetime | None = None) -> list[
         (MIN_FACTS,),
     ):
         last = db.get_meta(conn, _meta_key(row[0]))
-        if last is None or last < since:
+        if last is None:
             due.append(str(row[0]))
             continue
         new = [
@@ -124,7 +125,9 @@ def due_projects(conn: sqlite3.Connection, now: datetime | None = None) -> list[
                 (row[0], last),
             )
         ]
-        if len(new) >= NEW_FACTS or (last < gap and any(REPLACES.search(body) for body in new)):
+        # Without a new fact nothing can have become a duplicate or outdated: a review then only costs the
+        # developer's model quota (up to MAX_FACTS facts, ~15k tokens a call).
+        if (new and last < since) or len(new) >= NEW_FACTS or (last < gap and any(REPLACES.search(b) for b in new)):
             due.append(str(row[0]))
     return due
 

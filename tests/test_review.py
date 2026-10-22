@@ -1,6 +1,7 @@
 """Daily review: duplicates and outdated facts across a project's whole memory, retired only with evidence."""
 
 import json
+from datetime import timedelta
 
 from agent_mem.core import db, timeutil
 from agent_mem.memory import store
@@ -194,3 +195,15 @@ def test_a_failed_review_waits_before_it_is_tried_again(conn, config, monkeypatc
     w.review_due()
     assert calls == ["review"]
     assert providers.paused_until(conn, "claude")
+
+
+def test_no_review_without_a_new_fact(conn):
+    """A day without new facts costs no model call: nothing can have become a duplicate or outdated."""
+    _project(conn)
+    _facts(conn, TEXTS)
+    review.review(conn, Answer({}), "p1")
+    later = timeutil.now() + timedelta(hours=review.EVERY_HOURS + 1)
+    assert review.due_projects(conn, now=later) == []
+    fresh = _facts(conn, ["Logs go to stdout"])[0]
+    conn.execute("UPDATE memories SET created_at = ? WHERE id = ?", (timeutil.iso(later - timedelta(minutes=1)), fresh))
+    assert review.due_projects(conn, now=later) == ["p1"]
