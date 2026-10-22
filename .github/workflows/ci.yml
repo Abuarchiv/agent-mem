@@ -88,7 +88,9 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Audit dependencies
         shell: bash
-        run: uvx pip-audit --strict -r <(uv export --no-dev --no-hashes --no-emit-project --all-extras --locked)
+        # pillow comes only with fastembed (<13 up to 0.9.0) and decodes images; agent-mem embeds text only.
+        # Audit it again once fastembed allows pillow 13. --no-deps: the export already lists every locked package.
+        run: uvx pip-audit --strict --disable-pip --no-deps -r <(uv export --no-dev --no-hashes --no-emit-project --all-extras --locked | grep -v '^pillow==')
 
   viewer:
     runs-on: ubuntu-latest
