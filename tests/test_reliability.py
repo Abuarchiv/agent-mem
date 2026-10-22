@@ -392,6 +392,9 @@ def test_copilot_shows_the_panel_as_progress_lines(config: Config, project: Path
     progress, output = (json.loads(line) for line in lines)
     assert progress["type"] == "progress" and "Parser" in output["additionalContext"]
     assert "systemMessage" not in output
+    sub = {**start, "sessionId": "b", "agentName": "explore", "agentId": "x1"}
+    (line,) = hook.run("copilot", "subagentStart", json.dumps(sub), config).splitlines()
+    assert "Parser" in json.loads(line)["additionalContext"]  # context, but no second panel in the timeline
     (end,) = hook.run("copilot", "sessionEnd", json.dumps({**start, "reason": "complete"}), config).splitlines()
     assert json.loads(end) == {
         "type": "progress",
@@ -427,3 +430,20 @@ def test_an_unexpected_error_in_a_hook_leaves_a_note_instead_of_nothing(config: 
     assert done.returncode == 0 and done.stdout == ""  # the agent still sees nothing
     notes = [json.loads(p.read_text()) for p in config.quarantine_dir.glob("*.json")]
     assert [n["reason"] for n in notes] == ["unexpected RuntimeError: boom"]
+
+
+def test_a_paused_stage_hands_over_in_the_panel(config: Config, monkeypatch):
+    """opencode at its free limit: the next stage writes the facts, so requests do not wait."""
+    import shutil
+
+    from agent_mem.core import db
+    from agent_mem.hooks import inject
+
+    monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}" if name in {"opencode", "claude"} else None)
+    config.observe.providers, config.observe.cross_vendor = ["opencode", "claude"], True
+    conn = db.connect(config)
+    db.set_meta(conn, "observe.pause.opencode", "2999-01-01T10:00:00.000Z")
+    assert inject._facts_line(conn, config, "copilot") == "Facts written by haiku (claude)"
+    db.set_meta(conn, "observe.pause.claude", "2999-01-01T10:00:00.000Z")
+    assert "usage limit of opencode" in (inject._facts_line(conn, config, "copilot") or "")
+    conn.close()

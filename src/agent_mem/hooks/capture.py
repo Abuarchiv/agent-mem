@@ -111,7 +111,7 @@ def apply(conn: sqlite3.Connection, config: Config, event: Event, *, with_contex
     project = identity.resolve(conn, event.cwd, register=False)
     if not capture_allowed(conn, config, project):
         return Response()
-    config = inject.for_host(config, event.harness, event.kind)
+    config = inject.for_host(config, event.harness, "subagent" if event.source == "subagent" else event.kind)
     with db.transaction(conn):
         if project is not None:
             identity.register_project(conn, project, event.cwd)

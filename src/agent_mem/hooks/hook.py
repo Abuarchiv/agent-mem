@@ -361,8 +361,8 @@ NOTICE_SECONDS = 600
 
 def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
     """What the user sees in the terminal of Claude Code, Codex or Copilot: a panel at session start and after
-    compaction, a summary when a Claude Code or Copilot session ends, and failures as they happen. Ordinary prompts and
-    tool calls stay quiet."""
+    compaction (not for subagents), a summary when a Claude Code or Copilot session ends, and failures as they happen.
+    Ordinary prompts and tool calls stay quiet."""
     color = _color(event.harness)
     failure = None
     # A pending migration or a briefly locked database is routine: the indexer replays the spool later.
@@ -372,7 +372,8 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
         # The spool fails too on a full disk: then nothing waits, and saying so is the only honest notice.
         lost = "What happens now is kept and saved later." if worker.spooled else "This session is not being recorded."
         failure = f"agent-mem cannot use its database ({worker.error[:200]}). {lost} Run `agent-mem doctor`."
-    if event.kind == "session_start":
+    # A subagent's start shows no panel: one per session is enough, Copilot would list one per subagent.
+    if event.kind == "session_start" and event.source != "subagent":
         heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
         if event.source == "compact":
             heading += " · after compaction"

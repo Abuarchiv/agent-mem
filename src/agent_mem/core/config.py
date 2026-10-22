@@ -126,6 +126,18 @@ class Observe:
     turn_tool_chars: int = 12_000
     pause_minutes: int = 60
 
+    def stages_for(self, harness: str) -> list[tuple[str, str]]:
+        """Every stage turns from ``harness`` may go to, in ``observe.providers`` order (pauses not applied)."""
+        import shutil
+
+        if not self.enabled:
+            return []
+        return [
+            (name, getattr(self, f"{name}_model", "") or "CLI default")
+            for name in self.providers
+            if (self.cross_vendor or name in {"ollama", harness}) and shutil.which(name)
+        ]
+
     def stage_for(self, harness: str) -> tuple[str, str] | None:
         """The stage and model turns from ``harness`` go to first, as in ``observe.providers.chain`` (without
         pauses, which live in the database). Each harness CLI is its own vendor."""

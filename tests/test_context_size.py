@@ -53,3 +53,11 @@ def test_before_a_tool_call_warning_and_history_share_one_output(config: Config)
     cut = inject.for_host(config, "claude", "pre_tool").budgets
     assert cut.warning + cut.file_history <= 2_400
     assert inject.for_host(config, "opencode", "session_start").budgets.session_start == config.budgets.session_start
+
+
+def test_a_copilot_subagent_gets_a_short_start_block(conn, config: Config, project: Path):
+    driver = Driver(conn, config, project, harness="copilot")
+    _many(conn, driver)
+    main = driver.start("c1").context or ""
+    sub = driver.start("c1", source="subagent").context or ""
+    assert inject.tokens(main) > 2_400 >= inject.tokens(sub) > 0

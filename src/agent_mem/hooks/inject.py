@@ -342,10 +342,11 @@ def _briefing_lines(
 # file the model is not told to read. Claude Code: 10,000 characters per string, no setting (code.claude.com hooks).
 # Codex: about 2,500 tokens unless the handler sets ``additionalContextLimit`` (plugins/codex/hooks.json sets 8,000).
 # Copilot: postToolUse 10 KB, sessionStart 10 MiB. OpenCode: our plugin passes everything.
+# A subagent (kind "subagent") gets a short start block: it works on one task and its parent has the full one.
 HOST_TOKENS: dict[str, dict[str, int]] = {
     "claude": {"*": 2_400},
     "codex": {"session_start": 7_800, "prompt": 7_800, "tool": 7_800, "*": 2_400},
-    "copilot": {"tool": 2_400, "pre_tool": 2_400},
+    "copilot": {"tool": 2_400, "pre_tool": 2_400, "subagent": 2_400},
 }
 
 
@@ -632,19 +633,30 @@ def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str |
     """Which model turns this session's requests into facts, or why none does."""
     if not config.observe.enabled:
         return None
-    found = config.observe.stage_for(harness)
-    if found is None:
+    stages = config.observe.stages_for(harness)
+    if not stages:
         return f"Facts: off, `{harness}` is not installed. Requests are saved word for word."
-    paused = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause.{found[0]}",)).fetchone()
-    if paused and paused[0] > timeutil.iso():
-        when = timeutil.parse(paused[0])
-        until = when.astimezone().strftime("%H:%M") if when else paused[0]
-        kind = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause_kind.{found[0]}",)).fetchone()
-        if kind and kind[0] == "login":
-            hint = config_module.login_hint([found[0]]).rstrip(".")
-            return f"Facts: paused, `{found[0]}` is not logged in. {hint}; requests wait (next try {until})."
-        return f"Facts: paused until {until}, the usage limit of {found[0]} is reached. Requests wait."
-    return f"Facts written by {found[1]} ({found[0]})"
+    now = timeutil.iso()
+
+    def pause(name: str) -> tuple[str, str] | None:
+        until = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause.{name}",)).fetchone()
+        if not until or until[0] <= now:
+            return None
+        kind = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause_kind.{name}",)).fetchone()
+        return until[0], kind[0] if kind else "quota"
+
+    # A paused stage hands over to the next one (providers.chain): only when every stage waits do requests wait.
+    for name, model in stages:
+        if pause(name) is None:
+            return f"Facts written by {model} ({name})"
+    name = stages[0][0]
+    until, kind = pause(name) or (now, "quota")
+    when = timeutil.parse(until)
+    at = when.astimezone().strftime("%H:%M") if when else until
+    if kind == "login":
+        hint = config_module.login_hint([name]).rstrip(".")
+        return f"Facts: paused, `{name}` is not logged in. {hint}; requests wait (next try {at})."
+    return f"Facts: paused until {at}, the usage limit of {name} is reached. Requests wait."
 
 
 def session_summary(conn: sqlite3.Connection, session_id: str, color: bool = True) -> str | None:
