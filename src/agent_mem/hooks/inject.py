@@ -291,18 +291,27 @@ def now_line() -> str:
     return f"Current: {stamp:%Y-%m-%d %H:%M %Z}; (+N tok) after an entry = more detail via mem_get"
 
 
+# Copilot CLI does not pass an MCP server's instructions to the model (1.0.102, asked live): the briefing says it.
+SEARCH_LINE = (
+    "Older work: search it with mem_search (agent-mem MCP), open an id with mem_get; cite ids like T12 or M3 "
+    "when you rely on one"
+)
+NO_MCP_INSTRUCTIONS = {"copilot"}
+
+
 def session_start(
     conn: sqlite3.Connection, config: Config, project_id: str, session_id: str, harness: str
 ) -> Block | None:
     """The briefing, filled up to the budget: slots double until the budget is nearly used or nothing new comes."""
     budget = config.budgets.session_start
     scale = max(1.0, budget / 1000)
+    head = [(now_line(), None)] + ([(SEARCH_LINE, None)] if harness in NO_MCP_INSTRUCTIONS else [])
     block, count = None, -1
     for _ in range(4):
         lines = _briefing_lines(conn, config, project_id, session_id, harness, scale)
         if not lines or len(lines) == count:
             break
-        block, count = render([(now_line(), None), *lines], budget), len(lines)
+        block, count = render([*head, *lines], budget), len(lines)
         if block is None or tokens(block.text) >= budget * 0.85:
             break
         scale *= 2

@@ -61,3 +61,12 @@ def test_a_copilot_subagent_gets_a_short_start_block(conn, config: Config, proje
     main = driver.start("c1").context or ""
     sub = driver.start("c1", source="subagent").context or ""
     assert inject.tokens(main) > 2_400 >= inject.tokens(sub) > 0
+
+
+def test_copilot_is_told_how_to_search_older_work(conn, config: Config, project: Path):
+    """Copilot drops the MCP server's instructions, so its briefing names mem_search; Claude Code gets them."""
+    for harness, told in (("copilot", True), ("claude", False)):
+        driver = Driver(conn, config, project, harness=harness)
+        _many(conn, driver, 6)
+        start = driver.start(f"{harness}-s").context or ""
+        assert (inject.SEARCH_LINE in start) is told
