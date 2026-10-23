@@ -393,11 +393,15 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
             "WHERE (project_id IS ? OR project_id IS NULL) AND last_hit_at IS NOT NULL AND last_hit_at >= ?",
             (project_id, timeutil.iso(timeutil.now() - timedelta(minutes=15))),
         )
+    compacted = db.get_meta(conn, f"compacted.{session_id}")
+    if compacted:
+        conn.execute("DELETE FROM meta WHERE key = ?", (f"compacted.{session_id}",))
     if with_context and project_id is not None:
-        block = inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness)
-        if block:
-            response.context = block.text
-            learn.record_access(conn, block.owners, "injected", session_id)
+        blocks = [inject.compact(conn, config, session_id)] if compacted else []
+        blocks.append(inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness))
+        if any(blocks):
+            response.context = "\n".join(b.text for b in blocks if b)
+            learn.record_access(conn, [o for b in blocks if b for o in b.owners], "injected", session_id)
 
 
 def _learn_from_prompt(
@@ -845,7 +849,11 @@ def _on_compact(conn, config, event, project, project_id, session_id, event_id, 
     turn = _open_turn(conn, session_id)
     if turn is not None:
         conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], event_id))
-    if with_context:
+    if event.harness == "copilot":
+        # Copilot ignores context here and starts no session after compaction (CLI 1.0.102): the next request
+        # brings the essentials back, as Claude Code's and Codex's start after compaction does.
+        db.set_meta(conn, f"compacted.{session_id}", event.ts)
+    elif with_context:
         # Harnesses that accept context before compaction (OpenCode) keep the essentials in the summary.
         block = inject.compact(conn, config, session_id)
         if block:

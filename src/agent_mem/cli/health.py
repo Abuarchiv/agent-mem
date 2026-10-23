@@ -588,9 +588,13 @@ def _hook_checks(fix: bool) -> list[Check]:
                 "Run `agent-mem doctor --fix`.",
             )
         )
+        # Copilot names the event in each command: one line per binary, not one per event.
+        by_binary: dict[str, list[str]] = {}
         for command in commands:
-            exe = install.hook_binary(command)
+            by_binary.setdefault(install.hook_binary(command), []).append(command)
+        for exe, same in by_binary.items():
             resolved = Path(exe) if os.path.isabs(exe) else Path(shutil.which(exe) or "")
+            command = same[0] if len(same) == 1 else f"{exe} hook {harness} ({len(same)} events)"
             checks.append(
                 Check(
                     f"{LABELS[harness]} hook command",

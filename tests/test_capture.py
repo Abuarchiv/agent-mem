@@ -211,6 +211,17 @@ def test_pre_compaction_context_for_opencode(conn, config, project):
     assert "Port the scheduler to asyncio" in json.loads(output)["context"]
 
 
+def test_copilot_gets_the_essentials_back_with_the_request_after_compaction(conn, config, project):
+    """Copilot fires preCompact but no session start after it (CLI 1.0.102, live): the next request carries them."""
+    cp = Driver(conn, config, project, harness="copilot")
+    cp.prompt("p1", "Port the scheduler to asyncio")
+    cp.edit("p1", "scheduler.py")
+    assert cp.send("p1", "compact", raw_kind="preCompact").context is None
+    after = cp.prompt("p1", "weiter").context or ""
+    assert "Port the scheduler to asyncio" in after and "scheduler.py" in after
+    assert "Port the scheduler" not in (cp.prompt("p1", "weiter").context or "")  # once, not on every request
+
+
 def test_copilot_app_worktrees_are_captured_but_its_own_chats_are_not(conn, config, tmp_path):
     """The Copilot app checks repositories out below ~/.copilot/copilot-worktrees; plain chats run in
     ~/.copilot/chats. Everything else below a harness home stays out (its own background agents)."""

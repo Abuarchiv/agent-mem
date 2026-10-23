@@ -201,6 +201,10 @@ def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes:
     fixed = {c.name: c for c in _hook_checks(fix=True)}
     assert all(fixed[f"{LABELS[h]} hooks up to date"].ok for h in install.HARNESSES)
     assert "/hooks" in fixed["Codex hooks up to date"].detail
+    (copilot_line,) = [c for c in _hook_checks(fix=False) if c.name == "Copilot CLI hook command"]
+    assert (
+        copilot_line.ok and copilot_line.detail.startswith(f"{exe} hook copilot (") and "events)" in copilot_line.detail
+    )
     assert not any(install.stale(harness) for harness in install.HARNESSES)
     assert install.hook_commands("claude") == [f"{exe} hook claude"]  # the path they used, not this test's binary
     assert "other-tool notify" in _hooks_commands(json.loads(settings.read_text())["hooks"])
