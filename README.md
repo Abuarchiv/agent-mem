@@ -320,13 +320,13 @@ A memory carries its request's share (the request's work divided by the memories
 | --- | --- |
 | Python | 3.11 to 3.14 |
 | OS | Ubuntu, macOS arm64, macOS Intel (search by words and graph only, no fastembed wheels), Windows |
-| Agents | Claude Code 2.x, Codex CLI 0.x, Copilot CLI 1.0.96, Copilot app 1.1.29 (macOS), OpenCode 1.18 |
+| Agents | Claude Code 2.x, Codex CLI 0.x, Copilot CLI 1.0.103, Copilot app 1.1.29 (macOS), Copilot Chat in VS Code 1.142, OpenCode 1.18 |
 | CI | lint, types, tests and a wheel smoke test on all four systems |
 
 Notes per agent:
 
 - **Codex** asks you to trust the hooks once (`/hooks`).
-- **Copilot** CLI and app read the hooks `agent-mem setup copilot --write` puts in `~/.copilot/hooks`. Hooks from a Copilot plugin miss `preToolUse` ([copilot-cli#2540](https://github.com/github/copilot-cli/issues/2540)), so use `setup` instead. Sessions the app runs in its worktrees (`~/.copilot/copilot-worktrees`) count for their repository; plain app chats are not recorded.
+- **Copilot** CLI and app read the hooks `agent-mem setup copilot --write` puts in `~/.copilot/hooks`. Hooks from a Copilot plugin miss `preToolUse` ([copilot-cli#2540](https://github.com/github/copilot-cli/issues/2540)), so use `setup` instead. Sessions the app runs in its worktrees (`~/.copilot/copilot-worktrees`) count for their repository; plain app chats are not recorded. Copilot Chat in VS Code runs the same hooks (setting `chat.useHooks`, on by default): `setup copilot --write` connects it too, on Windows as well.
 - **OpenCode:** run one session at a time per repository.
 
 ## Development
