@@ -55,6 +55,10 @@ _EDIT = {
     "replace",
     "insert_edit_into_file",
     "update_file",
+    # VS Code's Copilot Chat
+    "replace_string_in_file",
+    "multi_replace_string_in_file",
+    "edit_notebook_file",
 }
 _READ = {"read", "view", "read_file", "cat", "open_file", "notebookread", "read_many_files"}
 _WEB = {"webfetch", "websearch", "web_fetch", "web_search", "fetch", "browser", "search_web", "fetch_url"}
@@ -482,11 +486,11 @@ def files_of(category: str, tool_input: Any) -> list[str]:
             value = tool_input.get(key)
             if isinstance(value, list):
                 found.extend(item for item in value if isinstance(item, str) and len(item) < 1024)
-        edits = tool_input.get("edits")
-        if isinstance(edits, list):
-            for item in edits:
+        for key in ("edits", "replacements"):  # replacements: VS Code's multi_replace_string_in_file
+            items = tool_input.get(key)
+            for item in items if isinstance(items, list) else []:
                 if isinstance(item, dict):
-                    value = item.get("file_path") or item.get("path")
+                    value = item.get("file_path") or item.get("path") or item.get("filePath")
                     if isinstance(value, str):
                         found.append(value)
         # Codex sends apply_patch as {"command": "*** Begin Patch …"}.

@@ -23,6 +23,7 @@ from agent_mem.core.events import (
     shell_text,
     text_of,
 )
+from agent_mem.hooks.normalize import claude
 
 _KINDS = {
     "sessionStart": "session_start",
@@ -92,6 +93,15 @@ def last_answer(transcript: str | None) -> str | None:
 
 
 def normalize(payload: dict[str, Any], event_name: str | None = None) -> Event | None:
+    if text_of(get(payload, "hook_event_name")) in claude.KINDS:
+        # VS Code's Copilot Chat runs ~/.copilot/hooks too, with Claude's payloads (VS Code 1.142); its transcript
+        # has Copilot's events.jsonl shape.
+        event = claude.normalize(payload, None, harness="copilot")
+        if event is not None:
+            event.extra["vscode"] = True
+            if event.kind == "stop" and event.answer is None:
+                event.answer = last_answer(text_of(get(payload, "transcript_path")))
+        return event
     name = event_name or text_of(get(payload, "hookEventName", "event")) or ""
     kind = _KINDS.get(name)
     if kind is None:

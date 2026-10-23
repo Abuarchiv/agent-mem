@@ -82,13 +82,17 @@ def _run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE")}
     env["AGENT_MEM_INTERNAL"] = "1"
     env.update(extra_env or {})
-    with tempfile.TemporaryDirectory() as cwd:
+    # npm installs the CLIs as copilot.cmd on Windows; CreateProcess finds only .exe files by bare name.
+    name = cmd[0]
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as cwd:
         process = subprocess.Popen(
-            cmd,
+            [shutil.which(name) or name, *cmd[1:]],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",  # a Windows pipe defaults to cp1252
+            errors="replace",
             cwd=cwd,
             env=env,
             **proc.hidden(new_group=True),
@@ -100,9 +104,9 @@ def _run(cmd: list[str], prompt: str, extra_env: dict[str, str] | None = None) -
             _kill_group(process)
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.communicate(timeout=5)
-            raise ProviderError(f"{cmd[0]}: timeout after {TIMEOUT_S}s") from exc
+            raise ProviderError(f"{name}: timeout after {TIMEOUT_S}s") from exc
     if process.returncode != 0:
-        raise ProviderError(f"{cmd[0]} exit {process.returncode}: {_error_text(stdout, stderr)}")
+        raise ProviderError(f"{name} exit {process.returncode}: {_error_text(stdout, stderr)}")
     return stdout
 
 
@@ -183,7 +187,7 @@ class CodexCliLLM(LLMBase):
 
     def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
         wants_json = kwargs.get("response_format") is not None
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             out_file = os.path.join(tmp, "out.txt")
             cmd = [
                 "codex",
@@ -232,8 +236,9 @@ class CopilotCliLLM(LLMBase):
         cmd = ["copilot", "-s", "--no-custom-instructions", "--disable-builtin-mcps"]
         # A private COPILOT_HOME per call: in the user's own, every call would be a saved session (listed in the
         # Copilot app) and would run the user's hooks, plugins and MCP servers. The keychain login works from any
-        # home; config.json comes along for a login kept there on machines without one.
-        with tempfile.TemporaryDirectory() as home:
+        # home; config.json comes along for a login kept there on machines without one. On Windows its helpers can
+        # still hold a file in it for a moment: a folder left behind beats losing the answer.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as home:
             login = copilot_config()
             if login.is_file():
                 shutil.copy(login, home)

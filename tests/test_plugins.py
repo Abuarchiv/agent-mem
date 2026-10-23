@@ -39,7 +39,7 @@ def test_versions_match_package():
 
 def test_claude_hooks_cover_supported_events():
     hooks = _json(PLUGINS / "claude" / "hooks" / "hooks.json")["hooks"]
-    assert set(hooks) == set(claude._KINDS)
+    assert set(hooks) == set(claude.KINDS)
     for groups in hooks.values():
         for group in groups:
             for hook in group["hooks"]:
@@ -50,7 +50,7 @@ def test_codex_hooks_use_codex_normalizer():
     manifest = _json(PLUGINS / "codex" / ".codex-plugin" / "plugin.json")
     assert manifest["hooks"] == "./hooks.json" and manifest["mcpServers"] == "./.mcp.json"
     hooks = _json(PLUGINS / "codex" / "hooks.json")["hooks"]
-    assert set(hooks) <= set(claude._KINDS) | {"PostCompact"}
+    assert set(hooks) <= set(claude.KINDS) | {"PostCompact"}
     assert {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"} <= set(hooks)
     commands = {h["command"] for groups in hooks.values() for g in groups for h in g["hooks"]}
     assert commands == {"agent-mem hook codex"}

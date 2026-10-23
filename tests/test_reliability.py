@@ -447,3 +447,35 @@ def test_a_paused_stage_hands_over_in_the_panel(config: Config, monkeypatch):
     db.set_meta(conn, "observe.pause.claude", "2999-01-01T10:00:00.000Z")
     assert "usage limit of opencode" in (inject._facts_line(conn, config, "copilot") or "")
     conn.close()
+
+
+def test_vs_code_runs_the_copilot_hooks_with_claude_payloads(config: Config, project: Path, tmp_path: Path):
+    """VS Code's Copilot Chat reads ~/.copilot/hooks as well, but sends Claude's snake_case payloads and reads
+    context only from hookSpecificOutput (VS Code 1.142). The answer comes from its own transcript."""
+    base = {"session_id": "vs1", "cwd": str(project), "timestamp": "2026-10-23T18:00:00.000Z"}
+    first = {**base, "hook_event_name": "UserPromptSubmit", "prompt": "Build the invoice parser"}
+    assert hook.run("copilot", "userPromptSubmitted", json.dumps(first), config) == ""
+    edit = {**base, "hook_event_name": "PostToolUse", "tool_name": "replace_string_in_file", "tool_use_id": "t1",
+            "tool_input": {"filePath": str(project / "app.py")}, "tool_response": "edited"}  # fmt: skip
+    hook.run("copilot", "postToolUse", json.dumps(edit), config)
+    transcript = tmp_path / "vs1.jsonl"
+    transcript.write_text(
+        json.dumps({"type": "user.message", "data": {"content": "Build the invoice parser"}}) + "\n"
+        + json.dumps({"type": "assistant.message", "data": {"content": "Parser done in app.py, Größe ✓.", "toolRequests": []}}) + "\n",
+        encoding="utf-8",
+    )  # fmt: skip
+    stop = {**base, "hook_event_name": "Stop", "stop_hook_active": False, "transcript_path": str(transcript)}
+    hook.run("copilot", "agentStop", json.dumps(stop), config)
+
+    start = {**base, "session_id": "vs2", "hook_event_name": "SessionStart", "source": "new", "agent_type": "agent"}
+    raw = hook.run("copilot", "sessionStart", json.dumps(start), config)
+    assert raw.isascii()  # PowerShell may re-encode it on Windows; JSON escapes survive any code page
+    output = json.loads(raw)
+    assert "Parser done in app.py, Größe ✓." in output["hookSpecificOutput"]["additionalContext"]
+    assert output["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "systemMessage" not in output and "type" not in output  # no Copilot CLI progress line: VS Code drops it
+    conn = db.connect(config)
+    turn = conn.execute("SELECT answer, files_json, session_id FROM turns ORDER BY id LIMIT 1").fetchone()
+    conn.close()
+    assert turn["answer"] == "Parser done in app.py, Größe ✓." and "app.py" in turn["files_json"]
+    assert turn["session_id"] == "copilot:vs1"

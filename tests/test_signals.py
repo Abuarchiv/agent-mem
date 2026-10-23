@@ -43,6 +43,9 @@ def test_files_from_tool_inputs():
     assert signals.files_of("edit", {"input": patch}) == ["src/a.py", "src/b.py"]
     assert signals.files_of("edit", patch) == ["src/a.py", "src/b.py"]
     assert signals.files_of("edit", {"edits": [{"file_path": "x.py"}]}) == ["x.py"]
+    replacements = {"replacements": [{"filePath": "a.py", "oldString": "x"}, {"filePath": "b.py"}]}
+    assert signals.files_of("edit", replacements) == ["a.py", "b.py"]  # VS Code multi_replace_string_in_file
+    assert signals.classify_tool("replace_string_in_file") == "edit"
 
 
 def test_command_from_argv_list():

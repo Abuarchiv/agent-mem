@@ -41,6 +41,8 @@ def _git(cwd: Path, *args: str) -> str | None:
             ["git", "-C", str(cwd), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",  # git writes UTF-8 paths and branch names; Windows would read them as cp1252
+            errors="replace",
             timeout=2,
             check=False,
             env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"},

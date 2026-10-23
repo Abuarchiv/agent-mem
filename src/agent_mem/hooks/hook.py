@@ -55,7 +55,7 @@ _SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 def render(harness: str, event: Event, response: capture.Response) -> dict[str, Any] | None:
-    if harness in {"claude", "codex"}:
+    if harness in {"claude", "codex"} or event.extra.get("vscode"):
         if response.deny and event.kind == "pre_tool":
             return {
                 "hookSpecificOutput": {
@@ -330,7 +330,8 @@ def run(
     if worker.error:
         logutil.write(config.log_dir, "hook", harness=harness, kind=event.kind, error=worker.error[:200])
     output = render(harness, event, worker.response) if worker.response is not None else None
-    if harness in TERMINAL:
+    # VS Code parses stdout as one JSON object: Copilot CLI's progress line would make it unreadable.
+    if harness in TERMINAL and not event.extra.get("vscode"):
         message = _terminal(config, event, worker)
         if message:
             output = {**(output or {}), "systemMessage": message}
@@ -344,12 +345,14 @@ TERMINAL = {"claude", "codex", "copilot"}
 
 def _dump(harness: str, output: dict[str, Any]) -> str:
     """The hook's stdout. Copilot has no ``systemMessage``: a ``{"type": "progress"}`` line before the output JSON
-    is shown in its timeline and removed before the rest is parsed (checked with CLI 1.0.96)."""
+    is shown in its timeline and removed before the rest is parsed (checked with CLI 1.0.96). ASCII only: on
+    Windows the hook runs inside PowerShell, which may pass its output on in the console's code page; ``\u00fc``
+    survives that, ``ü`` does not."""
     if harness != "copilot" or "systemMessage" not in output:
-        return json.dumps(output, ensure_ascii=False)
+        return json.dumps(output)
     rest = {key: value for key, value in output.items() if key != "systemMessage"}
-    line = json.dumps({"type": "progress", "message": output["systemMessage"]}, ensure_ascii=False)
-    return f"{line}\n{json.dumps(rest, ensure_ascii=False)}" if rest else line
+    line = json.dumps({"type": "progress", "message": output["systemMessage"]})
+    return f"{line}\n{json.dumps(rest)}" if rest else line
 
 
 def _color(harness: str = "claude") -> bool:

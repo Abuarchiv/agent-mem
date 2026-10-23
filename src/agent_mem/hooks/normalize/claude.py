@@ -20,7 +20,7 @@ from agent_mem.core.events import (
     text_of,
 )
 
-_KINDS = {
+KINDS = {
     "SessionStart": "session_start",
     "SubagentStart": "session_start",
     "UserPromptSubmit": "prompt",
@@ -36,7 +36,7 @@ _KINDS = {
 
 def normalize(payload: dict[str, Any], event_name: str | None = None, harness: str = "claude") -> Event | None:
     name = text_of(get(payload, "hook_event_name")) or event_name or ""
-    kind = _KINDS.get(name)
+    kind = KINDS.get(name)
     if kind is None:
         return None
     event = Event(
