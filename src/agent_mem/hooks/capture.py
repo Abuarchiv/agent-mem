@@ -367,7 +367,7 @@ def _on_session_start(conn, config, event, project, project_id, session_id, even
         block = inject.session_start(conn, config, project_id, session_id, event.harness)
     if block:
         response.context = block.text
-        learn.record_access(conn, block.owners, "injected", session_id)
+        learn.record_access(conn, block.owners, "injected", session_id, event.ts)
 
 
 def _on_prompt(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
@@ -401,7 +401,8 @@ def _on_prompt(conn, config, event, project, project_id, session_id, event_id, p
         blocks.append(inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness))
         if any(blocks):
             response.context = "\n".join(b.text for b in blocks if b)
-            learn.record_access(conn, [o for b in blocks if b for o in b.owners], "injected", session_id)
+            # The event's time: prompt_hints tells a start block's entries and a compaction apart by it.
+            learn.record_access(conn, [o for b in blocks if b for o in b.owners], "injected", session_id, event.ts)
 
 
 def _learn_from_prompt(

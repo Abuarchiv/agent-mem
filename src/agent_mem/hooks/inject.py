@@ -461,6 +461,9 @@ def prompt_hints(
     # Only confident hits: on wording alone a weaker one cannot be told from an unrelated one, and noise is not
     # context.
     hits = [h for h in search.search(conn, config, query) if search.confident(h, config, terms)][:PROMPT_HITS]
+    # Dropped after the cut: weaker hits do not move up in place of what the context already holds.
+    held = _in_context(conn, session_id)
+    hits = [h for h in hits if h.owner not in held]
     if not hits:
         return None
     learn.record_access(conn, [h.owner for h in hits], "shown", session_id)
@@ -472,6 +475,19 @@ def prompt_hints(
 
 
 PROMPT_HITS = 10
+
+
+def _in_context(conn: sqlite3.Connection, session_id: str) -> set[tuple[str, int]]:
+    """Entries an earlier prompt of this session injected in full, since the last compaction: 35 % of all injected
+    lines (2835 of 8093) repeated one. Start blocks do not count: they show a title, a prompt hit its answer."""
+    rows = conn.execute(
+        "SELECT owner_type, owner_id FROM accesses a WHERE a.session_id = ? AND a.kind = 'injected' "
+        "AND a.ts > COALESCE((SELECT MAX(ts) FROM events WHERE session_id = ? AND kind = 'compact'), '') "
+        "AND NOT EXISTS (SELECT 1 FROM events e WHERE e.session_id = a.session_id AND e.kind = 'session_start' "
+        "AND e.ts = a.ts)",
+        (session_id, session_id),
+    ).fetchall()
+    return {(str(r[0]), int(r[1])) for r in rows}
 _CODE_WORD = re.compile(r"\b[a-z]+[A-Z]\w*|\w+[_.]\w+|\b\w*\d\w*[A-Za-z]\w*")  # camelCase, snake_case, db.py, 006_x
 
 

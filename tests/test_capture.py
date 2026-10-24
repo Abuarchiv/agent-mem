@@ -115,8 +115,22 @@ def test_prompt_hints_oldest_first_best_kept(driver: Driver, conn, config, proje
     assert injected["blocks"] >= 1 and injected["today_tokens"] > 0 and injected["tokens_per_session"]
 
     config.budgets.prompt = 60  # room for one hit: the best-ranked one stays
-    context = other.prompt("c1", "Which Postgres version runs the staging database now, after the upgrade?").context
+    context = other.prompt("c2", "Which Postgres version runs the staging database now, after the upgrade?").context
     assert context and context.count("\n- [") == 1
+
+
+def test_prompt_hints_skip_what_the_context_already_holds(driver: Driver, conn, config, project):
+    driver.prompt("s1", "Implement the invoice PDF renderer with weasyprint")
+    driver.stop("s1", "Renderer in invoices/pdf.py uses weasyprint templates.")
+    other = Driver(conn, config, project, harness="codex")
+    assert "weasyprint" in (other.prompt("c1", "The invoice PDF renderer crashes with weasyprint").context or "")
+    # Shown once, it is still in the context: the same turn again costs tokens and tells nothing new.
+    assert other.prompt("c1", "Does the invoice PDF renderer still use weasyprint?").context is None
+    # A subagent's briefing went into the subagent's context, not into this one.
+    other.start("c1", source="subagent")
+    # Compaction wipes the context: from then on the turn is news again.
+    other.send("c1", "compact", raw_kind="PreCompact")
+    assert "weasyprint" in (other.prompt("c1", "Which library renders the invoice PDF, weasyprint?").context or "")
 
 
 def test_compaction_context(driver: Driver, conn):
