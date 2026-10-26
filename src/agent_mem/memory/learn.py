@@ -6,6 +6,7 @@ Pure functions plus small SQL helpers. Standard library only.
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -156,6 +157,70 @@ def drop_unseen_citations(conn: sqlite3.Connection, since: str) -> int:
     conn.executemany("DELETE FROM accesses WHERE id = ?", unseen)
     db.set_meta(conn, "unseen_citations_dropped", timeutil.iso())
     return len(unseen)
+
+
+# What only one entry would say: a path, a dotted or snake_case name, a flag, a commit hash. Plain words ("codex",
+# "prompt") are in hundreds of entries and an answer says them anyway.
+_MARK = re.compile(r"`([^`\s]{8,80})`|(?<![\w/.-])(--[\w-]{6,}|[\w-]+(?:[._/][\w-]+)+|[0-9a-f]{7,40})(?![\w/])")
+_SHAPED = re.compile(r"[._/]|^--|^[0-9a-f]{7,40}$")
+ECHO_MAX_ENTRIES = 6  # live data: 3 found 6 uses, 6 found 13, all real; 10 added project-wide paths
+
+
+def _marks(text: str) -> set[str]:
+    found = {(m.group(1) or m.group(2)).strip().lower() for m in _MARK.finditer(text or "")}
+    return {m for m in found if len(m) >= 8 and _SHAPED.search(m)}
+
+
+def echo_uses(conn: sqlite3.Connection) -> int:
+    """An answer that repeats a rare name from an entry the session was shown used it, cited or not: the agent rarely
+    writes "T12", and only 131 of 9,576 injections counted as used. Turns finished since the last run; returns the
+    uses recorded."""
+    since = db.get_meta(conn, "echo_checked_until") or ""
+    turns = conn.execute(
+        "SELECT t.id, t.session_id, t.ended_at, t.prompt, t.answer, p.root FROM turns t "
+        "LEFT JOIN projects p ON p.id = t.project_id WHERE t.ended_at > ? AND COALESCE(t.answer, '') != '' "
+        "ORDER BY t.ended_at",
+        (since,),
+    ).fetchall()
+    rare: dict[str, bool] = {}
+
+    def is_rare(mark: str) -> bool:
+        if mark not in rare:
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM search_fts WHERE search_fts MATCH ? LIMIT ?)",
+                ('"' + mark.replace('"', '""') + '"', ECHO_MAX_ENTRIES + 1),
+            ).fetchone()
+            rare[mark] = rows[0] <= ECHO_MAX_ENTRIES
+        return rare[mark]
+
+    recorded = 0
+    for turn in turns:
+        answer, asked, root = turn["answer"].lower(), (turn["prompt"] or "").lower(), (turn["root"] or "").lower()
+        exposed = conn.execute(
+            "SELECT DISTINCT a.owner_type, a.owner_id FROM accesses a WHERE a.session_id = ? AND a.ts <= ? "
+            "AND a.kind IN ('injected', 'shown') AND NOT EXISTS (SELECT 1 FROM accesses u WHERE u.session_id = ? "
+            "AND u.owner_type = a.owner_type AND u.owner_id = a.owner_id AND u.kind IN ('used', 'cited'))",
+            (turn["session_id"], turn["ended_at"], turn["session_id"]),
+        ).fetchall()
+        used = []
+        for owner_type, owner_id in exposed:
+            if (owner_type, owner_id) == ("t", turn["id"]):
+                continue
+            row = conn.execute(
+                "SELECT title || ' ' || body FROM memories WHERE id = ?"
+                if owner_type == "m"
+                else "SELECT COALESCE(title, '') || ' ' || COALESCE(answer, '') FROM turns WHERE id = ?",
+                (owner_id,),
+            ).fetchone()
+            marks = _marks(row[0] if row else "")
+            # The question's own words and the project's folder are no sign the entry helped.
+            if any(m in answer and m not in asked and m not in root and is_rare(m) for m in marks):
+                used.append((owner_type, int(owner_id)))
+        record_access(conn, used, "used", turn["session_id"], turn["ended_at"])
+        recorded += len(used)
+    if turns:
+        db.set_meta(conn, "echo_checked_until", turns[-1]["ended_at"])
+    return recorded
 
 
 def hebbian_update(conn: sqlite3.Connection, entity_ids: list[int], ts: str | None = None) -> None:

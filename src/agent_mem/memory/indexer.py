@@ -187,6 +187,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         stats["defines_backfilled"] = store.backfill_defines(conn)
         stats["observer_facts_cleaned"] = store.clean_observer_facts(conn)
         stats["note_headers_cleaned"] = notes.clean_headers(conn)
+        stats["echo_uses"] = learn.echo_uses(conn)
         stats["unseen_citations_dropped"] = learn.drop_unseen_citations(
             conn, timeutil.iso(timeutil.now() - timedelta(days=config.retention.access_days))
         )

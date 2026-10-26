@@ -318,3 +318,62 @@ def test_a_piped_test_run_that_failed_and_then_passed_teaches_the_fix(config, pr
         ("uv run pytest", '["parser.py"]')
     ]
     conn.close()
+
+
+def test_an_answer_that_repeats_a_rare_name_from_a_shown_entry_used_it(driver: Driver, conn):
+    """Agents rarely write "M3"; repeating `drop_retired_keys` from the entry they were shown is the use."""
+    from agent_mem.memory import store
+
+    pid = _project_id_after(driver)
+    rare = store.add_memory(
+        conn,
+        project_id=pid,
+        kind="fact",
+        title="Alte Suchschlüssel löscht `store.drop_retired_keys`",
+        body="",
+        source="agent",
+        trust="agent",
+    )
+    common = store.add_memory(
+        conn,
+        project_id=pid,
+        kind="fact",
+        title="Tests laufen mit `tests/conftest.py`",
+        body="",
+        source="agent",
+        trust="agent",
+    )
+    asked = store.add_memory(
+        conn,
+        project_id=pid,
+        kind="fact",
+        title="Die Spalte heißt `turns.defines_json`",
+        body="",
+        source="agent",
+        trust="agent",
+    )
+    for n in range(6):  # a name in this many entries says nothing about which one helped
+        store.add_memory(
+            conn,
+            project_id=pid,
+            kind="fact",
+            title=f"Fixture {n} in tests/conftest.py",
+            body="",
+            source="agent",
+            trust="agent",
+        )
+    driver.prompt("s2", "Wo steht turns.defines_json?")
+    start = conn.execute("SELECT started_at FROM turns ORDER BY id DESC LIMIT 1").fetchone()[0]
+    learn.record_access(conn, [("m", rare), ("m", common), ("m", asked)], "injected", "claude:s2", start)
+    driver.stop("s2", "Gelöscht über store.drop_retired_keys; siehe tests/conftest.py und turns.defines_json.")
+
+    assert learn.echo_uses(conn) == 1
+    used = conn.execute("SELECT owner_id FROM accesses WHERE kind = 'used'").fetchall()
+    assert [r[0] for r in used] == [rare]
+    assert learn.echo_uses(conn) == 0  # each turn is read once
+
+
+def _project_id_after(driver: Driver) -> str:
+    driver.prompt("s1", "start")
+    driver.stop("s1", "ok")
+    return _project_id(driver.conn)
