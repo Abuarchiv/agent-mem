@@ -531,6 +531,32 @@ def _on_session_start(call: _Call) -> None:
 REPEAT_SECONDS = 5  # the copies came within 0.2 s
 
 
+def merge_prompt_copies(conn: sqlite3.Connection) -> int:
+    """Once per database: OpenCode copies of one prompt recorded before :func:`_on_prompt` joined them become the
+    copy that got the answer; their events and memories move to it. Returns the copies removed."""
+    if db.get_meta(conn, "prompt_copies_merged"):
+        return 0
+    kept: dict[int, int] = {}
+    for copy, answered in conn.execute(
+        "SELECT c.id, k.id FROM turns c JOIN sessions s ON s.id = c.session_id JOIN turns k "
+        "ON k.session_id = c.session_id AND k.id != c.id AND k.prompt = c.prompt "
+        "AND ABS(julianday(k.started_at) - julianday(c.started_at)) * 86400 < ? "
+        "WHERE s.harness = 'opencode' AND c.prompt != '' AND COALESCE(c.answer, '') = '' "
+        "AND COALESCE(k.answer, '') != '' ORDER BY c.id, k.id",
+        (REPEAT_SECONDS,),
+    ).fetchall():
+        kept.setdefault(int(copy), int(answered))
+    for copy, answered in kept.items():
+        conn.execute("UPDATE events SET turn_id = ? WHERE turn_id = ?", (answered, copy))
+        conn.execute("UPDATE memories SET turn_id = ? WHERE turn_id = ?", (answered, copy))
+        store.remove_search_keys(conn, "t", copy)
+        for table in ("vectors", "links", "anchors", "accesses"):
+            conn.execute(f"DELETE FROM {table} WHERE owner_type = 't' AND owner_id = ?", (copy,))
+        conn.execute("DELETE FROM turns WHERE id = ?", (copy,))
+    db.set_meta(conn, "prompt_copies_merged", timeutil.iso())
+    return len(kept)
+
+
 def _on_prompt(call: _Call) -> None:
     prompt = str(call.payload.get("prompt") or "")
     latest = call.conn.execute(

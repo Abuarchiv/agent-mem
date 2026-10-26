@@ -433,3 +433,50 @@ def test_one_request_reported_by_several_opencode_processes_is_one_turn(conn, co
     rows = conn.execute("SELECT prompt, answer FROM turns").fetchall()
     assert [tuple(r) for r in rows] == [("find bugs in agent-mem and fix them", "Fixed two bugs.")]
     assert conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'prompt' AND turn_id IS NULL").fetchone()[0] == 0
+
+
+def test_old_opencode_copies_of_one_prompt_become_the_copy_that_got_the_answer(conn) -> None:
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p', 'p', '/p', 't')")
+    for harness in ("opencode", "claude"):
+        conn.execute(
+            "INSERT INTO sessions(id, harness, native_id, project_id, started_at, last_event_at) "
+            "VALUES (?, ?, ?, 'p', 't', 't')",
+            (harness, harness, harness),
+        )
+
+    def turn(session: str, ts: str, answer: str) -> int:
+        return conn.execute(
+            "INSERT INTO turns(session_id, project_id, started_at, ended_at, prompt, answer) "
+            "VALUES (?, 'p', ?, ?, 'fix the parser', ?) RETURNING id",
+            (session, ts, ts, answer),
+        ).fetchone()[0]
+
+    first, second = turn("opencode", "2026-10-23T18:12:36.214Z", ""), turn("opencode", "2026-10-23T18:12:36.260Z", "")
+    answered = turn("opencode", "2026-10-23T18:12:36.308Z", "Fixed in parse.py.")
+    later = turn("opencode", "2026-10-23T19:00:00.000Z", "")  # the same words an hour later: a request of its own
+    twice = [turn("claude", "2026-10-23T18:12:36.214Z", ""), turn("claude", "2026-10-23T18:12:36.260Z", "ok")]
+    conn.execute(
+        "INSERT INTO events(session_id, turn_id, ts, kind, payload, trust, dedupe_key) "
+        "VALUES ('opencode', ?, 't', 'prompt', '{}', 'user', 'e1')",
+        (first,),
+    )
+    memory = store.add_memory(
+        conn,
+        project_id="p",
+        kind="fact",
+        title="x",
+        body="x",
+        source="agent",
+        trust="agent",
+        dedupe="x",
+        turn_id=second,
+    )
+    assert capture.merge_prompt_copies(conn) == 2
+    assert [r[0] for r in conn.execute("SELECT id FROM turns WHERE session_id = 'opencode' ORDER BY id")] == [
+        answered,
+        later,
+    ]
+    assert conn.execute("SELECT turn_id FROM events").fetchone()[0] == answered
+    assert conn.execute("SELECT turn_id FROM memories WHERE id = ?", (memory,)).fetchone()[0] == answered
+    assert conn.execute("SELECT COUNT(*) FROM turns WHERE session_id = 'claude'").fetchone()[0] == len(twice)
+    assert capture.merge_prompt_copies(conn) == 0  # once
