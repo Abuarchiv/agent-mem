@@ -502,13 +502,19 @@ def prompt_hints(
     return render([(hit_line(h, detail, terms) + changed[h.owner], h.owner) for h in kept], config.budgets.prompt)
 
 
+_SCRATCH = ("/tmp/", "/private/tmp/", "/private/var/folders/", "/var/folders/")
+
+
 def _changed(conn: sqlite3.Connection, owner: tuple[str, int]) -> str:
     """ " (app.py changed since 2026-10-22)" for an entry whose files differ from when they were anchored: the agent
     otherwise reads an old entry about a file as if the file still looked that way."""
     from agent_mem.memory import consolidate
 
-    states = [f"{path.rsplit('/', 1)[-1]} {state}" for path, state in consolidate.anchor_status(conn, owner)]
-    states = [state for state in states if not state.endswith(" unchanged")]
+    states = [
+        f"{path.rsplit('/', 1)[-1]} {state}"
+        for path, state in consolidate.anchor_status(conn, owner)
+        if state != "unchanged" and not path.startswith(_SCRATCH)  # a session's scratch files are gone by design
+    ]
     return f" ({', '.join(states[:2])})" if states else ""
 
 
