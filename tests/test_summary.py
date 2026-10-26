@@ -270,6 +270,29 @@ def test_briefing_rotates_what_is_injected_but_never_used(driver: Driver, conn, 
     assert all(stat.injected == 4 and stat.briefing_factor < 1.0 for stat in stats.values())
 
 
+def test_briefing_leaves_out_what_was_injected_often_and_never_used(driver: Driver, conn, config: Config):
+    """The briefing fills its budget: ranking alone kept the same old notes and lessons in it at 40 to 50 starts
+    without one use (14 of 50 entries in the Lernen project). A preference the user stated stays: it is followed
+    without being cited."""
+    from agent_mem.memory import learn
+
+    driver.prompt("s1", "setup")
+    driver.stop("s1", "ok")
+    project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
+    worn = _memory(conn, project_id, "Agent note about an old release check", "native_note")
+    opened = _memory(conn, project_id, "Agent note about the viewer port", "native_note")
+    stated = _memory(conn, project_id, "Always answer in German")
+    for n in range(learn.WORN_OUT):
+        learn.record_access(conn, [("m", worn), ("m", opened), ("m", stated)], "injected", f"claude:s{n}")
+    learn.record_access(conn, [("m", opened)], "get", "claude:s3")
+
+    block = inject.session_start(conn, config, project_id, "claude:y", "claude")
+
+    assert block is not None
+    assert ("m", worn) not in block.owners
+    assert {("m", opened), ("m", stated)} <= set(block.owners)
+
+
 def test_briefing_pulls_in_memories_about_the_open_next_steps(driver: Driver, conn, config: Config):
     session_id, turn_ids = _session(driver, conn)
     project_id = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()[0]

@@ -18,6 +18,8 @@ DECAY = 0.5
 # injected and make it injected again.
 RETRIEVAL_KINDS = ("created", "get", "used", "cited")
 USE_KINDS = ("get", "used", "cited")
+# Injected this often and never opened, used or cited: left out of the briefing (it stays searchable).
+WORN_OUT = 20
 TRUST_FACTOR = {"user": 1.0, "agent": 0.9, "tool_local": 0.8, "tool_external": 0.5}
 HEBB_RATE = 0.1
 
@@ -60,6 +62,10 @@ class OwnerStats:
     def briefing_factor(self) -> float:
         """Injected at many session starts and never used: make room for something else."""
         return 0.5 + usefulness(self.used, self.injected)
+
+    @property
+    def worn_out(self) -> bool:
+        return self.used == 0 and self.injected >= WORN_OUT
 
 
 def owner_stats(

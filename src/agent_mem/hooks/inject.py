@@ -262,6 +262,9 @@ def _memory_lines(
     rows = [r for r in rows if r["origin"] not in own]
     owners = [("m", int(r["id"])) for r in rows]
     stats = learn.owner_stats(conn, owners)
+    # The briefing fills its budget, so a low rank alone keeps worn-out entries in it. A preference or correction
+    # is the user's word and is followed without being cited.
+    rows = [r for r in rows if r["kind"] in {"preference", "correction"} or not stats[("m", int(r["id"]))].worn_out]
     priority = {"preference": 1.3, "dead_end": 1.25, "decision": 1.2, "correction": 1.1, "lesson": 1.1}
     ranked = sorted(
         rows,
