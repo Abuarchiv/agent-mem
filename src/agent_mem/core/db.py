@@ -176,6 +176,10 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
+def delete_meta(conn: sqlite3.Connection, key: str) -> None:
+    conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+
+
 def record_health(conn: sqlite3.Connection, component: str, error: str | None = None) -> None:
     now = timeutil.iso()
     if error is None:

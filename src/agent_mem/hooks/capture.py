@@ -435,7 +435,7 @@ def _on_prompt(call: _Call) -> None:
         )
     compacted = db.get_meta(call.conn, f"compacted.{call.session_id}")
     if compacted:
-        call.conn.execute("DELETE FROM meta WHERE key = ?", (f"compacted.{call.session_id}",))
+        db.delete_meta(call.conn, f"compacted.{call.session_id}")
     if call.with_context and call.project_id is not None:
         blocks = [inject.compact(call.conn, call.config, call.session_id)] if compacted else []
         blocks.append(

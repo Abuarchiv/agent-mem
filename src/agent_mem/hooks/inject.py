@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from agent_mem.core import config as config_module
-from agent_mem.core import signals, spool, timeutil
+from agent_mem.core import db, signals, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.harness import HARNESS_NAMES
 from agent_mem.core.signals import command_kind, first_line, looks_like_error, request_text
@@ -647,9 +647,9 @@ def overview(conn: sqlite3.Connection, session_id: str, config: Config | None = 
             line = f"{line + ' · ' if line else ''}{waiting} request{'s' * (waiting != 1)} waiting for facts"
         if line:
             lines.append(line)
-    paused = conn.execute("SELECT value FROM meta WHERE key = 'paused_until'").fetchone()
+    paused = db.get_meta(conn, "paused_until")
     if paused:
-        until = timeutil.local(paused[0]) if paused[0] != "forever" else "further notice"
+        until = timeutil.local(paused) if paused != "forever" else "further notice"
         lines.append(f"Recording paused until {until}. `agent-mem resume` turns it back on.")
     return lines
 
@@ -664,11 +664,10 @@ def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str |
     now = timeutil.iso()
 
     def pause(name: str) -> tuple[str, str] | None:
-        until = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause.{name}",)).fetchone()
-        if not until or until[0] <= now:
+        until = db.get_meta(conn, f"observe.pause.{name}")
+        if not until or until <= now:
             return None
-        kind = conn.execute("SELECT value FROM meta WHERE key = ?", (f"observe.pause_kind.{name}",)).fetchone()
-        return until[0], kind[0] if kind else "quota"
+        return until, db.get_meta(conn, f"observe.pause_kind.{name}") or "quota"
 
     # A paused stage hands over to the next one (providers.chain): only when every stage waits do requests wait.
     for name, model in stages:

@@ -193,7 +193,7 @@ def cmd_pause(ns: argparse.Namespace, config: Config) -> int:
 
 def cmd_resume(ns: argparse.Namespace, config: Config) -> int:
     with _conn(config) as conn, db.transaction(conn):
-        conn.execute("DELETE FROM meta WHERE key = 'paused_until'")
+        db.delete_meta(conn, "paused_until")
     print("Recording again.")
     return 0
 

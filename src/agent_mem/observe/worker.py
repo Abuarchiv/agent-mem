@@ -305,7 +305,7 @@ class Worker:
             logutil.write(self.config.log_dir, "observe", error=f"scrub: {logutil.describe(error)}")
             return
         if purged:
-            self.conn.execute("DELETE FROM meta WHERE key = ?", (store.SCRUB_MESSAGES,))
+            db.delete_meta(self.conn, store.SCRUB_MESSAGES)
 
     def step(self) -> bool:
         """Process one leased bundle. Returns False when nothing was due."""

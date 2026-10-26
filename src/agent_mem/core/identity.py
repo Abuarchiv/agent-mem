@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_mem.core import proc, timeutil
+from agent_mem.core import db, proc, timeutil
 
 
 @dataclass(frozen=True)
@@ -151,8 +151,7 @@ def _hash(source: str) -> str:
 
 def _alias(conn: sqlite3.Connection, source: str) -> str | None:
     """The project an identity was recorded for after the fact (``record_aliases``)."""
-    row = conn.execute("SELECT value FROM meta WHERE key = ?", (f"identity:{source}",)).fetchone()
-    return str(row[0]) if row else None
+    return db.get_meta(conn, f"identity:{source}")
 
 
 def _held_by_other_repo(conn: sqlite3.Connection, project_id: str, common: str | None) -> bool:
