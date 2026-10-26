@@ -146,8 +146,9 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     context = "<agent-mem>\n- [M1 · 2026-10-13 · decision] Use pnpm\n</agent-mem>"
     panel = inject.terminal(context, "shop", color=False, spent=40_000)
     read = inject.tokens(context)
-    assert f"Loaded ~{read:,} tokens, built from ~40,000 tokens of earlier work" in panel
-    assert "built from" not in inject.terminal(context, "shop", color=False)  # nothing measured: no claim
+    assert f"Your savings: ~{40_000 - read:,} tokens ({(40_000 - read) * 100 // 40_000}% reduction from reuse)" in panel
+    assert "100% reduction" not in inject.terminal(context, "shop", color=False, spent=10_000_000)  # 99.9 stays 99
+    assert "savings" not in inject.terminal(context, "shop", color=False)  # nothing measured: no claim
 
     turns = _session(conn, "claude", "s9", [("2026-10-13T09:00:00.000Z", "2026-10-13T09:10:00.000Z")] * 2)
     conn.execute("UPDATE turns SET work_tokens = 5000")  # SQLite before 3.46 knows no 5_000
@@ -160,6 +161,7 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     learn.record_access(conn, [("t", turns[1])], "shown", "c", ts="2020-01-01T00:00:00.000Z")  # outside the week
     injected = _injected(conn)
     assert (injected["blocks"], injected["tokens"], injected["work"]) == (3, 400, 10_000)
+    assert injected["saved_percent"] == 96  # 9,600 of 10,000
 
 
 def test_a_growing_transcript_is_read_from_where_the_open_turn_begins(conn) -> None:

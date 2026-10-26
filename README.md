@@ -150,13 +150,13 @@ At session start, Claude Code and Codex show a panel with:
 
 Copilot CLI and the Copilot app show the same panel without colour, as progress lines in their timeline. Claude Code shows the panel again after context compaction.
 
-### Tokens
+### Token savings
 
 ```
-Loaded ~2,133 tokens, built from ~224,976 tokens of earlier work
+Your savings: ~84,760 tokens (98% reduction from reuse)
 ```
 
-The panel's last line shows what the memory cost the agent to read and how many tokens agents spent on the requests it came from. It appears only when that work was measured. `agent-mem status` shows the same for the last 7 days; the viewer shows it on the overview, on the Health page and in every memory. It is not a saving: nobody knows how much of that work an agent would have repeated without the memory. Details in [How it works](#token-work-measured).
+This line compares what a memory costs the agent to read with the work it took to find it out. It appears only when measured work stands behind it. `agent-mem status` shows the same for the last 7 days; the viewer shows it on the overview, on the Health page and in every memory. It is a comparison, not a measured saving: nobody knows how much of that work an agent would have repeated without the memory. Details in [How it works](#token-savings-measured).
 
 ## Viewer
 
@@ -164,7 +164,7 @@ Open **http://localhost:37778**, or run `agent-mem view`.
 
 | Page | Shows |
 | --- | --- |
-| Overview | activity, latest requests, tokens loaded |
+| Overview | activity, latest requests, token savings |
 | Timeline | every session with its title and summary (done, learned, next steps); each request step by step, failed commands stand out |
 | Memories | sorted by agent, then by session; preferences and lessons first; the agents' own memory files in their own group |
 | Learned | lessons, error fixes, rules and commands, each linked to the request it came from |
@@ -301,7 +301,7 @@ The model is the CLI you already pay for, started under your login without tools
 
 Search combines SQLite FTS5 (words), MiniLM vectors (meaning) and the graph with reciprocal rank fusion. Time words such as "gestern", "last week", "8. April" or "April 8th 2026" rank the requests of that time first. A request keeps the commits it made (hash and subject, also after `git commit -q && git log --oneline -1`), so "which commit did X" finds the hash. `mem_search` also looks for the file and code names of a question (`006_work_tokens.sql`, `_clean_json`) in what tools printed and shows the passage, because such details are often only there.
 
-### Token work, measured
+### Token savings, measured
 
 After a request ends, agent-mem reads the agent's own transcript and stores the fresh tokens the agent spent on it: input, cache writes and output. Cache reads are left out, because every step re-reads the whole context.
 

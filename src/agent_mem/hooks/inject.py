@@ -845,7 +845,12 @@ def terminal(
     hint = f"agent-mem show {shown[0]}" if shown else "agent-mem search <words>"
     browse = f"everything in the browser: {viewer}" if viewer else "everything in the browser: agent-mem view"
     out.append(paint("2", _RULE))
-    if spent:  # what loading costs next to what finding it out took (memory/work.py: not a measured saving)
-        out.append(paint("32", f"Loaded ~{tokens(context):,} tokens, built from ~{spent:,} tokens of earlier work"))
+    read = tokens(context)
+    if spent > read:  # footer: what loading costs against what finding it out took
+        out.append(
+            paint(
+                "32", f"Your savings: ~{spent - read:,} tokens ({(spent - read) * 100 // spent}% reduction from reuse)"
+            )
+        )
     out.append(paint("2", f"More: {hint} · {browse}"))
     return "\n".join(out)
