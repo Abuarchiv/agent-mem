@@ -2,9 +2,10 @@
 
 import json
 import types
+from datetime import timedelta
 from pathlib import Path
 
-from agent_mem.core import db
+from agent_mem.core import db, timeutil
 from agent_mem.core.config import Config
 from agent_mem.hooks import hook
 
@@ -533,4 +534,10 @@ def test_doctor_names_a_cli_whose_last_calls_all_failed(config: Config, monkeypa
     check = health._provider_check(conn, config)
     assert not check.ok and "codex" in check.detail and "workspace routing discovery failed" in check.detail
     assert "`codex`" in (check.fix or "")
+    # Codex and Copilot run only when the stages before them fail, often in the same network outage: their last
+    # calls from this morning said nothing in the evening, when both answered again, yet doctor sent the user to them.
+    conn.execute(
+        "UPDATE observe_calls SET ts = ?", (timeutil.iso(timeutil.now() - timedelta(hours=health.FAILED_HOURS + 1)),)
+    )
+    assert health._provider_check(conn, config).ok
     conn.close()

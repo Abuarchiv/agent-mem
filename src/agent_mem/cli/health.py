@@ -482,6 +482,9 @@ def _observer_queue_check(conn: sqlite3.Connection) -> Check:
 
 
 FAILED_CALLS = 3
+# Codex and Copilot run only when the stages before them fail, often in the same outage: older failures say
+# nothing about now (both answered again in the evening of calls that failed in the morning).
+FAILED_HOURS = 6
 
 
 def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
@@ -505,7 +508,8 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
         # A pause runs out and an error that is no limit (Codex: "workspace routing discovery failed") never pauses:
         # a CLI that failed its last calls stayed green while every turn fell through to the next stage.
         last = conn.execute(
-            "SELECT ok, error FROM observe_calls WHERE provider = ? ORDER BY id DESC LIMIT ?", (name, FAILED_CALLS)
+            "SELECT ok, error FROM observe_calls WHERE provider = ? AND ts >= ? ORDER BY id DESC LIMIT ?",
+            (name, timeutil.iso(timeutil.now() - timedelta(hours=FAILED_HOURS)), FAILED_CALLS),
         ).fetchall()
         if not paused and len(last) == FAILED_CALLS and not any(row["ok"] for row in last):
             lines = [line.strip() for line in str(last[0]["error"] or "").splitlines() if line.strip()]
