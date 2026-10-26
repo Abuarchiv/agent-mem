@@ -12,6 +12,12 @@ _CORRECTION = re.compile(
     r"|\b(ich hab(e)? (doch )?gesagt|i (already )?(told|said)|hör auf|don't do that|do not do that|"
     r"nicht schon wieder|immer noch falsch|still wrong)\b"
     r"|\bagain\?"
+    # How corrections are typed in German chat: "alter ändere nicht", "ich habe doch mehrmals gesagt", "ich will in
+    # diese projekt keine js sehen", "nicht schreiben erst planen". The list above caught 2 of 278 real prompts.
+    r"|^\s*(alter|digga|bro)\b"
+    r"|\b(ich habe? (doch |dir )?(schon |mehrmals |mehrfach |ausdrücklich )?gesagt|hab(e)? ich (doch|nicht) gesagt"
+    r"|du sollst (doch )?(nicht|kein)|ich will\b.{0,40}\b(kein|keine|nicht)\b|willst du mich verar"
+    r"|erst planen|änder(e)? (nichts|nicht)\b|nicht schreiben)"
 )
 # "immer noch", "wie immer", "noch nie", "never mind" are filler, not rules.
 _ALWAYS_NEVER = re.compile(

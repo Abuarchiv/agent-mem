@@ -117,6 +117,15 @@ def test_corrections_and_preferences():
     assert signals.is_correction("No, that's wrong")
     assert signals.is_correction("Ich habe doch gesagt pnpm")
     assert not signals.is_correction("Please add a test for the parser")
+    for typed in (  # real prompts the first patterns missed
+        "alter ändere nicht sag nur was der fehler ist?",
+        "ich will in diese projekt keine js sehen",
+        "nicht schreiben erst planen!",
+        "ich habe doch mehrmals gesagt umgang sprachlich",
+    ):
+        assert signals.is_correction(typed), typed
+    for request in ("Wie können wir agent-mem noch verbessern?", "ich will, dass die Suche schneller wird"):
+        assert not signals.is_correction(request), request
     assert signals.mentions_rule("nutze nie npm") and signals.mentions_rule("always use uv")
     for filler in ("da sind immer noch die alten Sachen", "wie immer", "noch nie gesehen", "never mind"):
         assert not signals.mentions_rule(filler), filler
