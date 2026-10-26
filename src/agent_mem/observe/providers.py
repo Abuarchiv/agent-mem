@@ -166,8 +166,14 @@ class _CliLLM(LLMBase):
 
     def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
         wants_json = kwargs.get("response_format") is not None
-        out = self._ask(_flatten(messages, wants_json))
-        return _clean_json(out) if wants_json else out.strip()
+        prompt = _flatten(messages, wants_json)
+        out = self._ask(prompt)
+        if not wants_json:
+            return out.strip()
+        try:
+            return _clean_json(out)
+        except ValueError as error:  # mostly an unescaped quote; asked once more, the answer is usually clean
+            return _clean_json(self._ask(f"{prompt}\n\nYour last answer was not valid JSON ({error}). Answer again."))
 
     def _ask(self, prompt: str) -> str:
         raise NotImplementedError

@@ -626,3 +626,25 @@ def test_stored_observer_facts_are_cleaned_once(config: Config, project: Path) -
     assert body == "`purge --id` steht in `cli/commands.py`."
     assert conn.execute("SELECT invalid_at FROM memories WHERE id = ?", (note,)).fetchone()[0]
     conn.close()
+
+
+def test_broken_json_is_asked_for_once_more_with_the_parse_error() -> None:
+    """Summaries failed nine times on JSON like an unescaped quote ("Expecting ',' delimiter"); the turn's titles,
+    summary and lessons were lost although a second answer is usually clean."""
+    from agent_mem.observe import providers
+
+    answers = iter(['{"title": "Er sagte "ja""}', '{"title": "Er sagte \\"ja\\""}', "never asked"])
+    prompts: list[str] = []
+
+    class Fake(providers.ClaudeCliLLM):
+        def _ask(self, prompt: str) -> str:
+            prompts.append(prompt)
+            return next(answers)
+
+    out = Fake().generate_response([{"role": "user", "content": "x"}], response_format={"type": "json_object"})
+    assert json.loads(out) == {"title": 'Er sagte "ja"'}
+    assert len(prompts) == 2 and "Expecting ',' delimiter" in prompts[1]
+
+    answers = iter(["not json", "still not json"])
+    with pytest.raises(ValueError):
+        Fake().generate_response([{"role": "user", "content": "x"}], response_format={"type": "json_object"})
