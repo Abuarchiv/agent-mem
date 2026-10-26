@@ -3,8 +3,10 @@
 import json
 from datetime import timedelta
 
+import numpy as np
+
 from agent_mem.core import db, timeutil
-from agent_mem.memory import store
+from agent_mem.memory import semantic, store
 from agent_mem.observe import review
 
 
@@ -216,3 +218,33 @@ def test_no_review_without_a_new_fact(conn):
     fresh = _facts(conn, ["Logs go to stdout"])[0]
     conn.execute("UPDATE memories SET created_at = ? WHERE id = ?", (timeutil.iso(later - timedelta(minutes=1)), fresh))
     assert review.due_projects(conn, now=later) == ["p1"]
+
+
+def test_facts_that_say_almost_the_same_are_shown_side_by_side_once_however_far_apart(conn):
+    _project(conn)
+    ids = _facts(conn, [f"Fact {n}" for n in range(review.MAX_FACTS * 2)])
+    old_twin, unrelated, newest, a, b = ids[150], ids[151], ids[-1], ids[160], ids[175]  # beyond both slices
+    conn.execute("UPDATE memories SET created_at = '2026-11-01T10:00:00.000Z' WHERE id = ?", (newest,))
+    conn.execute(
+        "UPDATE memories SET created_at = '2026-09-01T10:00:00.000Z' WHERE id IN (?, ?)", (old_twin, unrelated)
+    )
+
+    def vector(*values: float) -> bytes:
+        return semantic.to_blob(np.array([*values, *[0.0] * (8 - len(values))], dtype=np.float32))
+
+    for owner, vec in (
+        (newest, vector(1)),
+        (old_twin, vector(0.9, 0.3)),
+        (unrelated, vector(0, 1)),
+        (a, vector(0, 0, 1)),  # two old facts in other words
+        (b, vector(0, 0, 0.9, 0.3)),
+    ):
+        conn.execute("INSERT INTO vectors(owner_type, owner_id, model, vec) VALUES ('m', ?, 'mini', ?)", (owner, vec))
+    llm = Answer({})
+    review.review(conn, llm, "p1")
+    shown = {int(token[1:]) for token in llm.prompts[0].split() if token.startswith("M") and token[1:].isdigit()}
+    assert {old_twin, a, b} <= shown and unrelated not in shown
+    assert len(shown) == review.MAX_FACTS  # the twins take slots of the slice, no extra ones
+    review.review(conn, llm, "p1")
+    again = {int(token[1:]) for token in llm.prompts[1].split() if token.startswith("M") and token[1:].isdigit()}
+    assert not {old_twin, a, b} & again  # a pair the model kept is not shown again

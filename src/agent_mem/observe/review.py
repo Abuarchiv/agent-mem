@@ -17,8 +17,10 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
 
+import numpy as np
+
 from agent_mem.core import db, timeutil
-from agent_mem.memory import store
+from agent_mem.memory import semantic, store
 
 MIN_FACTS = 8
 # One call stays inside the provider's 120 s limit: 100 facts (about 20k characters) took 39 s; 300 timed out in 11 of
@@ -58,11 +60,51 @@ def _meta_key(project_id: str) -> str:
 
 RECENT = 70  # every review sees the newest facts ...
 OLDER = MAX_FACTS - RECENT  # ... plus the next slice of older ones, so each old fact meets the new ones in turn
+# ... and first pairs of facts that say almost the same. Above 0.90 the indexer merges a pair on its own; on the real
+# memory 59 pairs lay between 0.80 and 0.90, which the rotating slice of 30 out of 1,500 rarely puts side by side. Shown
+# the 30 closest of them, the model merged 18 (the same fact in other words or another language) and kept the rest.
+TWIN_COSINE = 0.80
+TWIN_FACTS = OLDER // 2
+
+
+def _twins(conn: sqlite3.Connection, project_id: str, ids: list[int], shown: set[int]) -> list[int]:
+    """Facts of the closest pairs not reviewed side by side yet (cosine at least ``TWIN_COSINE``), at most
+    ``TWIN_FACTS`` beyond ``shown``. A pair comes up once: a pair the model kept is not shown again."""
+    rows = conn.execute(
+        f"SELECT owner_id, model, vec FROM vectors WHERE owner_type = 'm' AND owner_id IN ({','.join('?' * len(ids))})",
+        ids,
+    ).fetchall()
+    models = [str(row[1]) for row in rows]
+    model = max(set(models), key=models.count, default=None)  # after a model change, until all are re-embedded
+    rows = [row for row in rows if str(row[1]) == model]
+    if len(rows) < 2:
+        return []
+    owners = [int(row[0]) for row in rows]
+    matrix = np.stack([semantic.from_blob(row[2]) for row in rows])
+    matrix /= np.maximum(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-9)
+    key = f"review_twins:{project_id}"
+    done = {(int(a), int(b)) for a, b in json.loads(db.get_meta(conn, key) or "[]")}
+    pairs: list[tuple[float, int, int]] = []
+    for at in range(0, len(owners), 512):  # in blocks: 10,000 facts would be a 400 MB matrix at once
+        scores = matrix[at : at + 512] @ matrix.T
+        for i, j in np.argwhere(scores >= TWIN_COSINE):
+            a, b = owners[at + int(i)], owners[int(j)]
+            if a < b and (a, b) not in done:
+                pairs.append((float(scores[i, j]), a, b))
+    picked: list[int] = []
+    for _, a, b in sorted(pairs, reverse=True):
+        extra = [i for i in (a, b) if i not in shown and i not in picked]
+        if len(picked) + len(extra) > TWIN_FACTS:
+            break
+        picked += extra
+        done.add((a, b))
+    db.set_meta(conn, key, json.dumps(sorted(done)))
+    return picked
 
 
 def _facts(conn: sqlite3.Connection, project_id: str) -> list[sqlite3.Row]:
-    """The newest facts and a rotating slice of the rest, so that in a large project the oldest facts, the ones a
-    later decision makes wrong, are checked too."""
+    """The newest facts, pairs that say almost the same, and a rotating slice of the rest, so that in a large
+    project the oldest facts, the ones a later decision makes wrong, are checked too."""
     marks = ",".join("?" for _ in KINDS)
     where = f"project_id = ? AND invalid_at IS NULL AND trust IN ('observer', 'agent') AND kind IN ({marks})"
     columns = "id, kind, title, body, created_at"
@@ -72,23 +114,32 @@ def _facts(conn: sqlite3.Connection, project_id: str) -> list[sqlite3.Row]:
     ).fetchall()
     if len(recent) < RECENT:
         return recent
-    taken = tuple(int(r["id"]) for r in recent)
+    every = [int(i) for (i,) in conn.execute(f"SELECT id FROM memories WHERE {where}", (project_id, *KINDS))]
+    recent_ids = [int(r["id"]) for r in recent]
+    twin_ids = _twins(conn, project_id, every, set(recent_ids))
+    twins = [
+        *conn.execute(
+            f"SELECT {columns} FROM memories WHERE id IN ({','.join('?' * len(twin_ids)) or 'NULL'})", twin_ids
+        )
+    ]
+    slots = OLDER - len(twins)
+    taken = (*recent_ids, *twin_ids)
     skip = f"AND id NOT IN ({','.join('?' for _ in taken)})"
     cursor = int(db.get_meta(conn, f"review_cursor:{project_id}") or 0)
     older = conn.execute(
         f"SELECT {columns} FROM memories WHERE {where} {skip} AND id > ? ORDER BY id LIMIT ?",
-        (project_id, *KINDS, *taken, cursor, OLDER),
+        (project_id, *KINDS, *taken, cursor, slots),
     ).fetchall()
-    if len(older) < OLDER:  # the end of the old facts: wrap around
+    if len(older) < slots:  # the end of the old facts: wrap around
         seen = tuple(int(r["id"]) for r in older)
         older += conn.execute(
             f"SELECT {columns} FROM memories WHERE {where} {skip} AND id <= ? "
             f"AND id NOT IN ({','.join('?' for _ in seen) or 'NULL'}) ORDER BY id LIMIT ?",
-            (project_id, *KINDS, *taken, cursor, *seen, OLDER - len(older)),
+            (project_id, *KINDS, *taken, cursor, *seen, slots - len(older)),
         ).fetchall()
     if older:
-        db.set_meta(conn, f"review_cursor:{project_id}", str(int(older[-1]["id"]) if len(older) == OLDER else 0))
-    return [*recent, *older]
+        db.set_meta(conn, f"review_cursor:{project_id}", str(int(older[-1]["id"]) if len(older) == slots else 0))
+    return [*recent, *twins, *older]
 
 
 # How the extraction words a change ("Use pnpm instead of npm", "nicht mehr", "umgestellt"); it matches every
