@@ -11,18 +11,18 @@
   "All@5": 0.85
  },
  "questions": {
-  "auto_am": 20,
+  "auto_am": 19,
   "search_am": 23,
   "silent_am": 8,
-  "prompt_chars_am": 73881
+  "prompt_chars_am": 76653
  },
  "questions_new": {
   "auto_am": 16,
-  "search_am": 17,
+  "search_am": 18,
   "silent_am": 8,
-  "prompt_chars_am": 37239
+  "prompt_chars_am": 39754
  },
  "start": {
-  "prompt_chars_start": 2909
+  "prompt_chars_start": 2989
  }
 }
