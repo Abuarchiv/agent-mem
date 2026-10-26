@@ -152,9 +152,28 @@ def _run_model(cmd: list[str], model_args: list[str], prompt: str, extra_env: di
         return _run(cmd, prompt, extra_env)
 
 
-class ClaudeCliLLM(LLMBase):
+class _CliLLM(LLMBase):
+    """A harness CLI as a mem0 LLM: the messages go in as one prompt, the answer comes back as text or JSON."""
+
+    DEFAULT_MODEL: ClassVar[str] = ""
+
+    def __init__(self, config: BaseLlmConfig | None = None) -> None:
+        super().__init__(config or BaseLlmConfig(model=self.DEFAULT_MODEL))
+        self.model = str(self.config.model or self.DEFAULT_MODEL)
+
+    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
+        wants_json = kwargs.get("response_format") is not None
+        out = self._ask(_flatten(messages, wants_json))
+        return _clean_json(out) if wants_json else out.strip()
+
+    def _ask(self, prompt: str) -> str:
+        raise NotImplementedError
+
+
+class ClaudeCliLLM(_CliLLM):
     """Stage 1: ``claude -p`` under the subscription login."""
 
+    DEFAULT_MODEL = "haiku"
     CMD: ClassVar[tuple[str, ...]] = (
         "claude",
         "-p",
@@ -167,26 +186,15 @@ class ClaudeCliLLM(LLMBase):
         "--no-session-persistence",
     )
 
-    def __init__(self, config: BaseLlmConfig | None = None) -> None:
-        super().__init__(config or BaseLlmConfig(model="haiku"))
-        self.model = str(self.config.model or "haiku")
-
-    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
-        wants_json = kwargs.get("response_format") is not None
-        out = _run_model(list(self.CMD), ["--model", self.model], _flatten(messages, wants_json))
-        return _clean_json(out) if wants_json else out.strip()
+    def _ask(self, prompt: str) -> str:
+        return _run_model(list(self.CMD), ["--model", self.model], prompt)
 
 
-class CodexCliLLM(LLMBase):
+class CodexCliLLM(_CliLLM):
     """Stage 2: ``codex exec`` under the CLI login. Default ``gpt-6-luna`` at low effort,
     the cheapest model in the Codex catalog."""
 
-    def __init__(self, config: BaseLlmConfig | None = None) -> None:
-        super().__init__(config or BaseLlmConfig(model=""))
-        self.model = str(self.config.model or "")
-
-    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
-        wants_json = kwargs.get("response_format") is not None
+    def _ask(self, prompt: str) -> str:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             out_file = os.path.join(tmp, "out.txt")
             cmd = [
@@ -206,10 +214,9 @@ class CodexCliLLM(LLMBase):
                 out_file,
             ]
             model_args = ["-m", self.model, "-c", "model_reasoning_effort=low"] if self.model else []
-            _run_model(cmd, model_args, _flatten(messages, wants_json))
+            _run_model(cmd, model_args, prompt)
             with open(out_file, encoding="utf-8") as fh:
-                out = fh.read()
-        return _clean_json(out) if wants_json else out.strip()
+                return fh.read()
 
 
 def copilot_config() -> Path:
@@ -217,19 +224,14 @@ def copilot_config() -> Path:
     return (Path(home).expanduser() if home else Path.home() / ".copilot") / "config.json"
 
 
-class CopilotCliLLM(LLMBase):
+class CopilotCliLLM(_CliLLM):
     """Stage 3: ``copilot -s`` with the prompt on stdin (``-p`` ignores stdin and drops prompts over roughly 30k
     characters on argv; stdin-only mode works under the GitHub login).
     Memory and tools are off by default in prompt mode. Default ``auto`` with the efficiency tier: a fixed
     model is refused when it is not in the plan's picker (Free plan refuses all of them); auto resolves to
     ``gpt-6-luna``, the cheapest catalog model."""
 
-    def __init__(self, config: BaseLlmConfig | None = None) -> None:
-        super().__init__(config or BaseLlmConfig(model=""))
-        self.model = str(self.config.model or "")
-
-    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
-        wants_json = kwargs.get("response_format") is not None
+    def _ask(self, prompt: str) -> str:
         model_args = ["--model", self.model] if self.model else []
         if self.model == "auto":
             model_args += ["--auto-tier", "efficiency"]  # only valid together with auto
@@ -242,26 +244,20 @@ class CopilotCliLLM(LLMBase):
             login = copilot_config()
             if login.is_file():
                 shutil.copy(login, home)
-            out = _run_model(cmd, model_args, _flatten(messages, wants_json), {"COPILOT_HOME": home})
-        return _clean_json(out) if wants_json else out.strip()
+            return _run_model(cmd, model_args, prompt, {"COPILOT_HOME": home})
 
 
-class OpencodeCliLLM(LLMBase):
+class OpencodeCliLLM(_CliLLM):
     """Stage for OpenCode turns: ``opencode run`` with the configured model, e.g. the free
     ``opencode/big-pickle``. ``--standalone`` uses a private server, so the run does not attach to the
     shared service; ``AGENT_MEM_INTERNAL`` (set by ``_run``) makes agent-mem's own OpenCode plugin skip it.
     ``--agent plan`` keeps the extractor read-only."""
 
+    DEFAULT_MODEL = "opencode/big-pickle"
     CMD: ClassVar[tuple[str, ...]] = ("opencode", "run", "--standalone", "--agent", "plan")
 
-    def __init__(self, config: BaseLlmConfig | None = None) -> None:
-        super().__init__(config or BaseLlmConfig(model="opencode/big-pickle"))
-        self.model = str(self.config.model or "opencode/big-pickle")
-
-    def generate_response(self, messages, tools=None, tool_choice="auto", **kwargs):  # type: ignore[override]
-        wants_json = kwargs.get("response_format") is not None
-        out = _run_model(list(self.CMD), ["--model", self.model], _flatten(messages, wants_json))
-        return _clean_json(out) if wants_json else out.strip()
+    def _ask(self, prompt: str) -> str:
+        return _run_model(list(self.CMD), ["--model", self.model], prompt)
 
 
 class FakeLLM(LLMBase):
