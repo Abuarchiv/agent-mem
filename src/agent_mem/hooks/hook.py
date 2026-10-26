@@ -236,8 +236,11 @@ class _Worker(threading.Thread):
             self.error = f"{type(error).__name__}: {error}"
             self._spool()
             _spawn_for_migration(self.config)
+        except sqlite3.OperationalError as error:
+            self.error = f"{type(error).__name__}: {error}"
+            self._spool()
+            self._read_only_context()
         except (
-            sqlite3.OperationalError,
             db.SchemaTooNewError,
             db.MigrationInProgressError,
             sqlite3.DatabaseError,
@@ -254,6 +257,18 @@ class _Worker(threading.Thread):
             if conn is not None:
                 with contextlib.suppress(sqlite3.Error):
                     conn.close()
+
+    def _read_only_context(self) -> None:
+        # WAL lets a reader in while another process holds the write lock: the session still gets its memory,
+        # and the spooled event is recorded later.
+        if self.event.kind not in {"session_start", "prompt"} or self.event.extra.get("reads_context") is False:
+            return
+        with contextlib.suppress(Exception):
+            conn = db.connect(self.config, migrate=False)
+            try:
+                self.response = capture.context_only(conn, self.config, self.event)
+            finally:
+                conn.close()
 
     def _spool(self) -> None:
         # Called by the worker on error and by the main thread on deadline; both can race.
@@ -308,18 +323,24 @@ def run(
         logutil.write(
             config.log_dir, "hook", harness=harness, kind=event.kind, error=worker.error or "queued behind spool"
         )
+        worker._read_only_context()  # queued for recording, but the agent still gets its memory
+        output = render(harness, event, worker.response) if worker.response is not None else None
         if not worker.spooled and harness in TERMINAL:
             text = f"agent-mem cannot save events ({worker.error}). This session is not being recorded."
             if _notice_due(config, text):
-                return _dump(harness, {"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
+                return _dump(
+                    harness, {**(output or {}), "systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text}
+                )
         # A lock of a few seconds passes unnoticed. Events waiting longer mean the database is unusable: say so,
         # or a broken database would go silent after its first error.
-        if harness not in TERMINAL or spool.oldest_age(config.spool_dir) < SPOOL_STUCK_SECONDS:
-            return ""
         text = "agent-mem cannot save events: they wait in the spool. Run `agent-mem doctor`."
-        if event.kind != "session_start" and not _notice_due(config, text):
-            return ""
-        return _dump(harness, {"systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text})
+        if (
+            harness in TERMINAL
+            and spool.oldest_age(config.spool_dir) >= SPOOL_STUCK_SECONDS
+            and (event.kind == "session_start" or _notice_due(config, text))
+        ):
+            output = {**(output or {}), "systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text}
+        return _dump(harness, output) if output else ""
     worker = _Worker(config, event)
     worker.start()
     worker.join(config.hook_deadline_ms / 1000)

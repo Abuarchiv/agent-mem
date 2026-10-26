@@ -120,6 +120,27 @@ def apply(conn: sqlite3.Connection, config: Config, event: Event, *, with_contex
     return response
 
 
+def context_only(conn: sqlite3.Connection, config: Config, event: Event) -> Response:
+    """The context a start or prompt gets, read without the write lock and without recording anything."""
+    project = identity.resolve(conn, event.cwd, register=False)
+    if project is None or not capture_allowed(conn, config, project):
+        return Response()
+    config = inject.for_host(config, event.harness, "subagent" if event.source == "subagent" else event.kind)
+    session_id = f"{event.harness}:{event.session_id}"
+    if event.kind == "session_start":
+        if event.source == "compact":
+            block = inject.compact(conn, config, session_id)
+        else:
+            block = inject.session_start(conn, config, project.id, session_id, event.harness)
+    elif event.kind == "prompt":
+        block = inject.prompt_hints(
+            conn, config, project.id, session_id, event.prompt or "", event.harness, record=False
+        )
+    else:
+        return Response()
+    return Response(context=block.text if block else None)
+
+
 def _bound_host_strings(event: Event) -> None:
     """Short identifiers from the host are stored in columns too; clean and bound them like all text."""
 

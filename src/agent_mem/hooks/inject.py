@@ -439,6 +439,8 @@ def prompt_hints(
     session_id: str,
     prompt: str,
     harness: str,
+    *,
+    record: bool = True,
 ) -> Block | None:
     # Inside a project its own name ("agent-mem") is in almost every memory, like the word "project".
     row = conn.execute("SELECT name FROM projects WHERE id = ?", (project_id,)).fetchone()
@@ -466,7 +468,8 @@ def prompt_hints(
     hits = [h for h in hits if h.owner not in held]
     if not hits:
         return None
-    learn.record_access(conn, [h.owner for h in hits], "shown", session_id)
+    if record:
+        learn.record_access(conn, [h.owner for h in hits], "shown", session_id)
     detail = _detail(config.budgets.prompt, len(hits))
     # The budget keeps the best-ranked hits; the kept ones are then shown oldest first.
     fitting = render([(hit_line(h, detail), h.owner) for h in hits], config.budgets.prompt)
@@ -488,6 +491,8 @@ def _in_context(conn: sqlite3.Connection, session_id: str) -> set[tuple[str, int
         (session_id, session_id),
     ).fetchall()
     return {(str(r[0]), int(r[1])) for r in rows}
+
+
 _CODE_WORD = re.compile(r"\b[a-z]+[A-Z]\w*|\w+[_.]\w+|\b\w*\d\w*[A-Za-z]\w*")  # camelCase, snake_case, db.py, 006_x
 
 

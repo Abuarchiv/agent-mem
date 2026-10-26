@@ -167,6 +167,33 @@ def test_deadline_and_worker_error_spool_once(config: Config, project: Path, mon
     assert spool.count(config.spool_dir) == 1
 
 
+def test_locked_database_still_gives_the_new_session_its_memory(config: Config, project: Path, conn):
+    """A writer holding the lock past the hook's 150 ms used to start the session without any memory."""
+    hook.run("claude", None, _prompt_payload(project, "s", "Build the parser for invoices"), config)
+    stop = {"hook_event_name": "Stop", "session_id": "s", "cwd": str(project), "last_assistant_message": "Parser done."}
+    hook.run("claude", None, json.dumps(stop), config)
+    indexer.run(config, allow_download=False)
+    locker = sqlite3.connect(config.db_path, isolation_level=None)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        start = {"hook_event_name": "SessionStart", "session_id": "n", "cwd": str(project), "source": "startup"}
+        data = json.loads(hook.run("claude", None, json.dumps(start), config))
+        question = _prompt_payload(project, "n2", "how did we build the invoices parser?")
+        prompt = json.loads(hook.run("claude", None, question, config))
+    finally:
+        locker.execute("ROLLBACK")
+        locker.close()
+    assert "Parser" in data["hookSpecificOutput"]["additionalContext"]
+    assert "parser" in prompt["hookSpecificOutput"]["additionalContext"].lower()
+    assert spool.count(config.spool_dir) == 2  # recorded later by the indexer
+    # The next prompt of a session whose start waits in the spool queues behind it, with its hints all the same.
+    queued = json.loads(
+        hook.run("claude", None, _prompt_payload(project, "n", "how did we build the invoices parser?"), config)
+    )
+    assert "parser" in queued["hookSpecificOutput"]["additionalContext"].lower()
+    assert spool.count(config.spool_dir) == 3
+
+
 def test_locked_database_spools_and_indexer_replays_once(config: Config, project: Path, conn):
     locker = sqlite3.connect(config.db_path, isolation_level=None)
     locker.execute("BEGIN EXCLUSIVE")
