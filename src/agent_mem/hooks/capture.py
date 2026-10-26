@@ -559,9 +559,43 @@ def _on_pre_tool(call: _Call) -> None:
             lines.append(
                 (f"- Note (R{rule['id']}): earlier correction — {rule['message']} ({rule['evidence']}x).", None)
             )
+    lines.extend(_user_rules(call.conn, call.project_id, call.session_id, tool_signal))
     block = inject.warnings_block(lines, call.config)
+    if block:
+        learn.record_access(call.conn, block.owners, "warned", call.session_id)
     history = _file_history(call.conn, call.config, call.project, call.project_id, call.session_id, tool_signal)
     call.response.context = "\n".join(b.text for b in (block, history) if b) or None
+
+
+def _user_rules(
+    conn: sqlite3.Connection, project_id: str | None, session_id: str, tool_signal: signals.ToolSignal
+) -> list[tuple[str, tuple[str, int] | None]]:
+    """The user's rules that name the file about to be edited or the command about to run ("in install.ps1 kein
+    `exit`", "`uv run ruff format` vor dem Commit"), once per session: in the start block they are one line among
+    many, here they come when they apply. Simulated on real sessions: about two per session."""
+    names = [os.path.basename(f).lower() for f in tool_signal.files] if tool_signal.category == "edit" else []
+    if tool_signal.command_key and " " in tool_signal.command_key:  # `git push`, `uv run pytest`; not a bare `ls`
+        names.append(tool_signal.command_key.lower())
+    names = [n for n in dict.fromkeys(names) if len(n) >= 5][:4]
+    if not names:
+        return []
+    lines: list[tuple[str, tuple[str, int] | None]] = []
+    for name in names:
+        for row in conn.execute(
+            "SELECT m.id, m.title, m.body FROM memories m WHERE m.kind IN ('preference', 'correction') "
+            "AND m.invalid_at IS NULL AND (m.project_id IS ? OR m.project_id IS NULL) "
+            "AND instr(lower(m.title || ' ' || m.body), ?) > 0 AND NOT EXISTS (SELECT 1 FROM accesses a "
+            "WHERE a.owner_type = 'm' AND a.owner_id = m.id AND a.session_id = ? AND a.kind IN ('injected', 'warned')) "
+            "ORDER BY m.id DESC LIMIT 3",
+            (project_id, name, session_id),
+        ):
+            text = f"{row['title']} {row['body']}".lower()
+            owner = ("m", int(row["id"]))
+            # A whole name: `inject.py` is not `test_inject.py`, `uv run pytest` not `uv run pytest-xdist`.
+            if owner in [o for _, o in lines] or not re.search(rf"(?<![\w./-]){re.escape(name)}(?![\w-])", text):
+                continue
+            lines.append((f"- Rule [M{row['id']}] for `{name}`: {signals.first_line(row['title'], 200)}", owner))
+    return lines[:3]
 
 
 # Kind, label and weight in the file history: what went wrong before matters most when touching a file.

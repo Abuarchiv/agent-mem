@@ -377,3 +377,19 @@ def _project_id_after(driver: Driver) -> str:
     driver.prompt("s1", "start")
     driver.stop("s1", "ok")
     return _project_id(driver.conn)
+
+
+def test_a_users_rule_comes_before_the_file_or_command_it_names(driver: Driver, conn):
+    from agent_mem.memory import store
+
+    pid = _project_id_after(driver)
+    for title in ("In install.ps1 darf kein `exit` stehen", "Vor dem Commit `uv run ruff format` laufen lassen"):
+        store.add_memory(
+            conn, project_id=pid, kind="preference", title=title, body="", source="agent", trust="observer"
+        )
+    edit = driver.pre_edit("s2", "install.ps1").context or ""
+    assert "kein `exit`" in edit and "ruff" not in edit
+    assert driver.pre_edit("s2", "install.ps1").context is None  # once per session
+    assert driver.pre_edit("s2", "test_install.ps1").context is None  # a whole name, not a part of one
+    assert "ruff format" in (driver.pre_bash("s2", "uv run ruff format src tests").context or "")
+    assert "kein `exit`" in (driver.pre_edit("s3", "install.ps1").context or "")  # a new session hears it again
