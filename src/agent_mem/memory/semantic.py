@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from agent_mem.core import db, timeutil
+from agent_mem.core import db, logutil, timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import search, store
 
@@ -116,7 +116,7 @@ def load_embedder_verbose(config: Config, *, allow_download: bool = False) -> tu
     try:
         return FastEmbedEmbedder(config, allow_download=allow_download), None
     except Exception as error:  # network, unsupported platform, corrupt cache
-        return None, f"loading {config.semantic.model} failed: {type(error).__name__}: {str(error)[:200]}"
+        return None, f"loading {config.semantic.model} failed: {logutil.describe(error)[:200]}"
 
 
 def load_embedder(config: Config, *, allow_download: bool = False) -> Embedder | None:

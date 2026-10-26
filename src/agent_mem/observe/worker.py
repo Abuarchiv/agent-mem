@@ -143,7 +143,7 @@ def mirror(conn: sqlite3.Connection, config: Config, b: bundling.Bundle, facts: 
         if signals.about_extraction(text):
             continue
         text = signals.without_line_refs(text)
-        title = signals.headline(text, 160) if text else "fact"
+        title = signals.headline(text) if text else "fact"
         memory_id = store.add_memory(
             conn,
             project_id=b.project_id,
@@ -213,7 +213,7 @@ class Worker:
             try:
                 self.adapter  # noqa: B018  (builds mem0 once; without an embedder there is only the raw stage)
             except RuntimeError as error:
-                logutil.write(self.config.log_dir, "observe", error=f"adapter: {error}"[:200])
+                logutil.write(self.config.log_dir, "observe", error=f"adapter: {error}")
                 with contextlib.suppress(sqlite3.Error):
                     db.record_health(self.conn, "observer", f"facts unavailable, turns kept raw: {error}")
                 chain = []

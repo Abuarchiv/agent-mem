@@ -524,7 +524,7 @@ def compact(conn: sqlite3.Connection, config: Config, session_id: str) -> Block 
         "WHERE t.session_id = ? AND m.kind IN ('decision', 'dead_end', 'correction') ORDER BY m.id DESC LIMIT 4",
         (session_id,),
     ):
-        lines.append((f"- [M{row['id']} · {row['kind']}] {first_line(row['title'], 160)}", ("m", int(row["id"]))))
+        lines.append((f"- [M{row['id']} · {row['kind']}] {first_line(row['title'])}", ("m", int(row["id"]))))
     # Only the last three turns: an early failed command that was never retried is not "still failing".
     for row in conn.execute(
         "SELECT command_key, payload FROM events WHERE session_id = ? AND error_sig IS NOT NULL AND resolved = 0 "

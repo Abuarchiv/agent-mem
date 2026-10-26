@@ -142,12 +142,12 @@ def run(config: Config, *, force_consolidate: bool = False, allow_download: bool
                 raise
             # Another process held the database longer than the busy timeout: not a failure to report; the spool
             # stays and the next run replays it.
-            logutil.write(config.log_dir, "indexer", error="busy", detail=str(error)[:200])
+            logutil.write(config.log_dir, "indexer", error="busy", detail=str(error))
             stats["skipped"] = "database busy"
         except Exception as error:
             with contextlib.suppress(sqlite3.Error), db.transaction(conn):
                 db.record_health(conn, "indexer", logutil.describe(error))
-            logutil.write(config.log_dir, "indexer", error=type(error).__name__, detail=str(error)[:200])
+            logutil.write(config.log_dir, "indexer", error=type(error).__name__, detail=str(error))
             raise
         finally:
             conn.close()

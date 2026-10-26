@@ -145,7 +145,7 @@ def summarize(conn: sqlite3.Connection, llm: Any, session_id: str, turn_ids: lis
                 conn,
                 project_id=row[0] if row else None,
                 kind="lesson",
-                title=signals.headline(lesson, 160),
+                title=signals.headline(lesson),
                 body=lesson,
                 source="agent",
                 trust="observer",

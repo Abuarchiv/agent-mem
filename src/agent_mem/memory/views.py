@@ -28,7 +28,7 @@ def search_lines(hits: list[search.Hit], weak: list[search.Hit] | None = None, f
             stale = " ⚠ files changed since"
         origin = hit.harness or hit.kind
         lines.append(
-            f"{hit.label} · {timeutil.day(hit.ts)} · {origin} · score {hit.score:.2f}{stale}\n  {first_line(hit.title or hit.text, 160)}"
+            f"{hit.label} · {timeutil.day(hit.ts)} · {origin} · score {hit.score:.2f}{stale}\n  {first_line(hit.title or hit.text)}"
         )
         if hit.passage:
             lines.append(f"  {hit.passage_from}: {hit.passage}")
@@ -150,6 +150,6 @@ def timeline(conn: sqlite3.Connection, raw_id: str, before: int = 3, after: int 
         marker = "▶" if row["id"] == turn_id else " "
         lines.append(
             f"{marker} T{row['id']} · {row['started_at'][:16]} · {row['outcome']}: {first_line(request_text(row['prompt']), 120)}"
-            + (f"\n    → {first_line(row['answer'], 160)}" if row["answer"] else "")
+            + (f"\n    → {first_line(row['answer'])}" if row["answer"] else "")
         )
     return "\n".join(lines)

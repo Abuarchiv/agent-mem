@@ -538,8 +538,8 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
                 kind="turn",
                 # Without an answer the request alone says nothing about what happened; the observer's title does.
                 title=(row["title"] if not (row["answer"] or "").strip() else "")
-                or first_line(request_text(row["prompt"]), 160)
-                or first_line(row["answer"] or "", 160),
+                or first_line(request_text(row["prompt"]))
+                or first_line(row["answer"] or ""),
                 text=text,
                 topic=topic,
                 answer=row["answer"] or "",
