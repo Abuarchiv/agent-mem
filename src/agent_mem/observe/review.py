@@ -21,7 +21,9 @@ from agent_mem.core import db, timeutil
 from agent_mem.memory import store
 
 MIN_FACTS = 8
-MAX_FACTS = 300  # one call stays well inside the provider's 120 s limit
+# One call stays inside the provider's 120 s limit: 100 facts (about 20k characters) took 39 s; 300 timed out in 11 of
+# 19 reviews, and each timeout also counted toward pausing the stage that extracts facts.
+MAX_FACTS = 100
 EVERY_HOURS = 20
 NEW_FACTS = 50  # a working day can add a hundred facts or more; duplicates pile up within a day
 KINDS = ("fact", "decision", "dead_end", "preference", "lesson")
@@ -54,7 +56,7 @@ def _meta_key(project_id: str) -> str:
     return f"reviewed_at:{project_id}"
 
 
-RECENT = 250  # every review sees the newest facts ...
+RECENT = 70  # every review sees the newest facts ...
 OLDER = MAX_FACTS - RECENT  # ... plus the next slice of older ones, so each old fact meets the new ones in turn
 
 

@@ -116,6 +116,15 @@ def test_old_facts_beyond_the_window_are_reviewed_in_turn(conn):
     assert set(ids) <= seen  # every fact came up at least once, the oldest included
 
 
+def test_a_review_prompt_fits_the_providers_time_limit(conn):
+    """300 facts (about 60k characters) ran into the 120 s limit in 11 of 19 real reviews; 100 took 39 s."""
+    _project(conn)
+    _facts(conn, [f"Fact {n}: " + "the release job signs every artifact before upload, " * 4 for n in range(400)])
+    llm = Answer({})
+    review.review(conn, llm, "p1")
+    assert len(llm.prompts[0]) <= 30_000
+
+
 def test_expired_snapshots_go_without_a_replacement_but_only_plain_facts(conn):
     _project(conn)
     _facts(conn, TEXTS)  # enough facts for a review
