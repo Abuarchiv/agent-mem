@@ -791,6 +791,9 @@ def cmd_eval(ns: argparse.Namespace, config: Config) -> int:
     if not ns.fixture and not ns.dataset:
         print("agent-mem eval: needs a dataset or --fixture", file=sys.stderr)
         return 2
+    for path in (ns.fixture, ns.dataset, ns.custom_prompt):
+        if path and not path.exists():  # before Runner loads, maybe downloads, the embedding model
+            raise FileNotFoundError(2, "No such file", str(path))
     runner = Runner(
         ns.backend,
         semantic_search=not ns.no_semantic,
