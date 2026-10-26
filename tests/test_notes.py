@@ -161,3 +161,28 @@ def test_many_new_notes_are_written_in_short_transactions(conn, config: Config, 
     monkeypatch.setattr(notes.db, "transaction", lambda c, **kw: opened.append(1) or real(c, **kw))
     assert notes.ingest(conn, config)["stored"] == notes.BATCH + 5
     assert len(opened) == 2
+
+
+def test_a_codex_note_is_stored_without_its_session_header(conn, config: Config, project: Path):
+    """thread_id, rollout_path and cwd say nothing to an agent: they cost tokens in every hit that shows the body."""
+    _codex_note(project, "s1.md", "Codex found the pnpm lockfile is authoritative")
+    notes.ingest(conn, config)
+    body = conn.execute("SELECT body FROM memories WHERE kind = 'native_note'").fetchone()[0]
+    assert body.startswith("# Codex found") and "thread_id" not in body and "cwd:" not in body
+
+
+def test_notes_stored_with_the_header_lose_it_once(conn, config: Config, project: Path):
+    store.add_memory(
+        conn,
+        project_id=None,
+        kind="native_note",
+        title="T",
+        body="thread_id: x\nrollout_path: /r.jsonl\ncwd: /p\n\n# T\n\nBody.",
+        source="native",
+        trust="agent",
+        origin="codex-memory",
+        dedupe="note:a:b",
+    )
+    assert notes.clean_headers(conn) == 1
+    assert conn.execute("SELECT body FROM memories").fetchone()[0] == "# T\n\nBody."
+    assert notes.clean_headers(conn) == 0

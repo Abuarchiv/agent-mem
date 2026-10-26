@@ -34,6 +34,8 @@ BATCH = 20
 _FRONT = re.compile(r"\A---\n(.*?)\n---\n?", re.S)
 _FIELD = re.compile(r"^\s*(name|description|type):\s*(.+?)\s*$", re.M)
 _HEADING = re.compile(r"^#\s+(.+)$", re.M)
+# Codex opens each summary with its session's ids and paths; ``cwd`` is read before this is cut.
+_SESSION_HEADER = re.compile(r"\A(?:(?:thread_id|updated_at|rollout_path|cwd):[^\n]*\n)+\s*")
 
 
 def own_notes(harness: str) -> set[str]:
@@ -112,10 +114,29 @@ def codex_notes(root: Path) -> Iterator[tuple[str, Path, str, float]]:
 def _title_body(text: str, path: Path) -> tuple[str, str]:
     front = _FRONT.match(text)
     fields = dict(_FIELD.findall(front.group(1))) if front else {}
-    body = text[front.end() :] if front else text
+    body = _SESSION_HEADER.sub("", text[front.end() :] if front else text)
     heading = _HEADING.search(body)
     title = fields.get("description") or (heading.group(1) if heading else "") or fields.get("name") or path.stem
     return title.strip().strip('"'), body.strip()
+
+
+def clean_headers(conn: sqlite3.Connection) -> int:
+    """Once per database: notes stored before the session header was cut lose it. Returns the notes changed."""
+    if db.get_meta(conn, "note_headers_cleaned"):
+        return 0
+    changed = 0
+    for memory_id, title, body in conn.execute(
+        "SELECT id, title, body FROM memories WHERE kind = 'native_note' AND origin = 'codex-memory'"
+    ).fetchall():
+        clean = _SESSION_HEADER.sub("", body or "")
+        if clean == body:
+            continue
+        conn.execute("UPDATE memories SET body = ? WHERE id = ?", (clean, memory_id))
+        store.set_search_key(conn, "m", memory_id, f"native_note: {title}\n{clean}")
+        conn.execute("DELETE FROM vectors WHERE owner_type = 'm' AND owner_id = ?", (memory_id,))  # embedded anew
+        changed += 1
+    db.set_meta(conn, "note_headers_cleaned", timeutil.iso())
+    return changed
 
 
 def _home(variable: str, folder: str) -> Path:

@@ -185,6 +185,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         stats["commits_backfilled"] = store.backfill_commits(conn)
         stats["defines_backfilled"] = store.backfill_defines(conn)
         stats["observer_facts_cleaned"] = store.clean_observer_facts(conn)
+        stats["note_headers_cleaned"] = notes.clean_headers(conn)
     # Outside the transaction: it runs git (about 25 ms per repository), and hooks wait 150 ms for the write lock.
     stats["identity_aliases"] = identity.record_aliases(conn)
     _mark_guards(conn, config)
