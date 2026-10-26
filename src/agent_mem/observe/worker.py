@@ -32,6 +32,7 @@ from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 
 POLL_SECONDS = 2.0
 GRAPH_BATCHES = 3
+RECENT_CALLS = 10  # the calls per stage and purpose that decide which stage does housekeeping
 
 
 def namespace_for(project_id: str | None) -> str:
@@ -391,7 +392,7 @@ class Worker:
         for project_id in review.due_projects(self.conn):
             if _calls_today(self.conn) >= self.config.observe.daily_limit:
                 return
-            name = self._provider_for(project_id)
+            name = self._provider_for(project_id, "review")
             if name is None:
                 continue
             retired = self._housekeeping(
@@ -410,7 +411,7 @@ class Worker:
             if not todo or _calls_today(self.conn) >= self.config.observe.daily_limit:
                 return
             project_id, rows = todo[0]
-            name = self._provider_for(project_id)
+            name = self._provider_for(project_id, "graph")
             if name is None:
                 return
             extract = functools.partial(relations.extract, self.conn, project_id=project_id, rows=rows)
@@ -421,13 +422,28 @@ class Worker:
                 return
             self.stats["graph_relations"] += stored
 
-    def _provider_for(self, project_id: str) -> str | None:
-        """The first stage open to the vendor the project used last."""
-        row = self.conn.execute(
-            "SELECT harness FROM sessions WHERE project_id = ? ORDER BY last_event_at DESC LIMIT 1", (project_id,)
-        ).fetchone()
-        chain = providers.chain(self.config, row[0] if row else "claude", self.conn)
-        return chain[0] if chain else None
+    def _provider_for(self, project_id: str, purpose: str) -> str | None:
+        """Of the stages open to the vendors the project already used, the one whose last calls for ``purpose`` failed
+        least; the vendor used last on a tie. The vendor used last alone ran OpenCode's free model on the project's
+        whole memory: 7 of 26 graph and 12 of 21 review calls a week timed out, against 1 of 16 graph calls with
+        claude."""
+        harnesses = [
+            str(h)
+            for (h,) in self.conn.execute(
+                "SELECT harness FROM sessions WHERE project_id = ? GROUP BY harness ORDER BY MAX(last_event_at) DESC",
+                (project_id,),
+            )
+        ] or ["claude"]
+        names = list(dict.fromkeys(n for h in harnesses for n in providers.chain(self.config, h, self.conn)))
+
+        def success(name: str) -> float:
+            rows = self.conn.execute(
+                "SELECT ok FROM observe_calls WHERE provider = ? AND purpose = ? ORDER BY id DESC LIMIT ?",
+                (name, purpose, RECENT_CALLS),
+            ).fetchall()
+            return (sum(int(r[0]) for r in rows) + 1) / (len(rows) + 2)  # an untried stage counts as one in two
+
+        return max(names, key=lambda n: (success(n), -names.index(n)), default=None)
 
     def _housekeeping(self, name: str, purpose: str, call: Callable[[Any], int]) -> int | None:
         """One model call outside extraction (review, graph), recorded like any other. None when it failed: housekeeping

@@ -648,3 +648,29 @@ def test_broken_json_is_asked_for_once_more_with_the_parse_error() -> None:
     answers = iter(["not json", "still not json"])
     with pytest.raises(ValueError):
         Fake().generate_response([{"role": "user", "content": "x"}], response_format={"type": "json_object"})
+
+
+def test_housekeeping_goes_to_the_vendor_whose_recent_calls_failed_least(config: Config, monkeypatch) -> None:
+    """The project's last vendor kept timing out on the graph; another vendor the project used does it instead,
+    never one the project did not use."""
+    from agent_mem.observe import providers, worker
+
+    monkeypatch.setattr(providers, "available", lambda name: True)
+    config.observe.providers = ["opencode", "claude", "codex"]
+    conn = db.connect(config)
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('p1', 'p', '/p', 't')")
+    for harness, last in (("claude", "2026-10-25"), ("opencode", "2026-10-26")):
+        conn.execute(
+            "INSERT INTO sessions(id, harness, native_id, project_id, started_at, last_event_at) "
+            "VALUES (?, ?, ?, 'p1', ?, ?)",
+            (harness, harness, harness, last, last),
+        )
+    w = worker.Worker(config, conn)
+    assert w._provider_for("p1", "graph") == "opencode"  # untried: the vendor used last
+    for ok in (0, 0, 1):
+        worker._record_call(conn, "opencode", "graph", 120, bool(ok), 0, [], None)
+    worker._record_call(conn, "claude", "graph", 20, True, 0, [], None)
+    worker._record_call(conn, "codex", "graph", 5, True, 0, [], None)
+    assert w._provider_for("p1", "graph") == "claude"
+    assert w._provider_for("p1", "review") == "opencode"  # graph failures say nothing about reviews
+    conn.close()
