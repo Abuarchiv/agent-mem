@@ -39,7 +39,7 @@ def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, An
     except sqlite3.OperationalError:
         raise  # transient (locked); retry next run
     except Exception as error:
-        raise spool.PermanentError(f"{type(error).__name__}: {error}") from error
+        raise spool.PermanentError(logutil.describe(error)) from error
 
 
 def recover_if_corrupt(config: Config) -> bool:
@@ -146,7 +146,7 @@ def run(config: Config, *, force_consolidate: bool = False, allow_download: bool
             stats["skipped"] = "database busy"
         except Exception as error:
             with contextlib.suppress(sqlite3.Error), db.transaction(conn):
-                db.record_health(conn, "indexer", f"{type(error).__name__}: {error}")
+                db.record_health(conn, "indexer", logutil.describe(error))
             logutil.write(config.log_dir, "indexer", error=type(error).__name__, detail=str(error)[:200])
             raise
         finally:

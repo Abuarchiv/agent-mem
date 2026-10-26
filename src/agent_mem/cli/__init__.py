@@ -55,7 +55,7 @@ def _explain(error: Exception) -> str:
     """One line with the cause and the next step instead of a traceback (AGENT_MEM_DEBUG=1 shows it)."""
     import sqlite3
 
-    from agent_mem.core import db
+    from agent_mem.core import db, logutil
 
     if isinstance(error, db.SchemaTooNewError):
         return f"{error}. A newer agent-mem wrote this database; upgrade agent-mem."
@@ -81,7 +81,7 @@ def _explain(error: Exception) -> str:
         return (
             f"missing module {error.name}. Add the extras that need it: `agent-mem upgrade --extras semantic observer`."
         )
-    return f"unexpected {type(error).__name__}: {error}. Run again with AGENT_MEM_DEBUG=1 for details and report it."
+    return f"unexpected {logutil.describe(error)}. Run again with AGENT_MEM_DEBUG=1 for details and report it."
 
 
 def _parser() -> argparse.ArgumentParser:

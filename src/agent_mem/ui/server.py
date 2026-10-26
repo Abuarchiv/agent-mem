@@ -21,7 +21,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from agent_mem import __version__
-from agent_mem.core import db
+from agent_mem.core import db, logutil
 from agent_mem.core.config import Config, env_flag
 
 HOST = "127.0.0.1"
@@ -130,7 +130,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 _message_page(
                     "agent-mem cannot read its memory",
-                    f"{type(error).__name__}: {error}. Run `agent-mem doctor` in a terminal; this page retries on reload.",
+                    f"{logutil.describe(error)}. Run `agent-mem doctor` in a terminal; this page retries on reload.",
                 ),
                 {"Refresh": "10"},
             )

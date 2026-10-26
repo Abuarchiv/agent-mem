@@ -13,6 +13,11 @@ MAX_BYTES = 1_000_000
 KEEP = 5
 
 
+def describe(error: BaseException) -> str:
+    """``KeyError: 'x'``: the line every log, health row and queue entry records for a failure."""
+    return f"{type(error).__name__}: {error}"
+
+
 def write(log_dir: Path, name: str, **fields: object) -> None:
     with contextlib.suppress(OSError):
         log_dir.mkdir(parents=True, exist_ok=True)

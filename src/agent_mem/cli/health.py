@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_mem.cli.install import claude_home, codex_home, copilot_home, opencode_home
-from agent_mem.core import db, spool, timeutil
+from agent_mem.core import db, logutil, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.harness import HARNESS_NAMES, HARNESSES
 from agent_mem.memory import work
@@ -233,7 +233,7 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
         try:
             indexer.run(config, allow_download=False)
         except Exception as error:  # the indexer records it in health too; doctor shows it instead of crashing
-            checks.append(Check("index after fix", False, f"{type(error).__name__}: {error}", "Run `agent-mem index`."))
+            checks.append(Check("index after fix", False, logutil.describe(error), "Run `agent-mem index`."))
     return checks
 
 

@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agent_mem.core import logutil
 from agent_mem.core.harness import HARNESSES
 
 PROVIDERS = ("claude", "codex", "copilot", "ollama")
@@ -288,7 +289,7 @@ def _claude_mcp(exe: str | None, *, add: bool) -> None:
         try:
             result = subprocess.run([claude, "mcp", *args], capture_output=True, text=True, timeout=30, check=False)
         except (OSError, subprocess.SubprocessError) as error:
-            return f"{type(error).__name__}: {error}"
+            return logutil.describe(error)
         return None if result.returncode == 0 else (result.stderr or result.stdout).strip()[-200:]
 
     # Remove first: `mcp add` refuses an existing name and would keep an entry with an old binary path.

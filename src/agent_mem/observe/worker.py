@@ -52,7 +52,16 @@ def _record_call(
     conn.execute(
         "INSERT INTO observe_calls(ts, provider, purpose, seconds, ok, prompt_chars, turn_ids, error) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (timeutil.iso(), provider, purpose, round(seconds, 3), int(ok), chars, json.dumps(turn_ids), error),
+        (
+            timeutil.iso(),
+            provider,
+            purpose,
+            round(seconds, 3),
+            int(ok),
+            chars,
+            json.dumps(turn_ids),
+            error and error[:300],
+        ),
     )
 
 
@@ -226,9 +235,9 @@ class Worker:
                 # mem0 raises the provider's error as the cause of its own LLMError; unwrapped, a usage limit or
                 # a logged-out CLI pauses the stage instead of failing every turn.
                 failure = providers.provider_error(error)
-                text = str(failure) if failure else f"{type(error).__name__}: {error}"
+                text = str(failure) if failure else logutil.describe(error)
                 _record_call(
-                    self.conn, name, "extract", time.perf_counter() - started, False, b.chars, b.turn_ids, text[:300]
+                    self.conn, name, "extract", time.perf_counter() - started, False, b.chars, b.turn_ids, text
                 )
                 if failure:
                     providers.note_failure(self.conn, self.config, name, failure)
@@ -268,7 +277,7 @@ class Worker:
                 False,
                 0,
                 b.turn_ids,
-                f"{type(error).__name__}: {error}"[:300],
+                logutil.describe(error),
             )
             return
         _record_call(self.conn, provider, "summary", time.perf_counter() - started, True, chars, b.turn_ids, None)
@@ -286,14 +295,14 @@ class Worker:
                 self.adapter.forget(str(row[0]))  # False when mem0 no longer has it: done as well
             except Exception as error:
                 # Keep the request: a deleted fact must not stay in the vector index because Qdrant was busy once.
-                logutil.write(self.config.log_dir, "observe", error=f"forget: {type(error).__name__}: {error}"[:200])
+                logutil.write(self.config.log_dir, "observe", error=f"forget: {logutil.describe(error)}")
                 continue
             self.conn.execute("DELETE FROM observe_forget WHERE mem0_id = ?", (row[0],))
             self.stats["forgotten"] += 1
         try:
             self.adapter.scrub(messages=purged)
         except Exception as error:  # retried with the next forget or purge
-            logutil.write(self.config.log_dir, "observe", error=f"scrub: {type(error).__name__}: {error}"[:200])
+            logutil.write(self.config.log_dir, "observe", error=f"scrub: {logutil.describe(error)}")
             return
         if purged:
             self.conn.execute("DELETE FROM meta WHERE key = ?", (store.SCRUB_MESSAGES,))
@@ -310,7 +319,7 @@ class Worker:
         try:
             bundles = bundling.build(self.conn, self.config, turn_ids)
         except Exception as error:  # one broken turn must not stop the queue behind it
-            queue.fail(self.conn, turn_ids, f"bundle: {type(error).__name__}: {error}")
+            queue.fail(self.conn, turn_ids, f"bundle: {logutil.describe(error)}")
             self.stats["failed"] += 1
             return True
         if not bundles:
@@ -337,7 +346,7 @@ class Worker:
             except Exception as error:
                 # Storing failed (a locked database, a bad fact): back off like a provider error, then `failed`, so
                 # one poison turn cannot stop all extraction.
-                queue.fail(self.conn, b.turn_ids, f"{type(error).__name__}: {error}")
+                queue.fail(self.conn, b.turn_ids, logutil.describe(error))
                 self.stats["failed"] += 1
                 continue
             if provider == "raw":
@@ -427,7 +436,7 @@ class Worker:
         except Exception as error:
             if failure := providers.provider_error(error):
                 providers.note_failure(self.conn, self.config, name, failure)
-            text = f"{type(error).__name__}: {error}"[:300]
+            text = logutil.describe(error)
             _record_call(self.conn, name, purpose, time.perf_counter() - started, False, 0, [], text)
             return None
         _record_call(self.conn, name, purpose, time.perf_counter() - started, True, 0, [], None)
@@ -462,9 +471,9 @@ def run(
         try:
             stats = worker.run(drain=drain)
         except BaseException as error:  # the detached process has no stderr; leave a trace (lease expires later)
-            logutil.write(config.log_dir, "observe", error=f"aborted: {type(error).__name__}: {error}"[:300])
+            logutil.write(config.log_dir, "observe", error=f"aborted: {logutil.describe(error)}")
             with contextlib.suppress(sqlite3.Error):
-                db.record_health(conn, "observer", f"worker aborted: {type(error).__name__}: {error}")
+                db.record_health(conn, "observer", f"worker aborted: {logutil.describe(error)}")
             raise
         finally:
             worker.close()
