@@ -9,6 +9,7 @@ import contextlib
 import json
 import re
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
@@ -91,14 +92,15 @@ def render(lines: list[tuple[str, tuple[str, int] | None]], budget_tokens: int) 
     return Block(text="\n".join([HEADER, *kept, FOOTER]), owners=owners)
 
 
-def hit_line(hit: search.Hit, detail: int = 120) -> str:
-    """One hit; ``detail`` characters of its answer (turn) or body (memory) follow the title."""
+def hit_line(hit: search.Hit, detail: int = 120, terms: Sequence[str] = ()) -> str:
+    """One hit; ``detail`` characters of its answer (turn) or body (memory) follow the title. With the question's
+    ``terms`` a long answer shows its opening and the stretch that names most of them."""
     day = timeutil.day(hit.ts) if hit.ts else ""
     origin = hit.harness or hit.kind
     title = first_line(request_text(hit.title or hit.text), 140)
     line = f"- [{hit.label} · {day} · {origin}] {title}"
     if hit.kind == "turn" and hit.answer.strip():
-        line += f" → {_clip(' '.join(hit.answer.split()), detail)}"
+        line += f" → {_excerpt(' '.join(hit.answer.split()), detail, terms)}"
     elif hit.kind != "turn" and detail > 140:
         # A memory's text is "title\nbody"; the body is the full statement the title shortens.
         body = " ".join(hit.text.partition("\n")[2].split())
@@ -474,9 +476,9 @@ def prompt_hints(
         learn.record_access(conn, [h.owner for h in hits], "shown", session_id)
     detail = _detail(config.budgets.prompt, len(hits))
     # The budget keeps the best-ranked hits; the kept ones are then shown oldest first.
-    fitting = render([(hit_line(h, detail), h.owner) for h in hits], config.budgets.prompt)
+    fitting = render([(hit_line(h, detail, terms), h.owner) for h in hits], config.budgets.prompt)
     kept = sorted((h for h in hits if fitting and h.owner in fitting.owners), key=lambda h: h.ts)
-    return render([(hit_line(h, detail), h.owner) for h in kept], config.budgets.prompt)
+    return render([(hit_line(h, detail, terms), h.owner) for h in kept], config.budgets.prompt)
 
 
 PROMPT_HITS = 10
@@ -617,6 +619,18 @@ _KIND_NAME = {
     "summary": "Summaries",
     "native_note": "Agent notes",
 }
+
+
+# The opening of a long answer says what was done; the detail a question asks for is often pages further down.
+ANSWER_HEAD = 240
+
+
+def _excerpt(answer: str, detail: int, terms: Sequence[str]) -> str:
+    if not terms or len(answer) <= detail:
+        return _clip(answer, detail)
+    head = _clip(answer, ANSWER_HEAD)
+    matched, window = search.best_window(answer[ANSWER_HEAD:], terms)
+    return f"{head} … {window} …" if matched else head
 
 
 def _clip(text: str, limit: int) -> str:
