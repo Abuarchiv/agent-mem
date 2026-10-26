@@ -9,12 +9,14 @@ handle is stored raw (``kind='summary'``) so nothing is lost.
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import re
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -378,34 +380,13 @@ class Worker:
         for project_id in review.due_projects(self.conn):
             if _calls_today(self.conn) >= self.config.observe.daily_limit:
                 return
-            row = self.conn.execute(
-                "SELECT harness FROM sessions WHERE project_id = ? ORDER BY last_event_at DESC LIMIT 1", (project_id,)
-            ).fetchone()
-            chain = providers.chain(self.config, row[0] if row else "claude", self.conn)
-            if not chain:
+            name = self._provider_for(project_id)
+            if name is None:
                 continue
-            name = chain[0]
-            started = time.perf_counter()
-            try:
-                retired = review.review(
-                    self.conn, providers.make_llm(name, providers.model_for(self.config, name)), project_id
-                )
-            except Exception as error:  # the review is housekeeping; it never stops the worker
-                if failure := providers.provider_error(error):
-                    providers.note_failure(self.conn, self.config, name, failure)
-                _record_call(
-                    self.conn,
-                    name,
-                    "review",
-                    time.perf_counter() - started,
-                    False,
-                    0,
-                    [],
-                    f"{type(error).__name__}: {error}"[:300],
-                )
-                continue
-            _record_call(self.conn, name, "review", time.perf_counter() - started, True, 0, [], None)
-            self.stats["reviewed"] += retired
+            retired = self._housekeeping(
+                name, "review", functools.partial(review.review, self.conn, project_id=project_id)
+            )
+            self.stats["reviewed"] += retired or 0
 
     def graph_due(self, batches: int = GRAPH_BATCHES) -> None:
         """Read new memories into the graph (``observe/relations.py``), a few batches per run so a backlog
@@ -418,36 +399,39 @@ class Worker:
             if not todo or _calls_today(self.conn) >= self.config.observe.daily_limit:
                 return
             project_id, rows = todo[0]
-            row = self.conn.execute(
-                "SELECT harness FROM sessions WHERE project_id = ? ORDER BY last_event_at DESC LIMIT 1", (project_id,)
-            ).fetchone()
-            chain = providers.chain(self.config, row[0] if row else "claude", self.conn)
-            if not chain:
+            name = self._provider_for(project_id)
+            if name is None:
                 return
-            name = chain[0]
-            started = time.perf_counter()
-            try:
-                stored = relations.extract(
-                    self.conn, providers.make_llm(name, providers.model_for(self.config, name)), project_id, rows
-                )
-            except Exception as error:  # the graph is a view; it never stops the worker
-                if failure := providers.provider_error(error):
-                    providers.note_failure(self.conn, self.config, name, failure)
-                _record_call(
-                    self.conn,
-                    name,
-                    "graph",
-                    time.perf_counter() - started,
-                    False,
-                    0,
-                    [],
-                    f"{type(error).__name__}: {error}"[:300],
-                )
+            extract = functools.partial(relations.extract, self.conn, project_id=project_id, rows=rows)
+            stored = self._housekeeping(name, "graph", extract)
+            if stored is None:
                 # Hold the graph for an hour: a timed-out batch would otherwise be sent again on every worker run.
                 db.set_meta(self.conn, "observe.graph_hold", timeutil.iso(timeutil.now() + timedelta(hours=1)))
                 return
-            _record_call(self.conn, name, "graph", time.perf_counter() - started, True, 0, [], None)
             self.stats["graph_relations"] += stored
+
+    def _provider_for(self, project_id: str) -> str | None:
+        """The first stage open to the vendor the project used last."""
+        row = self.conn.execute(
+            "SELECT harness FROM sessions WHERE project_id = ? ORDER BY last_event_at DESC LIMIT 1", (project_id,)
+        ).fetchone()
+        chain = providers.chain(self.config, row[0] if row else "claude", self.conn)
+        return chain[0] if chain else None
+
+    def _housekeeping(self, name: str, purpose: str, call: Callable[[Any], int]) -> int | None:
+        """One model call outside extraction (review, graph), recorded like any other. None when it failed: housekeeping
+        never stops the worker, and a usage limit or logout still pauses the stage."""
+        started = time.perf_counter()
+        try:
+            result = call(providers.make_llm(name, providers.model_for(self.config, name)))
+        except Exception as error:
+            if failure := providers.provider_error(error):
+                providers.note_failure(self.conn, self.config, name, failure)
+            text = f"{type(error).__name__}: {error}"[:300]
+            _record_call(self.conn, name, purpose, time.perf_counter() - started, False, 0, [], text)
+            return None
+        _record_call(self.conn, name, purpose, time.perf_counter() - started, True, 0, [], None)
+        return result
 
     def close(self) -> None:
         if self._adapter is not None:
