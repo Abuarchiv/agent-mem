@@ -230,26 +230,31 @@ def test_copilot_turn_work_counts_input_minus_cache_reads(conn) -> None:
     assert conn.execute("SELECT work_tokens FROM turns WHERE id = ?", (turns[0],)).fetchone()[0] == 14141 + 61
 
 
-def test_a_turn_that_ended_without_stop_gets_its_answer_from_the_transcript(conn) -> None:
-    """A spend limit, an API error or Esc ends a turn without Stop: 54 of 70 such Claude turns had the agent's last
-    words in the transcript, and without them the longest work was stored as "result unknown"."""
+def _said(ts: str, text: str) -> dict:
+    return {"type": "assistant", "timestamp": ts, "message": {"id": ts, "content": [{"type": "text", "text": text}]}}
+
+
+def test_an_interrupted_turn_gets_its_last_messages_from_the_transcript(conn) -> None:
+    """Without a Stop (interrupted, usage limit) the turn kept no answer; the transcript still has what it did."""
     now = "2026-10-13T12:"
-    lost, kept = _session(
-        conn, "claude", "s7", [(f"{now}00:00.000Z", f"{now}05:00.000Z"), (f"{now}06:00.000Z", f"{now}09:00.000Z")]
+    turns = _session(conn, "claude", "s4", [(f"{now}00:00.000Z", f"{now}05:00.000Z"), (f"{now}06:00.000Z", None)])
+    conn.execute("UPDATE turns SET answer = '', outcome = 'unknown' WHERE id = ?", (turns[0],))
+    home = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-tmp-p"
+    _lines(
+        home / "s4.jsonl",
+        [
+            _said(f"{now}01:00.000Z", "Reading the parser."),
+            _said(f"{now}03:00.000Z", "The bug reproduces in parse.py."),
+            {**_said(f"{now}04:30.000Z", "API Error: 502"), "isApiErrorMessage": True},
+            {**_said(f"{now}04:40.000Z", "You've hit your monthly spend limit")}
+            | {
+                "message": {"id": "l", "model": "<synthetic>", "content": [{"type": "text", "text": "spend limit"}]}
+            },  # Claude Code's own notice, without isApiErrorMessage
+            _said(f"{now}06:30.000Z", "Next request already."),  # belongs to the open turn
+        ],
     )
-    conn.execute("UPDATE turns SET answer = 'Done.' WHERE id = ?", (kept,))
-    reply = _assistant(f"{now}02:00.000Z", "a", 10, 5)
-    reply["message"]["content"] = [{"type": "text", "text": "Kurzstand: Tests grün, Commit folgt."}]
-    limit = _assistant(f"{now}03:00.000Z", "b", 1, 1)
-    limit["message"]["content"] = [{"type": "text", "text": "You've hit your monthly spend limit · raise it"}]
-    limit["message"]["model"], limit["isApiErrorMessage"] = "<synthetic>", True  # Claude Code's own notice
-    later = _assistant(f"{now}07:00.000Z", "c", 1, 1)
-    later["message"]["content"] = [{"type": "text", "text": "Second turn's own words"}]
-    _lines(Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-tmp-p" / "s7.jsonl", [reply, limit, later])
-
-    assert work.recover_answers(conn, 16_000) == 1
-
-    answers = dict(conn.execute("SELECT id, answer FROM turns").fetchall())
-    assert answers == {lost: "Kurzstand: Tests grün, Commit folgt.", kept: "Done."}
-    conn.execute("UPDATE turns SET answer = '' WHERE id = ?", (lost,))
-    assert work.recover_answers(conn, 16_000) == 0  # each turn is read once, not at every indexer run
+    _lines(home / "s4" / "subagents" / "agent-y.jsonl", [_said(f"{now}04:00.000Z", "subagent text")])
+    assert work.fill_answers(conn, [turns[0], turns[1]]) == 1
+    answer = conn.execute("SELECT answer FROM turns WHERE id = ?", (turns[0],)).fetchone()[0]
+    assert answer == "(unfinished) Reading the parser.\nThe bug reproduces in parse.py."
+    assert work.fill_answers(conn, [turns[0]]) == 0  # an answer is never overwritten

@@ -22,8 +22,8 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TypeVar
 
-from agent_mem.core import db, timeutil
-from agent_mem.memory import learn
+from agent_mem.core import db, privacy, timeutil
+from agent_mem.memory import learn, store
 
 T = TypeVar("T")
 
@@ -153,64 +153,6 @@ def _copilot_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
     return calls, end
 
 
-def _claude_last_words(path: Path) -> list[tuple[str, str]]:
-    """(timestamp, text) of each assistant text block. Claude Code's own notices (spend limit, API error) are
-    ``<synthetic>`` messages: not the agent's words."""
-    found: list[tuple[str, str]] = []
-    for _, _, line in _lines(path, 0):
-        if '"text"' not in line or '"assistant"' not in line or '"<synthetic>"' in line:
-            continue
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            continue
-        message = entry.get("message") if isinstance(entry, dict) else None
-        if entry.get("type") != "assistant" or not isinstance(message, dict) or not entry.get("timestamp"):
-            continue
-        for part in message.get("content") or []:
-            if isinstance(part, dict) and part.get("type") == "text" and str(part.get("text") or "").strip():
-                found.append((str(entry["timestamp"]), str(part["text"]).strip()))
-    return found
-
-
-def recover_answers(conn: sqlite3.Connection, limit_chars: int) -> int:
-    """A Claude turn that ended without Stop (spend limit, API error, Esc) has no answer; its last words are in the
-    transcript: 54 of 70 such turns. Without them the longest work was stored as "result unknown". Returns turns
-    filled."""
-    from agent_mem.core import privacy
-    from agent_mem.memory import store
-
-    since = timeutil.iso(timeutil.now() - timedelta(days=LOOKBACK_DAYS))
-    rows = conn.execute(
-        "SELECT t.id, t.session_id, s.native_id, t.started_at, t.ended_at, "
-        "(SELECT MIN(n.started_at) FROM turns n WHERE n.session_id = t.session_id AND n.started_at > t.started_at) "
-        "FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.harness = 'claude' AND t.ended_at IS NOT NULL "
-        "AND COALESCE(t.answer, '') = '' AND t.started_at >= ? AND t.id NOT IN "
-        "(SELECT CAST(substr(key, 16) AS INTEGER) FROM meta WHERE key LIKE 'answer.checked:%')",
-        (since,),
-    ).fetchall()
-    words: dict[str, list[tuple[str, str]]] = {}
-    filled = 0
-    for turn_id, session_id, native_id, start, end, following in rows:
-        if session_id not in words:
-            files = _claude_files(native_id)
-            try:
-                words[session_id] = _claude_last_words(files[0]) if files else []
-            except OSError:
-                words[session_id] = []
-        stop = min(end, following) if following else end
-        said = [text for ts, text in words[session_id] if start <= ts <= stop]
-        with db.transaction(conn):
-            db.set_meta(conn, f"answer.checked:{turn_id}", "1")  # read once, found or not
-            if said:
-                conn.execute(
-                    "UPDATE turns SET answer = ? WHERE id = ?", (privacy.clean_text(said[-1], limit_chars), turn_id)
-                )
-                store.index_turn(conn, turn_id)
-                filled += 1
-    return filled
-
-
 def measure(conn: sqlite3.Connection) -> int:
     """Fill ``turns.work_tokens`` for closed turns of Claude Code, Codex and Copilot sessions whose transcript exists.
     A turn without a model call in its window gets 0 (measured, nothing spent). Returns the turns measured.
@@ -335,3 +277,104 @@ def _chunks(ids: list[T], size: int = 500) -> Iterator[tuple[T, ...]]:
     """SQLite allows a bounded number of ``?`` per statement; a week of injections names thousands of ids."""
     for start in range(0, len(ids), size):
         yield tuple(ids[start : start + size])
+
+
+# The last messages of a turn that ended without a Stop: what it did before it was cut off.
+UNFINISHED_MESSAGES = 3
+
+
+def fill_answers(conn: sqlite3.Connection, turn_ids: list[int], chars: int = 16_000) -> int:
+    """Give closed turns without an answer (interrupted, usage limit, missing Stop) the agent's last messages from
+    the transcript, marked "(unfinished)". Only the main transcript counts: a subagent's text is not the answer.
+    Returns the turns filled."""
+    if not turn_ids:
+        return 0
+    marks = ",".join("?" * len(turn_ids))
+    rows = conn.execute(
+        "SELECT t.id, t.started_at, t.ended_at, s.harness, s.native_id, s.started_at AS session_start FROM turns t "
+        f"JOIN sessions s ON s.id = t.session_id WHERE t.id IN ({marks}) AND t.ended_at IS NOT NULL "
+        "AND COALESCE(t.answer, '') = '' AND s.native_id IS NOT NULL",
+        turn_ids,
+    ).fetchall()
+    said_by_file: dict[Path, list[tuple[str, str]]] = {}
+    filled = 0
+    for turn_id, start, end, harness, native_id, session_start in rows:
+        files = _transcripts(harness, native_id, session_start)
+        if not files:
+            continue
+        if files[0] not in said_by_file:
+            try:
+                said_by_file[files[0]] = _SAID[harness](files[0])
+            except OSError:
+                continue
+        texts = [text for ts, text in said_by_file[files[0]] if start <= ts <= end][-UNFINISHED_MESSAGES:]
+        if not texts:
+            continue
+        answer = privacy.clean_text("(unfinished) " + "\n".join(texts), chars)
+        with db.transaction(conn):
+            conn.execute("UPDATE turns SET answer = ? WHERE id = ? AND COALESCE(answer, '') = ''", (answer, turn_id))
+            store.index_turn(conn, int(turn_id))
+        filled += 1
+    return filled
+
+
+def _transcripts(harness: str, native_id: str, started_at: str) -> list[Path]:
+    if harness == "claude":
+        return _claude_files(native_id)
+    if harness == "codex":
+        return _codex_files(native_id, started_at)
+    if harness == "copilot":
+        return _copilot_files(native_id)
+    return []
+
+
+def _json_lines(path: Path, needle: str) -> Iterator[dict[str, object]]:
+    for _, _, line in _lines(path, 0):
+        if needle not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("timestamp"):
+            yield entry
+
+
+def _claude_said(path: Path) -> list[tuple[str, str]]:
+    said: list[tuple[str, str]] = []
+    for entry in _json_lines(path, '"text"'):
+        message = entry.get("message")
+        if entry.get("type") != "assistant" or not isinstance(message, dict) or entry.get("isApiErrorMessage"):
+            continue  # an API error is the harness reporting, not the agent's work
+        if message.get("model") == "<synthetic>":
+            continue  # Claude Code's own notice (spend limit), not the agent's words
+        content = message.get("content")
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "text" and str(block.get("text") or "").strip():
+                said.append((str(entry["timestamp"]), str(block["text"]).strip()))
+    return said
+
+
+def _codex_said(path: Path) -> list[tuple[str, str]]:
+    said: list[tuple[str, str]] = []
+    for entry in _json_lines(path, '"agent_message"'):
+        payload = entry.get("payload")
+        if isinstance(payload, dict) and payload.get("type") == "agent_message" and payload.get("message"):
+            said.append((str(entry["timestamp"]), str(payload["message"]).strip()))
+    return said
+
+
+def _copilot_said(path: Path) -> list[tuple[str, str]]:
+    said: list[tuple[str, str]] = []
+    for entry in _json_lines(path, '"assistant.message"'):
+        data = entry.get("data")
+        if (
+            entry.get("type") == "assistant.message"
+            and isinstance(data, dict)
+            and str(data.get("content") or "").strip()
+        ):
+            said.append((str(entry["timestamp"]), str(data["content"]).strip()))
+    return said
+
+
+_SAID = {"claude": _claude_said, "codex": _codex_said, "copilot": _copilot_said}

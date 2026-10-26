@@ -25,7 +25,7 @@ from filelock import FileLock, Timeout
 
 from agent_mem.core import db, logutil, signals, timeutil
 from agent_mem.core.config import Config
-from agent_mem.memory import store
+from agent_mem.memory import store, work
 from agent_mem.observe import bundle as bundling
 from agent_mem.observe import providers, queue, relations, review, summary
 from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
@@ -317,6 +317,8 @@ class Worker:
             return False
         turn_ids = [int(r["turn_id"]) for r in rows]
         try:
+            # A turn cut off without a Stop has only its request: the transcript still says what it did.
+            work.fill_answers(self.conn, turn_ids, self.config.limits.answer_chars)
             bundles = bundling.build(self.conn, self.config, turn_ids)
         except Exception as error:  # one broken turn must not stop the queue behind it
             queue.fail(self.conn, turn_ids, f"bundle: {logutil.describe(error)}")

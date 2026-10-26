@@ -333,6 +333,25 @@ def _close_turn(conn: sqlite3.Connection, config: Config, turn_id: int, outcome:
         )
 
 
+def _reopen_cut_off_turn(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None:
+    """The session's last turn again, if it ended without an answer (closed as stale while the limit held)."""
+    last = conn.execute("SELECT id FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+    if last is None:
+        return None
+    turn_id = int(last[0])
+    reopened = conn.execute(
+        "UPDATE turns SET outcome = 'open', ended_at = NULL WHERE id = ? AND outcome = 'unknown' "
+        "AND COALESCE(answer, '') = ''",
+        (turn_id,),
+    ).rowcount
+    if not reopened:
+        return None
+    # Not extracted yet: it waits until the turn really ends. Already extracted: those facts stay.
+    with contextlib.suppress(sqlite3.OperationalError):
+        conn.execute("DELETE FROM observe_queue WHERE turn_id = ? AND state = 'pending'", (turn_id,))
+    return _open_turn(conn, session_id)
+
+
 def _turn_at(conn: sqlite3.Connection, session_id: str, ts: str) -> sqlite3.Row | None:
     """The turn an event belongs to by its time. Live, that is the open turn; replayed from the spool after the next
     prompt already arrived, it is the earlier turn the event happened in, not the one open now."""
@@ -413,6 +432,8 @@ def _on_session_start(call: _Call) -> None:
 def _on_prompt(call: _Call) -> None:
     prompt = str(call.payload.get("prompt") or "")
     previous = _open_turn(call.conn, call.session_id)
+    if previous is None and signals.resumes_turn(prompt):
+        previous = _reopen_cut_off_turn(call.conn, call.session_id)
     if previous is not None and signals.continues_turn(prompt) and previous["started_at"] <= call.event.ts:
         # Claude Code delivers a finished background task as a prompt while the turn runs: it belongs to that turn.
         call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (int(previous["id"]), call.event_id))

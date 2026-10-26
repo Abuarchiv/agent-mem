@@ -179,7 +179,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     stats["spool_applied"], stats["spool_quarantined"] = _drain_spool(conn, config)
     stats["stale_turns_closed"] = capture.close_stale_turns(conn, config)
     stats["work_measured"] = work.measure(conn)
-    stats["answers_recovered"] = work.recover_answers(conn, config.limits.answer_chars)
+    stats["answers_filled"] = _fill_answers(conn, config)
     stats["native_notes"] = notes.ingest(conn, config)
     with db.transaction(conn):
         stats["retired_unindexed"] = store.drop_retired_keys(conn)
@@ -212,6 +212,27 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     with contextlib.suppress(sqlite3.OperationalError):
         conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
     return stats
+
+
+def _fill_answers(conn: sqlite3.Connection, config: Config) -> int:
+    """Turns closed without an answer since the last run; ``meta answers.checked`` is the last turn id done (every
+    turn up to it is closed), so a transcript is read once per turn, not on every run."""
+    checked = int(db.get_meta(conn, "answers.checked") or 0)
+    open_turn = conn.execute("SELECT MIN(id) FROM turns WHERE outcome = 'open' AND id > ?", (checked,)).fetchone()[0]
+    rows = conn.execute(
+        "SELECT id FROM turns WHERE id > ? AND id < ? AND outcome != 'open' AND COALESCE(answer, '') = ''",
+        (checked, open_turn if open_turn is not None else 2**62),
+    ).fetchall()
+    filled = work.fill_answers(conn, [int(r[0]) for r in rows], config.limits.answer_chars)
+    done = (
+        (open_turn - 1)
+        if open_turn is not None
+        else conn.execute("SELECT COALESCE(MAX(id), 0) FROM turns").fetchone()[0]
+    )
+    if done > checked:
+        with db.transaction(conn):
+            db.set_meta(conn, "answers.checked", str(done))
+    return filled
 
 
 def _drain_spool(conn: sqlite3.Connection, config: Config) -> tuple[int, int]:
