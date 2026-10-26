@@ -13,12 +13,13 @@ finding it out again took. It is not a measured saving: nobody knows what the ag
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import sqlite3
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TypeVar
 
@@ -281,6 +282,7 @@ def _chunks(ids: list[T], size: int = 500) -> Iterator[tuple[T, ...]]:
 
 # The last messages of a turn that ended without a Stop: what it did before it was cut off.
 UNFINISHED_MESSAGES = 3
+LAST_TURN_HOURS = 6  # a session resumed days later has prompts agent-mem may not have seen
 
 
 def fill_answers(conn: sqlite3.Connection, turn_ids: list[int], chars: int = 16_000) -> int:
@@ -291,23 +293,21 @@ def fill_answers(conn: sqlite3.Connection, turn_ids: list[int], chars: int = 16_
         return 0
     marks = ",".join("?" * len(turn_ids))
     rows = conn.execute(
-        "SELECT t.id, t.started_at, t.ended_at, s.harness, s.native_id, s.started_at AS session_start FROM turns t "
+        "SELECT t.id, t.started_at, (SELECT MIN(n.started_at) FROM turns n WHERE n.session_id = t.session_id "
+        "AND n.started_at > t.started_at), s.harness, s.native_id, s.started_at AS session_start FROM turns t "
         f"JOIN sessions s ON s.id = t.session_id WHERE t.id IN ({marks}) AND t.ended_at IS NOT NULL "
         "AND COALESCE(t.answer, '') = '' AND s.native_id IS NOT NULL",
         turn_ids,
     ).fetchall()
-    said_by_file: dict[Path, list[tuple[str, str]]] = {}
+    said_in: dict[tuple[str, str], list[tuple[str, str]]] = {}
     filled = 0
-    for turn_id, start, end, harness, native_id, session_start in rows:
-        files = _transcripts(harness, native_id, session_start)
-        if not files:
-            continue
-        if files[0] not in said_by_file:
-            try:
-                said_by_file[files[0]] = _SAID[harness](files[0])
-            except OSError:
-                continue
-        texts = [text for ts, text in said_by_file[files[0]] if start <= ts <= end][-UNFINISHED_MESSAGES:]
+    for turn_id, start, until, harness, native_id, session_start in rows:
+        # A turn's messages run until the next prompt, not until its end: a one-shot run (``opencode run``) is closed
+        # with its prompt and answers seconds later.
+        until = until or timeutil.iso((timeutil.parse(start) or timeutil.now()) + timedelta(hours=LAST_TURN_HOURS))
+        if (harness, native_id) not in said_in:
+            said_in[harness, native_id] = _said(harness, native_id, session_start)
+        texts = [text for ts, text in said_in[harness, native_id] if start <= ts < until][-UNFINISHED_MESSAGES:]
         if not texts:
             continue
         answer = privacy.clean_text("(unfinished) " + "\n".join(texts), chars)
@@ -316,6 +316,42 @@ def fill_answers(conn: sqlite3.Connection, turn_ids: list[int], chars: int = 16_
             store.index_turn(conn, int(turn_id))
         filled += 1
     return filled
+
+
+def _said(harness: str, native_id: str, session_start: str) -> list[tuple[str, str]]:
+    """(timestamp, text) of the agent's messages in a session, empty when the transcript is gone or unreadable."""
+    try:
+        if harness == "opencode":
+            return _opencode_said(native_id)
+        files = _transcripts(harness, native_id, session_start)
+        return _SAID[harness](files[0]) if files else []
+    except (OSError, sqlite3.Error):
+        return []
+
+
+def _opencode_said(native_id: str) -> list[tuple[str, str]]:
+    """OpenCode keeps its sessions in a SQLite database, not in files; read-only, the running app may hold it."""
+    xdg = os.environ.get("XDG_DATA_HOME")
+    path = (Path(xdg) if xdg else Path.home() / ".local" / "share") / "opencode" / "opencode.db"
+    if not path.is_file():
+        return []
+    said: list[tuple[str, str]] = []
+    with contextlib.closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1)) as oc:
+        for (data,) in oc.execute(
+            "SELECT data FROM session_message WHERE session_id = ? AND type = 'assistant' ORDER BY seq", (native_id,)
+        ):
+            try:
+                message = json.loads(data)
+            except ValueError:
+                continue
+            created = (message.get("time") or {}).get("created") if isinstance(message, dict) else None
+            if not isinstance(created, int | float):
+                continue
+            ts = timeutil.iso(datetime.fromtimestamp(created / 1000, UTC))
+            for block in message.get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "text" and str(block.get("text") or "").strip():
+                    said.append((ts, str(block["text"]).strip()))
+    return said
 
 
 def _transcripts(harness: str, native_id: str, started_at: str) -> list[Path]:

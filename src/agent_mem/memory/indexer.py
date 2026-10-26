@@ -220,10 +220,14 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     return stats
 
 
+ANSWERS_CHECKED = "answers.checked.2"
+
+
 def _fill_answers(conn: sqlite3.Connection, config: Config) -> int:
-    """Turns closed without an answer since the last run; ``meta answers.checked`` is the last turn id done (every
-    turn up to it is closed), so a transcript is read once per turn, not on every run."""
-    checked = int(db.get_meta(conn, "answers.checked") or 0)
+    """Turns closed without an answer since the last run; ``meta ANSWERS_CHECKED`` is the last turn id done (every
+    turn up to it is closed), so a transcript is read once per turn, not on every run. The key's suffix starts the
+    check over once: OpenCode turns and one-shot runs closed with their prompt were passed by before."""
+    checked = int(db.get_meta(conn, ANSWERS_CHECKED) or 0)
     open_turn = conn.execute("SELECT MIN(id) FROM turns WHERE outcome = 'open' AND id > ?", (checked,)).fetchone()[0]
     rows = conn.execute(
         "SELECT id FROM turns WHERE id > ? AND id < ? AND outcome != 'open' AND COALESCE(answer, '') = ''",
@@ -237,7 +241,7 @@ def _fill_answers(conn: sqlite3.Connection, config: Config) -> int:
     )
     if done > checked:
         with db.transaction(conn):
-            db.set_meta(conn, "answers.checked", str(done))
+            db.set_meta(conn, ANSWERS_CHECKED, str(done))
     return filled
 
 

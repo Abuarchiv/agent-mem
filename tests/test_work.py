@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 from agent_mem.cli.health import _injected
@@ -258,3 +259,31 @@ def test_an_interrupted_turn_gets_its_last_messages_from_the_transcript(conn) ->
     answer = conn.execute("SELECT answer FROM turns WHERE id = ?", (turns[0],)).fetchone()[0]
     assert answer == "(unfinished) Reading the parser.\nThe bug reproduces in parse.py."
     assert work.fill_answers(conn, [turns[0]]) == 0  # an answer is never overwritten
+
+
+def test_an_interrupted_opencode_turn_gets_its_last_messages_from_opencodes_database(
+    conn, tmp_path, monkeypatch
+) -> None:
+    """OpenCode keeps no transcript file; its messages sit in its own SQLite database."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    now = "2026-10-13T12:"
+    # ``opencode run`` closes the turn with its prompt; the answer comes after the turn's end
+    turns = _session(conn, "opencode", "ses_1", [(f"{now}00:00.000Z", f"{now}00:00.000Z"), (f"{now}05:00.000Z", None)])
+    (tmp_path / "share" / "opencode").mkdir(parents=True)
+    with sqlite3.connect(tmp_path / "share" / "opencode" / "opencode.db") as oc:
+        oc.execute("CREATE TABLE session_message(id, session_id, type, seq, time_created, time_updated, data)")
+        start = 1791892800000  # 2026-10-13T12:00:00Z
+
+        def said(seq: int, minute: int, content: list, kind: str = "assistant", **extra) -> None:
+            data = {"time": {"created": start + minute * 60_000}, "content": content, **extra}
+            oc.execute(
+                "INSERT INTO session_message VALUES (?, 'ses_1', ?, ?, 0, 0, ?)", (seq, kind, seq, json.dumps(data))
+            )
+
+        said(1, 0, [{"type": "text", "text": "the prompt"}], kind="user")
+        said(2, 1, [{"type": "reasoning", "text": "thinking"}, {"type": "text", "text": "Reading the parser."}])
+        said(3, 3, [], finish="error")  # the provider's free limit: no text
+        said(4, 6, [{"type": "text", "text": "the next request's answer"}])
+    assert work.fill_answers(conn, turns) == 1
+    answer = conn.execute("SELECT answer FROM turns WHERE id = ?", (turns[0],)).fetchone()[0]
+    assert answer == "(unfinished) Reading the parser."
