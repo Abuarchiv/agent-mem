@@ -136,3 +136,28 @@ def test_a_note_the_review_retired_stays_retired(conn, config: Config, project: 
     store.supersede(conn, note[0], newer)
     assert notes.ingest(conn, config)["stored"] == 0
     assert _valid(conn) == []
+
+
+def test_a_profile_linking_to_the_same_projects_folder_stores_each_note_once(
+    conn, config: Config, project: Path, tmp_path: Path, monkeypatch
+):
+    """Orca profiles set CLAUDE_CONFIG_DIR to a home whose ``projects`` links to ~/.claude/projects."""
+    _claude_note(project, "worker-drain.md", NOTE)
+    notes.ingest(conn, config)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    (profile / "projects").symlink_to(Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+    assert notes.ingest(conn, config)["stored"] == 0
+    assert _valid(conn) == ["claude-auto-memory"]
+
+
+def test_many_new_notes_are_written_in_short_transactions(conn, config: Config, project: Path, monkeypatch):
+    """Hooks wait 150 ms for the write lock: one transaction for 130 notes held it for 300 ms."""
+    for i in range(notes.BATCH + 5):
+        _claude_note(project, f"n{i}.md", NOTE.replace("before it exits", f"before exit {i}"))
+    opened = []
+    real = notes.db.transaction
+    monkeypatch.setattr(notes.db, "transaction", lambda c, **kw: opened.append(1) or real(c, **kw))
+    assert notes.ingest(conn, config)["stored"] == notes.BATCH + 5
+    assert len(opened) == 2

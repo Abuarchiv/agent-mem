@@ -29,6 +29,8 @@ from agent_mem.memory import store
 # The origin each harness's own notes carry; that harness already has them in its context.
 OWN_NOTES = {"claude": "claude-auto-memory", "codex": "codex-memory"}
 MAX_BYTES = 64 * 1024
+# New notes per write transaction: hooks wait 150 ms for the lock, 130 notes in one held it for 300 ms.
+BATCH = 20
 _FRONT = re.compile(r"\A---\n(.*?)\n---\n?", re.S)
 _FIELD = re.compile(r"^\s*(name|description|type):\s*(.+?)\s*$", re.M)
 _HEADING = re.compile(r"^#\s+(.+)$", re.M)
@@ -84,7 +86,8 @@ def claude_notes(root: Path, scanned: set[str] | None = None) -> Iterator[tuple[
     """(cwd, path, text, mtime) for Claude Code's topic files; ``MEMORY.md`` is only an index of links. ``scanned``
     collects the folders read completely: a note missing there was deleted. A folder whose transcripts are gone
     (Claude Code removes them after 30 days) cannot be placed in a project and does not count."""
-    for folder in sorted((root / "projects").glob("*/memory")):
+    # Resolved: an Orca profile's ``projects`` links to ~/.claude/projects, and a note keyed by both paths is two notes.
+    for folder in sorted((root / "projects").resolve().glob("*/memory")):
         cwd = _transcript_cwd(folder.parent)
         if cwd is None:
             continue
@@ -175,18 +178,20 @@ def ingest(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
             new.append((project, origin, cwd, path, text, mtime, dedupe))
     if not (new or rekeyed or revived or gone):
         return counts
-    with db.transaction(conn):
-        for key, memory_id in rekeyed:
-            conn.execute("UPDATE memories SET dedupe_key = ? WHERE id = ?", (key, memory_id))
-        for memory_id in gone:
-            store.supersede(conn, memory_id, None)
-            counts["retired"] += 1
-        for memory_id, source in revived:
-            _revive(conn, memory_id, source)
-        for project, origin, cwd, path, text, mtime, dedupe in new:
-            identity.register_project(conn, project, cwd)
-            stored_id = _store(conn, project.id, origin, path, text, mtime, dedupe)
-            counts["stored" if stored_id is not None else "unchanged"] += 1
+    for start in range(0, max(len(new), 1), BATCH):
+        with db.transaction(conn):
+            if start == 0:
+                for key, memory_id in rekeyed:
+                    conn.execute("UPDATE memories SET dedupe_key = ? WHERE id = ?", (key, memory_id))
+                for memory_id in gone:
+                    store.supersede(conn, memory_id, None)
+                    counts["retired"] += 1
+                for memory_id, source in revived:
+                    _revive(conn, memory_id, source)
+            for project, origin, cwd, path, text, mtime, dedupe in new[start : start + BATCH]:
+                identity.register_project(conn, project, cwd)
+                stored_id = _store(conn, project.id, origin, path, text, mtime, dedupe)
+                counts["stored" if stored_id is not None else "unchanged"] += 1
     return counts
 
 
