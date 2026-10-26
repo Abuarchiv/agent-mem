@@ -20,7 +20,7 @@ body:
     id: log
     attributes:
       label: Last 50 lines of the log
-      description: "`tail -n 50 \"$(agent-mem paths | python -c 'import json,sys;print(json.load(sys.stdin)[\"logs\"])')\"/hook.log`. Logs never contain prompt contents."
+      description: "`tail -n 50 \"$(agent-mem paths --json | python -c 'import json,sys;print(json.load(sys.stdin)[\"logs\"])')\"/hook.log`. Logs never contain prompt contents."
       render: text
   - type: input
     id: harness

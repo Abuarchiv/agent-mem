@@ -5,13 +5,13 @@ This file describes the design in short.
 ## Processes
 
 ```
-Harness hook ──► agent-mem hook <harness> [event]        short-lived, standard library only, ~60 ms
+Harness hook ──► agent-mem hook <harness> [event]        short-lived, standard library only, ~70 ms
                    normalize → redact → capture.apply → optional context/deny
                    Stop/SessionEnd: enqueue the turn, spawn the observer if none holds the lock
                    on deadline/lock/error: write the event to the spool, print nothing
 
 agent-mem observe  detached, one at a time (observe.lock), low priority, exits after 90 s idle
-                   lease turns → bundle (≤ 5 turns, ≤ 6000 tokens, tool output ≤ 800 chars)
+                   lease turns → bundle (≤ 5 turns, ≤ 20 000 tokens, tool output ≤ 1 200 chars)
                    → mem0.add through the harness CLI of the turn's vendor
                    → mirror facts into SQLite (dedupe_key = mem0:<id>)
                    → work log: type and title per turn, running session summary, lessons with an evidence turn
