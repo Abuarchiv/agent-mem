@@ -6,8 +6,8 @@ A turn's work is the fresh tokens of the calls between its prompt and its end: i
 subagents included. Cache reads stay out: every step re-reads the whole context, and counting that would make a
 30-step turn look like millions of tokens. The indexer measures closed turns, never the hook path.
 
-A memory's share is its turn's work divided by the memories that turn produced, so a block that names several
-memories of one turn counts that turn once. The number is what the agent itself spent, so "read 400 tokens built from 30,000" compares what an injection costs with what
+A turn's work is split evenly between the turn and the memories drawn from it; only what an agent used counts, each
+part once, so naming the turn and all its memories adds up to the whole turn. The number is what the agent itself spent, so "read 400 tokens built from 30,000" compares what an injection costs with what
 finding it out again took. It is not a measured saving: nobody knows what the agent would have redone.
 """
 
@@ -20,8 +20,12 @@ import sqlite3
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
+from typing import TypeVar
 
 from agent_mem.core import db, timeutil
+from agent_mem.memory import learn
+
+T = TypeVar("T")
 
 LOOKBACK_DAYS = 30  # Claude Code deletes transcripts after 30 days by default
 # The label an entry starts with ("- [M12 · 2026-10-13 · fact]"); an id inside its text is only a mention.
@@ -203,44 +207,73 @@ def measure(conn: sqlite3.Connection) -> int:
 
 
 def behind(conn: sqlite3.Connection, text: str) -> int:
-    """Measured work behind the memories (``M12``) and turns (``T5``) a block names. A named turn counts whole and
-    once; a memory brings its turn's share unless that turn is named itself."""
+    """Measured work behind the memories (``M12``) and turns (``T5``) a block names that an agent has used before. A
+    named turn counts whole and once; a memory brings its turn's share unless that turn is named itself."""
     memories: set[int] = set()
     turns: set[int] = set()
     for kind, number in _ID.findall(text):
         (memories if kind == "M" else turns).add(int(number))
-    return _work_of(conn, memories, turns)
+    used = _used(conn, [("m", i) for i in memories] + [("t", i) for i in turns])
+    return _work_of(conn, {i for t, i in used if t == "m"}, {i for t, i in used if t == "t"})
+
+
+_USE_MARKS = "(" + ",".join("?" * len(learn.USE_KINDS)) + ")"
+
+
+def _used(conn: sqlite3.Connection, owners: list[tuple[str, int]]) -> set[tuple[str, int]]:
+    """The owners an agent fetched, cited or worked on after it was given them: shown alone, an entry saved nothing."""
+    found: set[tuple[str, int]] = set()
+    for chunk in _chunks(sorted(owners)):
+        marks = ",".join("(?, ?)" for _ in chunk)
+        found.update(
+            (str(t), int(i))
+            for t, i in conn.execute(
+                f"SELECT DISTINCT owner_type, owner_id FROM accesses WHERE kind IN {_USE_MARKS} "
+                f"AND (owner_type, owner_id) IN (VALUES {marks})",
+                [*learn.USE_KINDS, *(part for owner in chunk for part in owner)],
+            )
+        )
+    return found
 
 
 def reused(conn: sqlite3.Connection, since: str) -> int:
-    """Measured work behind everything given to agents since ``since``, each memory and turn once however often it
-    was given: a fact shown in ten sessions was found out once."""
+    """Measured work behind what agents used since ``since`` (fetched, cited, worked on), each memory and turn once
+    however often it was used: a fact used in ten sessions was found out once."""
     owners = conn.execute(
-        "SELECT DISTINCT owner_type, owner_id FROM accesses WHERE kind IN ('injected', 'warned') AND ts >= ?", (since,)
+        f"SELECT DISTINCT owner_type, owner_id FROM accesses WHERE kind IN {_USE_MARKS} AND ts >= ?",
+        (*learn.USE_KINDS, since),
     ).fetchall()
     return _work_of(conn, {int(i) for t, i in owners if t == "m"}, {int(i) for t, i in owners if t == "t"})
 
 
+# A turn's work is shared by what came out of it: its own record and each memory drawn from it.
+_SHARES = "1 + (SELECT COUNT(*) FROM memories s WHERE s.turn_id = t.id AND s.kind != 'native_note')"
+
+
 def _work_of(conn: sqlite3.Connection, memories: set[int], turns: set[int]) -> int:
+    """Each used turn and memory brings its share of the turn's work: a fact taken from a twelve-hour run did not
+    save the whole run."""
     total = 0
     for chunk in _chunks(sorted(turns)):
         marks = ",".join("?" * len(chunk))
         total += int(
-            conn.execute(f"SELECT COALESCE(SUM(work_tokens), 0) FROM turns WHERE id IN ({marks})", chunk).fetchone()[0]
+            conn.execute(
+                f"SELECT COALESCE(SUM(t.work_tokens / ({_SHARES})), 0) FROM turns t WHERE t.id IN ({marks})", chunk
+            ).fetchone()[0]
         )
     for chunk in _chunks(sorted(memories)):
         marks = ",".join("?" * len(chunk))
-        for turn_id, spent, siblings in conn.execute(
-            "SELECT m.turn_id, t.work_tokens, (SELECT COUNT(*) FROM memories s WHERE s.turn_id = m.turn_id "
-            f"AND s.kind != 'native_note') FROM memories m JOIN turns t ON t.id = m.turn_id WHERE m.id IN ({marks})",
-            chunk,
-        ):
-            if turn_id not in turns and spent:
-                total += int(spent) // max(int(siblings), 1)
+        total += int(
+            conn.execute(
+                f"SELECT COALESCE(SUM(t.work_tokens / ({_SHARES})), 0) FROM memories m JOIN turns t ON t.id = m.turn_id "
+                f"WHERE m.id IN ({marks}) AND m.kind != 'native_note'",
+                chunk,
+            ).fetchone()[0]
+        )
     return total
 
 
-def _chunks(ids: list[int], size: int = 500) -> Iterator[tuple[int, ...]]:
+def _chunks(ids: list[T], size: int = 500) -> Iterator[tuple[T, ...]]:
     """SQLite allows a bounded number of ``?`` per statement; a week of injections names thousands of ids."""
     for start in range(0, len(ids), size):
         yield tuple(ids[start : start + size])
