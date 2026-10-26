@@ -26,7 +26,7 @@ Agent Mem records what your coding agents do, writes short facts from it in the 
 ## Quick start
 
 ```sh
-uv tool install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
+uv tool install --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
 agent-mem setup all --write
 agent-mem doctor
 ```
@@ -92,7 +92,7 @@ If your agent runs in a container, install agent-mem into that same image and ke
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 USER node
 ENV PATH=/home/node/.local/bin:$PATH AGENT_MEM_DATA_DIR=/home/node/.agent-mem
-RUN uv tool install "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
+RUN uv tool install --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
  && agent-mem setup claude --write
 ```
 

@@ -17,8 +17,9 @@ fi
 git --version >/dev/null 2>&1 \
   || fail "git is missing; uv needs it to fetch agent-mem. macOS: xcode-select --install. Linux: install git with your package manager."
 before=$(agent-mem --version 2>/dev/null || true)
-uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
-  || fail "uv could not install agent-mem (network or git missing?). The error above names the cause."
+# 3.13: uv would take the newest Python, and onnxruntime (search by meaning) has no wheels for it yet (3.15).
+uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem" \
+  || fail "uv could not install agent-mem. The error above names the cause."
 uv tool update-shell >/dev/null 2>&1 || true
 exe="$(uv tool dir --bin)/agent-mem"  # the copy just installed, even before PATH knows it
 if [ -n "$before" ]; then

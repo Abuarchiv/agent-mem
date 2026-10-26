@@ -18,8 +18,9 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   Fail "git is missing; uv needs it to fetch agent-mem. Install Git for Windows (winget install Git.Git) and run this again."
 }
 $before = if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem --version } else { "" }
-uv tool install --upgrade "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
-if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem (network or git missing?). The error above names the cause." }
+# 3.13: uv would take the newest Python, and onnxruntime (search by meaning) has no wheels for it yet (3.15).
+uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
+if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem. The error above names the cause." }
 uv tool update-shell | Out-Null
 $exe = Join-Path (uv tool dir --bin) "agent-mem.exe"  # the copy just installed, even before PATH knows it
 if ($before) {
