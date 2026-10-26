@@ -600,3 +600,13 @@ def test_a_turn_without_answer_shows_the_observer_title(driver: Driver, conn):
     assert search.load_hits(conn, [("t", turn)])[("t", turn)].title == "Parser für Rechnungen fertig"
     conn.execute("UPDATE turns SET answer = 'Parser steht.' WHERE id = ?", (turn,))
     assert search.load_hits(conn, [("t", turn)])[("t", turn)].title == "mache weiter mit dem Parser"
+
+
+def test_a_long_answer_shows_its_opening_and_the_part_the_question_names():
+    """Injected answers cost 79 % of the prompt tokens; the detail a question asks for is often pages further down."""
+    answer = "Viewer umgebaut und lokal committet. " + "Weitere Schritte am Layout. " * 60
+    answer += "Exporte und Viewer-Seiten werden mit privaten Dateirechten 0o600 geschrieben. " + "Rest. " * 80
+    hit = search.Hit(owner=("t", 1), kind="turn", title="Viewer umbauen", text="", answer=answer)
+    line = inject.hit_line(hit, 1200, search.query_terms("Mit welchen Dateirechten werden Exporte geschrieben?"))
+    assert "Viewer umgebaut" in line and "0o600" in line
+    assert len(line) < 700 < len(inject.hit_line(hit, 1200))

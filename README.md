@@ -156,7 +156,7 @@ Copilot CLI and the Copilot app show the same panel without colour, as progress 
 Your savings: ~84,760 tokens (98% reduction from reuse)
 ```
 
-This line compares what a memory costs the agent to read with the work it took to find it out. It appears only when measured work stands behind it. `agent-mem status` shows the same for the last 7 days; the viewer shows it on the overview, on the Health page and in every memory. It is a comparison, not a measured saving: nobody knows how much of that work an agent would have repeated without the memory. Details in [How it works](#token-savings-measured).
+This line compares what memories cost the agent to read with the work it took to find them out. Only memories an agent has used count: fetched with `mem_get`, cited by id, or followed by an edit of a file they name. It appears only when measured work stands behind them. `agent-mem status` shows the same for the last 7 days; the viewer shows it on the overview, on the Health page and in every memory. It is a comparison, not a measured saving: nobody knows how much of that work an agent would have repeated without the memory. Details in [How it works](#token-savings-measured).
 
 ## Viewer
 
@@ -312,7 +312,7 @@ After a request ends, agent-mem reads the agent's own transcript and stores the 
 | Copilot | `~/.copilot/session-state/<id>/events.jsonl` |
 | OpenCode | not measured |
 
-A memory carries its request's share (the request's work divided by the memories it produced), so several memories from one request count that request once. Over 7 days each memory counts once, however many sessions were given it.
+A request's work is split evenly between the request and the memories drawn from it, so a fact taken from a long run brings its share, not the whole run, and all parts together add up to the request once. Over 7 days each used memory counts once, however many sessions used it; memories that were only shown count nothing.
 
 ## Supported versions
 

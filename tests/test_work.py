@@ -110,7 +110,7 @@ def test_codex_turn_work_skips_repeated_events_and_a_late_close_takes_nothing_fr
     assert measured == {turns[0]: 400, turns[1]: 100}  # the first turn ends where the second begins
 
 
-def test_an_injection_counts_a_turn_once_and_a_memory_by_its_share(conn) -> None:
+def test_a_used_turn_and_its_memories_share_the_turn_s_work(conn) -> None:
     turns = _session(conn, "claude", "s2", [("2026-10-13T09:00:00.000Z", "2026-10-13T09:10:00.000Z")] * 2)
     conn.execute("UPDATE turns SET work_tokens = ? WHERE id = ?", (9_000, turns[0]))
     conn.execute("UPDATE turns SET work_tokens = ? WHERE id = ?", (500, turns[1]))
@@ -122,10 +122,12 @@ def test_an_injection_counts_a_turn_once_and_a_memory_by_its_share(conn) -> None
         assert memory is not None
         conn.execute("UPDATE memories SET turn_id = ? WHERE id = ?", (turns[0], memory))
         ids.append(memory)
-    assert work.behind(conn, f"- [M{ids[0]} · fact] first") == 3_000
-    named = f"- [M{ids[0]} · fact] a\n- [M{ids[1]} · fact] b\n- [T{turns[0]} · work] c"
-    assert work.behind(conn, named) == 9_000  # the turn itself, not twice
-    assert work.behind(conn, f"- [M{ids[2]} · fact] a\n- [T{turns[1]} · work] b\n- [T{turns[1]} · work] c") == 3_500
+    assert work.behind(conn, f"- [M{ids[0]} · fact] first") == 0  # given, never used: it saved nothing yet
+    learn.record_access(conn, [("m", i) for i in ids] + [("t", t) for t in turns], "get", "s2")
+    assert work.behind(conn, f"- [M{ids[0]} · fact] first") == 2_250  # the turn and its three facts: four shares
+    named = f"- [M{ids[0]} · fact] a\n- [M{ids[1]} · fact] b\n- [T{turns[0]} · work] c\n- [M{ids[2]} · fact] d"
+    assert work.behind(conn, named) == 9_000  # all four shares add up to the turn, never more
+    assert work.behind(conn, f"- [M{ids[2]} · fact] a\n- [T{turns[1]} · work] b\n- [T{turns[1]} · work] c") == 2_750
     assert work.behind(conn, "nothing named") == 0
     # An id inside an entry's text ("fixed in M12, see T4") is a mention, not something the agent was given.
     assert work.behind(conn, f"- [T{turns[1]} · claude] done → the facts M{ids[0]} and T{turns[0]} were missing") == 500
@@ -157,12 +159,15 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     # Three sessions were given the same turn, one of them a second turn too: each turn's work counts once.
     for session in ("a", "b", "c"):
         learn.record_access(conn, [("t", turns[0])], "injected", session)
-        learn.record_access(conn, [("t", turns[0])], "cited", session)
     other = _session(conn, "claude", "s8", [("2026-10-13T09:00:00.000Z", "2026-10-13T09:10:00.000Z")])[0]
     conn.execute("UPDATE turns SET work_tokens = 90000 WHERE id = ?", (other,))
     learn.record_access(conn, [("t", other)], "injected", "a")  # given but never used: no saving claimed
     learn.record_access(conn, [("t", turns[1])], "warned", "c")
     learn.record_access(conn, [("t", turns[1])], "shown", "c", ts="2020-01-01T00:00:00.000Z")  # outside the week
+    assert _injected(conn)["work"] == 0  # given and warned about, never used: no savings claimed
+    learn.record_access(conn, [("t", turns[0])], "cited", "a")
+    learn.record_access(conn, [("t", turns[1])], "used", "c")
+    learn.record_access(conn, [("t", turns[0])], "used", "b")
     injected = _injected(conn)
     assert (injected["blocks"], injected["tokens"], injected["work"]) == (3, 400, 10_000)
     assert injected["saved_percent"] == 96  # 9,600 of 10,000
