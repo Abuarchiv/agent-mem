@@ -561,6 +561,46 @@ def parallel(conn: sqlite3.Connection, project_id: str, session_id: str, now: st
     return Block(text="\n".join(["<agent-mem>", *lines, FOOTER]), owners=[])
 
 
+def editing_elsewhere(
+    conn: sqlite3.Connection, project_id: str, session_id: str, paths: list[str], now: str
+) -> list[tuple[str, tuple[str, int] | None]]:
+    """A warning right before an edit of a file (``paths`` relative to the project) that another running agent of
+    this project changed in the last hours, in this checkout or another worktree, once per file and session. The
+    start block names them too, but the clash happens at the edit, often many tool calls later."""
+    if not paths:
+        return []
+    moment = timeutil.parse(now) or timeutil.now()
+    key = f"parallel.edit.{session_id}"
+    told: list[str] = json.loads(db.get_meta(conn, key) or "[]")
+    lines: list[tuple[str, tuple[str, int] | None]] = []
+    for row in conn.execute(
+        "SELECT s.id, s.harness, s.last_event_at, t.files_json FROM sessions s JOIN turns t ON t.session_id = s.id "
+        "WHERE s.id != ? AND s.ended_at IS NULL AND s.last_event_at >= ? AND t.project_id = ? AND t.started_at >= ?",
+        (
+            session_id,
+            timeutil.iso(moment - timedelta(minutes=PARALLEL_MINUTES)),
+            project_id,
+            timeutil.iso(moment - timedelta(hours=3)),
+        ),
+    ):
+        changed = json.loads(row["files_json"] or "[]")
+        for path in paths:
+            if path in told or not any(f == path or f.endswith("/" + path) for f in changed):
+                continue
+            told.append(path)
+            minutes = max(0, round(timeutil.hours_between(row["last_event_at"], moment) * 60))
+            lines.append(
+                (
+                    f"! Another agent ({row['harness']}, active {minutes} min ago) changed `{path}` too. Check with "
+                    "the user before editing it, or the two changes collide.",
+                    None,
+                )
+            )
+    if lines:
+        db.set_meta(conn, key, json.dumps(told))
+    return lines
+
+
 def _home(path: str) -> str:
     home = str(Path.home())
     return "~" + path[len(home) :] if path.startswith(home + "/") else path

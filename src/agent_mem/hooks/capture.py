@@ -602,6 +602,9 @@ def _on_pre_tool(call: _Call) -> None:
                 (f"- Note (R{rule['id']}): earlier correction — {rule['message']} ({rule['evidence']}x).", None)
             )
     lines.extend(_user_rules(call.conn, call.project_id, call.session_id, tool_signal))
+    if tool_signal.category == "edit" and call.project_id is not None:
+        edited = _rel_files(call.project, tool_signal.files)
+        lines.extend(inject.editing_elsewhere(call.conn, call.project_id, call.session_id, edited, call.event.ts))
     block = inject.warnings_block(lines, call.config)
     if block:
         learn.record_access(call.conn, block.owners, "warned", call.session_id)

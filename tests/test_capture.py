@@ -418,3 +418,23 @@ def test_one_request_reported_by_several_opencode_processes_is_one_turn(conn, co
     rows = conn.execute("SELECT prompt, answer FROM turns").fetchall()
     assert [tuple(r) for r in rows] == [("find bugs in agent-mem and fix them", "Fixed two bugs.")]
     assert conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'prompt' AND turn_id IS NULL").fetchone()[0] == 0
+
+
+def test_editing_a_file_another_running_agent_changes_warns_right_before(conn, config, project, tmp_path):
+    """The start block named the other agents' files only at the start and with each request; the clash happens at
+    the edit, often many tool calls later. Another worktree of the repo counts: the same file there is merged later."""
+    other = tmp_path / "proj-wt"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    subprocess.run(["git", "-C", str(other), "remote", "add", "origin", "git@github.com:me/demo.git"], check=True)
+    (other / "app.py").write_text("x = 1\n")
+    them = Driver(conn, config, other)
+    them.prompt("s1", "improve the search")
+    them.edit("s1", "app.py")
+    me = Driver(conn, config, project)
+    me.prompt("s2", "improve everything")
+    warned = me.pre_edit("s2", "app.py").context or ""
+    assert "Another agent" in warned and "app.py" in warned
+    assert "Another agent" not in (me.pre_edit("s2", "app.py").context or "")  # once per file
+    (project / "db.py").write_text("x = 1\n")
+    assert "Another agent" not in (me.pre_edit("s2", "db.py").context or "")  # a file nobody else changes
