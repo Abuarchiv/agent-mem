@@ -421,3 +421,15 @@ def test_a_request_names_the_files_another_running_agent_changes_here(driver: Dr
     driver.edit("s1", "cli.py")
     assert "Another agent" not in (driver.prompt("s2", "next").context or "")  # an ended session is not running
     assert "Another agent" not in (driver.start("s3").context or "")
+
+
+def test_one_request_reported_by_several_opencode_processes_is_one_turn(conn, config, project):
+    """Every OpenCode process that loaded the plugin reports the same message, up to four within a second: 21 of 38
+    OpenCode requests in a week were such copies, closed without an answer."""
+    driver = Driver(conn, config, project, harness="opencode")
+    for _ in range(3):
+        driver.prompt("s1", "find bugs in agent-mem and fix them")
+    driver.stop("s1", "Fixed two bugs.")
+    rows = conn.execute("SELECT prompt, answer FROM turns").fetchall()
+    assert [tuple(r) for r in rows] == [("find bugs in agent-mem and fix them", "Fixed two bugs.")]
+    assert conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'prompt' AND turn_id IS NULL").fetchone()[0] == 0

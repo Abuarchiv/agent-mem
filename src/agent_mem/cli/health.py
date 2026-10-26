@@ -19,6 +19,7 @@ from agent_mem.cli.install import claude_home, codex_home, copilot_home, opencod
 from agent_mem.core import db, logutil, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.harness import HARNESS_NAMES, HARNESSES
+from agent_mem.core.signals import first_line
 from agent_mem.memory import work
 
 HARNESS_MARKERS = {
@@ -480,6 +481,9 @@ def _observer_queue_check(conn: sqlite3.Connection) -> Check:
     )
 
 
+FAILED_CALLS = 3
+
+
 def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
     """Which harness CLIs can run the observer, with their model and any pause after a quota or login error."""
     from agent_mem.observe import providers
@@ -488,6 +492,7 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
     now = timeutil.iso()
     shown = []
     logged_out = []
+    failing = []
     for name in stages:
         until = providers.paused_until(conn, name)
         paused = ""
@@ -497,15 +502,26 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
             reason = {"login": "not logged in, retry at", "timeout": "no answer twice, paused until"}
             paused = f", {reason.get(kind or '', 'usage limit, paused until')} {until}"
             logged_out += [name] if login else []
+        # A pause runs out and an error that is no limit (Codex: "workspace routing discovery failed") never pauses:
+        # a CLI that failed its last calls stayed green while every turn fell through to the next stage.
+        last = conn.execute(
+            "SELECT ok, error FROM observe_calls WHERE provider = ? ORDER BY id DESC LIMIT ?", (name, FAILED_CALLS)
+        ).fetchall()
+        if not paused and len(last) == FAILED_CALLS and not any(row["ok"] for row in last):
+            lines = [line.strip() for line in str(last[0]["error"] or "").splitlines() if line.strip()]
+            paused = f", last {FAILED_CALLS} calls failed: {first_line(lines[-1] if lines else 'no message', 80)}"
+            failing.append(name)
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
     remedy = 'Install Claude Code, Codex, Copilot CLI or OpenCode, or add "ollama" to observe.providers.'
+    if failing:
+        remedy = "Start " + " and ".join(f"`{name}`" for name in failing) + " once and check that it answers."
     if logged_out:
         from agent_mem.core import config as config_module
 
         remedy = config_module.login_hint(logged_out)
     return Check(
         "facts model",
-        bool(stages) and not logged_out,
+        bool(stages) and not logged_out and not failing,
         ", ".join(shown) if stages else f"none installed of {', '.join(config.observe.providers)}",
         remedy,
         warn_only=True,

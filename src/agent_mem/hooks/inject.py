@@ -516,10 +516,24 @@ def prompt_hints(
     if record:
         learn.record_access(conn, [h.owner for h in hits], "shown", session_id)
     detail = _detail(config.budgets.prompt, len(hits))
+    changed = {h.owner: _changed(conn, h.owner) for h in hits}
     # The budget keeps the best-ranked hits; the kept ones are then shown oldest first.
-    fitting = render([(hit_line(h, detail, terms), h.owner) for h in hits], config.budgets.prompt)
+    fitting = render([(hit_line(h, detail, terms) + changed[h.owner], h.owner) for h in hits], config.budgets.prompt)
     kept = sorted((h for h in hits if fitting and h.owner in fitting.owners), key=lambda h: h.ts)
-    return render([(hit_line(h, detail, terms), h.owner) for h in kept], config.budgets.prompt)
+    return render([(hit_line(h, detail, terms) + changed[h.owner], h.owner) for h in kept], config.budgets.prompt)
+
+
+def _changed(conn: sqlite3.Connection, owner: tuple[str, int]) -> str:
+    """ " (app.py changed since 2026-10-22)" for an entry whose files differ from when they were anchored: the agent
+    otherwise reads an old entry about a file as if the file still looked that way."""
+    from agent_mem.memory import consolidate, store
+
+    states = [
+        f"{path.rsplit('/', 1)[-1]} {state}"
+        for path, state in consolidate.anchor_status(conn, owner)
+        if state != "unchanged" and not store.scratch_path(path)  # a session's scratch files are gone by design
+    ]
+    return f" ({', '.join(states[:2])})" if states else ""
 
 
 PROMPT_HITS = 10

@@ -265,6 +265,19 @@ def test_anchors_detect_changed_and_deleted_files(driver: Driver, conn, project)
     assert consolidate.anchor_status(conn, ("t", 1)) == [("app.py", "deleted")]
 
 
+def test_a_shown_entry_says_its_file_changed_since(driver: Driver, conn, config: Config, project):
+    """The anchors were only used to retire dead ends and decisions once a day; the agent read an old entry about a
+    file as if the file still looked that way."""
+    driver.prompt("s1", "Make the retry backoff in app.py exponential")
+    driver.edit("s1", "app.py")
+    driver.stop("s1", "The retry backoff in app.py doubles up to 30 seconds.")
+    consolidate.record_anchors(conn)
+    prompt = "How does the retry backoff in app.py work?"
+    assert "changed since" not in inject.prompt_hints(conn, config, _pid(conn), "s2", prompt, "claude").text
+    (project / "app.py").write_text("retry = None\n")
+    assert "app.py changed since" in inject.prompt_hints(conn, config, _pid(conn), "s3", prompt, "claude").text
+
+
 def test_a_decision_about_a_deleted_file_leaves_mem0_too(driver: Driver, conn, config: Config, project):
     driver.prompt("s1", "edit app")
     driver.edit("s1", "app.py")
