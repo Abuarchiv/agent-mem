@@ -62,7 +62,7 @@ Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `
 | `hooks/normalize/` | Harness payload to `Event` |
 | `hooks/capture.py` | Single write path: sessions, turns, events, recipes, rules, dead ends; enqueues finished turns |
 | `hooks/inject.py` | Context blocks within budgets, facts included as `[M<id> · fact]` |
-| `core/signals.py` | Deterministic signals: tool categories, command keys, error signatures, corrections, decisions |
+| `core/signals/` | Deterministic signals: `tools` (categories, command keys, files), `errors` (signatures), `prompts` (corrections, preferences, decisions), `text` |
 | `core/privacy.py` | Redaction, private sections, exclude globs, size limits |
 | `core/identity.py` | Project identity (remote URL or repository root, worktrees shared) |
 | `memory/store.py` | Memories, search keys, entities, links, deletion (queues `observe_forget` for facts) |
