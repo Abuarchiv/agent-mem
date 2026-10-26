@@ -400,13 +400,13 @@ def _housekeeping_checks(conn: sqlite3.Connection, config: Config, fix: bool) ->
 
 
 def _viewer_checks(config: Config, fix: bool) -> list[Check]:
-    from agent_mem.ui import server
+    from agent_mem.ui import autostart, server
 
     if not config.viewer.enabled:
         return [Check("viewer", True, "disabled in config.json")]
-    login = server.autostart_path()
+    login = autostart.autostart_path()
     if fix and (login is None or not login.exists()):
-        server.install_autostart(config)
+        autostart.install_autostart(config)
     up = server.running(config)
     checks = [
         Check(

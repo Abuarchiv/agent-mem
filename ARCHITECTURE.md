@@ -52,7 +52,7 @@ src/agent_mem/
              the background fact worker; the only place that imports mem0 and qdrant
   mcp/       server: the stdio MCP server used by the plugins
   cli/       argument parsing, commands, install (setup --write, uninstall), health (status, doctor)
-  ui/        the self-contained HTML page and the loopback server that serves it
+  ui/        the self-contained HTML page, the loopback server that serves it, its login item
   bench/     evaluate: fixture and LongMemEval-S runner (not used at runtime)
 ```
 

@@ -190,16 +190,16 @@ def test_second_viewer_on_the_same_port_exits_cleanly(config: Config, capsys):
 
 
 def test_autostart_writes_and_removes_a_login_item(config: Config):
-    from agent_mem.ui import server
+    from agent_mem.ui import autostart
 
-    target = server.autostart_path()
+    target = autostart.autostart_path()
     if target is None:
         return  # Linux without systemd: nothing to register
-    assert "login item written" in server.install_autostart(config)
+    assert "login item written" in autostart.install_autostart(config)
     assert target.exists() and str(config.data_dir) in target.read_text(encoding="utf-8")
     if not target.name.endswith(".cmd"):  # Windows startup scripts inherit the user's PATH
         assert os.environ["PATH"] in target.read_text(encoding="utf-8")  # the health page finds claude, codex, copilot
-    assert server.remove_autostart() == target and not target.exists()
+    assert autostart.remove_autostart() == target and not target.exists()
 
 
 def test_view_output_into_a_folder_and_export_into_a_new_folder(config: Config, driver: Driver, tmp_path: Path):
@@ -261,12 +261,12 @@ def test_viewer_rebuilds_the_page_only_after_a_write_and_restarts_after_an_upgra
 def test_login_item_removes_itself_once_agent_mem_is_uninstalled(config: Config, tmp_path: Path):
     import plistlib
 
-    from agent_mem.ui import server
+    from agent_mem.ui import autostart
 
     if sys.platform != "darwin":
         return  # systemd: ConditionPathExists; Windows: the .cmd deletes itself (both declarative)
-    server.install_autostart(config)
-    target = server.autostart_path()
+    autostart.install_autostart(config)
+    target = autostart.autostart_path()
     assert target is not None
     argv = plistlib.loads(target.read_bytes())["ProgramArguments"]
     stub = tmp_path / "bin"

@@ -21,7 +21,7 @@ from agent_mem.core import db, identity, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.harness import HARNESSES
 from agent_mem.memory import store, views
-from agent_mem.ui import server
+from agent_mem.ui import autostart, server
 
 
 def dispatch(ns: argparse.Namespace, config: Config) -> int:
@@ -623,7 +623,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
             except (OSError, ValueError) as error:
                 print(f"topic model not downloaded: {error}. Facts still work, they are just not linked by topic.")
     if config.viewer.enabled:
-        print(server.install_autostart(config))
+        print(autostart.install_autostart(config))
     print("\nDetected:\n" + _detect_table(found))
     print("\nStart a session, then run `agent-mem doctor`. `agent-mem view` opens the viewer.")
     return 0
@@ -643,7 +643,7 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.cli.health import harness_installed
 
     if not any(harness_installed(name) for name in HARNESSES):
-        removed = server.remove_autostart()
+        removed = autostart.remove_autostart()
         if removed:
             print(f"  removed the viewer login item {removed} (no agent left)")
     print(f"Data stays in {config.data_dir}; `agent-mem purge --all` deletes it.")
@@ -811,10 +811,10 @@ def cmd_eval(ns: argparse.Namespace, config: Config) -> int:
 
 def cmd_serve(ns: argparse.Namespace, config: Config) -> int:
     if ns.autostart:
-        print(server.install_autostart(config))
+        print(autostart.install_autostart(config))
         return 0
     if ns.no_autostart:
-        removed = server.remove_autostart()
+        removed = autostart.remove_autostart()
         print(
             f"Removed {removed}. The viewer still starts with each agent session."
             if removed
