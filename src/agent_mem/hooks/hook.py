@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import socket
 import sqlite3
 import subprocess
@@ -22,7 +21,7 @@ from typing import Any
 
 from agent_mem.core import db, logutil, proc, spool, timeutil
 from agent_mem.core.config import Config, env_flag, load
-from agent_mem.core.events import Event, PayloadError
+from agent_mem.core.events import Event, PayloadError, without_lone_surrogates
 from agent_mem.hooks import capture, inject
 from agent_mem.hooks.normalize import normalize
 
@@ -37,21 +36,6 @@ def _read_stdin(limit: int, preread: bytes | None = None) -> str:
     if len(data) > limit:
         raise PayloadError("payload too large")
     return data.decode("utf-8", errors="replace")
-
-
-def _without_lone_surrogates(value: Any) -> Any:
-    """JSON may carry `\\ud800` (a binary file shown by `cat`). Such a string cannot be written to the database or
-    the spool; it becomes U+FFFD. Valid pairs are already joined by ``json.loads``."""
-    if isinstance(value, str):
-        return _SURROGATE.sub("\ufffd", value)
-    if isinstance(value, dict):
-        return {key: _without_lone_surrogates(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_without_lone_surrogates(item) for item in value]
-    return value
-
-
-_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 def render(harness: str, event: Event, response: capture.Response) -> dict[str, Any] | None:
@@ -298,7 +282,7 @@ def run(
         raw = stdin_text if stdin_text is not None else _read_stdin(config.limits.stdin_bytes, stdin_bytes)
         payload = json.loads(raw) if raw.strip() else {}
         if "\\ud" in raw.lower():  # only an escape makes a surrogate: the bytes were decoded with "replace"
-            payload = _without_lone_surrogates(payload)
+            payload = without_lone_surrogates(payload)
         event = normalize(harness, payload, event_name)
     except (PayloadError, ValueError) as error:
         logutil.write(

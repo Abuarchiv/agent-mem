@@ -28,6 +28,21 @@ class PayloadError(ValueError):
     """The payload does not match the expected shape for this harness and event."""
 
 
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def without_lone_surrogates(value: Any) -> Any:
+    """JSON may carry `\\ud800` (a binary file shown by `cat`). Such a string cannot be written to the database or
+    the spool; it becomes U+FFFD. Valid pairs are already joined by ``json.loads``."""
+    if isinstance(value, str):
+        return _SURROGATE.sub("\ufffd", value)
+    if isinstance(value, dict):
+        return {key: without_lone_surrogates(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [without_lone_surrogates(item) for item in value]
+    return value
+
+
 @dataclass
 class Event:
     harness: str

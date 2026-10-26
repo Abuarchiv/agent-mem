@@ -22,6 +22,7 @@ from agent_mem.core.events import (
     require_session,
     shell_text,
     text_of,
+    without_lone_surrogates,
 )
 from agent_mem.hooks.normalize import claude
 
@@ -73,7 +74,8 @@ def _answer_in(transcript: str) -> tuple[str | None, bool]:
             final = not data.get("toolRequests")
         content = data.get("content")
         if isinstance(content, str) and content.strip():
-            return content, final
+            # Read after the hook cleaned its payload: the transcript's escapes need the same treatment.
+            return without_lone_surrogates(content), final
     return None, bool(final)
 
 

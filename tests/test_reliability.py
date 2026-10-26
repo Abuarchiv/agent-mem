@@ -442,6 +442,21 @@ def test_a_lone_surrogate_in_a_payload_is_saved_not_lost(config: Config, project
     conn.close()
 
 
+def test_a_lone_surrogate_in_a_copilot_transcript_is_saved_not_lost(config: Config, project: Path, tmp_path: Path):
+    """agentStop reads the answer from the transcript after the payload was cleaned: the same escape lands there."""
+    transcript = tmp_path / "events.jsonl"
+    lines = [{"type": "user.message", "data": {}}, {"type": "assistant.message", "data": {"content": "done \ud800"}}]
+    transcript.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    prompt = {"sessionId": "c", "cwd": str(project), "timestamp": 1790000000000, "prompt": "build it"}
+    hook.run("copilot", "userPromptSubmitted", json.dumps(prompt), config)
+    stop = {"sessionId": "c", "cwd": str(project), "timestamp": 1790000001000, "transcriptPath": str(transcript)}
+    hook.run("copilot", "agentStop", json.dumps(stop), config)
+    conn = db.connect(config)
+    assert conn.execute("SELECT answer FROM turns").fetchone()[0] == "done \ufffd"
+    conn.close()
+    assert spool.count(config.spool_dir) == 0
+
+
 def test_an_unexpected_error_in_a_hook_leaves_a_note_instead_of_nothing(config: Config, tmp_path: Path):
     """An event lost to an unexpected error leaves a note that doctor and the viewer show."""
     import subprocess
