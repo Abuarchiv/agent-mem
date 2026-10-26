@@ -12,6 +12,7 @@ def test_activation_grows_with_use_and_decays_with_age():
     assert frequent > fresh > old
     assert math.isclose(learn.usefulness(0, 0), 0.5)
     assert learn.usefulness(5, 5) > learn.usefulness(0, 5)
+    assert learn.usefulness(6, 0) == learn.usefulness(6, 6) < 1  # a ratio, however few showings were counted
 
 
 def test_corrections_become_rules_and_deny(driver: Driver, conn, config):
@@ -124,8 +125,38 @@ def test_cited_ids_count_as_use(driver: Driver, conn):
     driver.prompt("s1", "first")
     driver.stop("s1", "done")
     driver.prompt("s2", "second")
+    learn.record_access(conn, [("t", 1)], "shown", "claude:s2")
     driver.stop("s2", "Following T1 as before.")
     assert conn.execute("SELECT COUNT(*) FROM accesses WHERE kind = 'cited' AND owner_id = 1").fetchone()[0] == 1
+
+
+def test_an_id_the_session_never_saw_is_no_citation(driver: Driver, conn):
+    """Example ids in code and tests (`mem_get(["T42"])`) were 49 of 69 citations; one turn with six ranked first
+    for unrelated questions."""
+    for n in range(3):
+        driver.prompt("s1", f"turn {n}")
+        driver.stop("s1", "done")
+    driver.prompt("s2", "second")
+    learn.record_access(conn, [("t", 2)], "get")  # mem_get carries no session
+    driver.stop("s2", 'Following T2; the test calls `mem_get(["T1"])`.')
+    cited = conn.execute("SELECT owner_id FROM accesses WHERE kind = 'cited'").fetchall()
+    assert [r[0] for r in cited] == [2]
+
+
+def test_citations_stored_before_the_check_lose_the_unseen_once(driver: Driver, conn):
+    driver.prompt("s1", "first")
+    driver.stop("s1", "done")
+    driver.prompt("s2", "second")
+    learn.record_access(conn, [("t", 1)], "injected", "claude:s2")
+    learn.record_access(conn, [("t", 1), ("m", 7)], "cited", "claude:s2")
+    learn.record_access(conn, [("m", 7)], "cited", "claude:s2", "2020-01-01T00:00:00.000Z")  # too old to judge
+
+    assert learn.drop_unseen_citations(conn, "2026-01-01T00:00:00.000Z") == 1
+
+    left = conn.execute("SELECT owner_type, owner_id, ts FROM accesses WHERE kind = 'cited' ORDER BY ts").fetchall()
+    assert [(r[0], r[1]) for r in left] == [("m", 7), ("t", 1)] and left[0][2].startswith("2020")
+    learn.record_access(conn, [("m", 7)], "cited", "claude:s2")
+    assert learn.drop_unseen_citations(conn, "2026-01-01T00:00:00.000Z") == 0  # once per database
 
 
 def _project_id(conn):
@@ -287,3 +318,78 @@ def test_a_piped_test_run_that_failed_and_then_passed_teaches_the_fix(config, pr
         ("uv run pytest", '["parser.py"]')
     ]
     conn.close()
+
+
+def test_an_answer_that_repeats_a_rare_name_from_a_shown_entry_used_it(driver: Driver, conn):
+    """Agents rarely write "M3"; repeating `drop_retired_keys` from the entry they were shown is the use."""
+    from agent_mem.memory import store
+
+    pid = _project_id_after(driver)
+    rare = store.add_memory(
+        conn,
+        project_id=pid,
+        kind="fact",
+        title="Alte Suchschlüssel löscht `store.drop_retired_keys`",
+        body="",
+        source="agent",
+        trust="agent",
+    )
+    common = store.add_memory(
+        conn,
+        project_id=pid,
+        kind="fact",
+        title="Tests laufen mit `tests/conftest.py`",
+        body="",
+        source="agent",
+        trust="agent",
+    )
+    asked = store.add_memory(
+        conn,
+        project_id=pid,
+        kind="fact",
+        title="Die Spalte heißt `turns.defines_json`",
+        body="",
+        source="agent",
+        trust="agent",
+    )
+    for n in range(6):  # a name in this many entries says nothing about which one helped
+        store.add_memory(
+            conn,
+            project_id=pid,
+            kind="fact",
+            title=f"Fixture {n} in tests/conftest.py",
+            body="",
+            source="agent",
+            trust="agent",
+        )
+    driver.prompt("s2", "Wo steht turns.defines_json?")
+    start = conn.execute("SELECT started_at FROM turns ORDER BY id DESC LIMIT 1").fetchone()[0]
+    learn.record_access(conn, [("m", rare), ("m", common), ("m", asked)], "injected", "claude:s2", start)
+    driver.stop("s2", "Gelöscht über store.drop_retired_keys; siehe tests/conftest.py und turns.defines_json.")
+
+    assert learn.echo_uses(conn) == 1
+    used = conn.execute("SELECT owner_id FROM accesses WHERE kind = 'used'").fetchall()
+    assert [r[0] for r in used] == [rare]
+    assert learn.echo_uses(conn) == 0  # each turn is read once
+
+
+def _project_id_after(driver: Driver) -> str:
+    driver.prompt("s1", "start")
+    driver.stop("s1", "ok")
+    return _project_id(driver.conn)
+
+
+def test_a_users_rule_comes_before_the_file_or_command_it_names(driver: Driver, conn):
+    from agent_mem.memory import store
+
+    pid = _project_id_after(driver)
+    for title in ("In install.ps1 darf kein `exit` stehen", "Vor dem Commit `uv run ruff format` laufen lassen"):
+        store.add_memory(
+            conn, project_id=pid, kind="preference", title=title, body="", source="agent", trust="observer"
+        )
+    edit = driver.pre_edit("s2", "install.ps1").context or ""
+    assert "kein `exit`" in edit and "ruff" not in edit
+    assert driver.pre_edit("s2", "install.ps1").context is None  # once per session
+    assert driver.pre_edit("s2", "test_install.ps1").context is None  # a whole name, not a part of one
+    assert "ruff format" in (driver.pre_bash("s2", "uv run ruff format src tests").context or "")
+    assert "kein `exit`" in (driver.pre_edit("s3", "install.ps1").context or "")  # a new session hears it again

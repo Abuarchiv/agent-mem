@@ -32,7 +32,8 @@ def test_claude_gets_everything_that_fits_ten_thousand_characters(conn, config: 
     driver = Driver(conn, config, project, harness="claude")
     _many(conn, driver)
     start = driver.start("s1").context or ""
-    assert 7_000 < len(start) <= 10_000  # filled, but never moved to a file Claude is not told to read
+    # The start block is short for every harness; what a request needs comes with the request.
+    assert 700 < inject.tokens(start) <= config.budgets.session_start == 800
     hints = driver.prompt("s1", "how does the release script sign the artifacts before upload").context or ""
     assert len(hints) <= 10_000
     assert hints.count("- [M") >= 5 and "with reasons" in hints  # several hits, with their bodies
@@ -41,8 +42,8 @@ def test_claude_gets_everything_that_fits_ten_thousand_characters(conn, config: 
 def test_codex_gets_more_and_its_hooks_raise_the_limit(conn, config: Config, project: Path):
     driver = Driver(conn, config, project, harness="codex")
     _many(conn, driver)
-    start = driver.start("x1").context or ""
-    assert len(start) > 10_000 and inject.tokens(start) <= 7_800
+    hints = driver.prompt("x1", "how does the release script sign the artifacts before upload").context or ""
+    assert inject.tokens(hints) <= 7_800 and hints.count("- [M") >= 5
     handlers = json.loads((install.plugins_dir() / "codex" / "hooks.json").read_text())
     limits = {e: g["hooks"][0].get("additionalContextLimit") for e, groups in handlers["hooks"].items() for g in groups}
     assert limits["SessionStart"] == limits["UserPromptSubmit"] == limits["PostToolUse"] == 8000
@@ -58,6 +59,7 @@ def test_before_a_tool_call_warning_and_history_share_one_output(config: Config)
 def test_a_copilot_subagent_gets_a_short_start_block(conn, config: Config, project: Path):
     driver = Driver(conn, config, project, harness="copilot")
     _many(conn, driver)
+    config.budgets.session_start = 8_000  # someone who wants the long block back
     main = driver.start("c1").context or ""
     sub = driver.start("c1", source="subagent").context or ""
     assert inject.tokens(main) > 2_400 >= inject.tokens(sub) > 0
@@ -70,3 +72,24 @@ def test_copilot_is_told_how_to_search_older_work(conn, config: Config, project:
         _many(conn, driver, 6)
         start = driver.start(f"{harness}-s").context or ""
         assert (inject.SEARCH_LINE in start) is told
+
+
+def test_a_full_start_block_keeps_the_users_rules_and_where_the_last_session_stopped(
+    conn, config: Config, project: Path
+):
+    driver = Driver(conn, config, project, harness="claude")
+    project_id = _many(conn, driver)
+    driver.stop("seed", "Signing moved to the release job.")
+    store.add_memory(
+        conn,
+        project_id=project_id,
+        kind="preference",
+        title="Never push without asking",
+        body="",
+        source="hook",
+        trust="user",
+    )
+    config.budgets.session_start = 800
+    start = driver.start("s2").context or ""
+    assert inject.tokens(start) <= 800
+    assert "Never push without asking" in start and "last session" in start
