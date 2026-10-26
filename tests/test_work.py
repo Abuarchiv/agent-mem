@@ -157,6 +157,10 @@ def test_terminal_and_status_show_read_against_work(conn) -> None:
     # Three sessions were given the same turn, one of them a second turn too: each turn's work counts once.
     for session in ("a", "b", "c"):
         learn.record_access(conn, [("t", turns[0])], "injected", session)
+        learn.record_access(conn, [("t", turns[0])], "cited", session)
+    other = _session(conn, "claude", "s8", [("2026-10-13T09:00:00.000Z", "2026-10-13T09:10:00.000Z")])[0]
+    conn.execute("UPDATE turns SET work_tokens = 90000 WHERE id = ?", (other,))
+    learn.record_access(conn, [("t", other)], "injected", "a")  # given but never used: no saving claimed
     learn.record_access(conn, [("t", turns[1])], "warned", "c")
     learn.record_access(conn, [("t", turns[1])], "shown", "c", ts="2020-01-01T00:00:00.000Z")  # outside the week
     injected = _injected(conn)

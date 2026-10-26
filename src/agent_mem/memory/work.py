@@ -22,6 +22,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from agent_mem.core import db, timeutil
+from agent_mem.memory.learn import USE_KINDS
 
 LOOKBACK_DAYS = 30  # Claude Code deletes transcripts after 30 days by default
 # The label an entry starts with ("- [M12 · 2026-10-13 · fact]"); an id inside its text is only a mention.
@@ -213,10 +214,13 @@ def behind(conn: sqlite3.Connection, text: str) -> int:
 
 
 def reused(conn: sqlite3.Connection, since: str) -> int:
-    """Measured work behind everything given to agents since ``since``, each memory and turn once however often it
-    was given: a fact shown in ten sessions was found out once."""
+    """Measured work behind what agents reused since ``since``: opened, used or cited, or a warning before a known
+    error. Each memory and turn once however often: a fact used in ten sessions was found out once. Merely injected
+    does not count: 1.4 % of injected entries were ever used, and counting all of them claimed 68 M tokens saved."""
+    kinds = ("warned", *USE_KINDS)
     owners = conn.execute(
-        "SELECT DISTINCT owner_type, owner_id FROM accesses WHERE kind IN ('injected', 'warned') AND ts >= ?", (since,)
+        f"SELECT DISTINCT owner_type, owner_id FROM accesses WHERE kind IN ({','.join('?' * len(kinds))}) AND ts >= ?",
+        (*kinds, since),
     ).fetchall()
     return _work_of(conn, {int(i) for t, i in owners if t == "m"}, {int(i) for t, i in owners if t == "t"})
 
