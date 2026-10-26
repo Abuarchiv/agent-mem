@@ -390,3 +390,19 @@ def test_a_turn_cut_off_by_the_usage_limit_continues_after_the_reset(driver, con
     driver.stop("s", "Parser refactored, tests pass.")
     rows = conn.execute("SELECT id, prompt, answer, outcome FROM turns").fetchall()
     assert [tuple(r) for r in rows] == [(turn, "refactor the parser", "Parser refactored, tests pass.", "ok")]
+
+
+def test_a_request_names_the_files_another_running_agent_changes_here(driver: Driver, conn):
+    """On 2026-10-26 five sessions worked on the same agent-mem request at once, unaware of each other, and changed
+    the same files twice over."""
+    driver.prompt("s1", "improve the search")
+    driver.edit("s1", "app.py")
+    told = driver.prompt("s2", "improve everything").context or ""
+    assert "Another agent" in told and "app.py" in told
+    assert "Another agent" not in (driver.prompt("s2", "go on").context or "")  # told once
+    driver.edit("s1", "db.py")
+    assert "db.py" in (driver.prompt("s2", "and now?").context or "")  # until it changes another file
+    driver.send("s1", "session_end")
+    driver.edit("s1", "cli.py")
+    assert "Another agent" not in (driver.prompt("s2", "next").context or "")  # an ended session is not running
+    assert "Another agent" not in (driver.start("s3").context or "")

@@ -521,8 +521,10 @@ def _on_session_start(call: _Call) -> None:
         block = inject.session_start(
             call.conn, call.config, inject.work_project(call.conn, call.project_id), call.session_id, call.event.harness
         )
+    others = inject.parallel(call.conn, call.project_id, call.session_id, call.event.ts)
+    if block or others:
+        call.response.context = "\n".join(b.text for b in (others, block) if b)
     if block:
-        call.response.context = block.text
         learn.record_access(call.conn, block.owners, "injected", call.session_id, call.event.ts)
 
 
@@ -555,7 +557,9 @@ def _on_prompt(call: _Call) -> None:
     if compacted:
         db.delete_meta(call.conn, f"compacted.{call.session_id}")
     if call.with_context and call.project_id is not None:
-        blocks = [inject.compact(call.conn, call.config, call.session_id)] if compacted else []
+        blocks = [inject.parallel(call.conn, call.project_id, call.session_id, call.event.ts)]
+        if compacted:
+            blocks.append(inject.compact(call.conn, call.config, call.session_id))
         blocks.append(
             inject.prompt_hints(
                 call.conn,
