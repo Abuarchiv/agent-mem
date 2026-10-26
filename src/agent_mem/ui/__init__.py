@@ -24,6 +24,7 @@ from agent_mem import __version__
 from agent_mem.core import timeutil
 from agent_mem.core.config import Config
 from agent_mem.memory import learn
+from agent_mem.memory.store import json_list
 
 LIMITS = {
     "sessions": 150,
@@ -54,14 +55,6 @@ def view_dir(config: Config) -> Path:
 def discard(config: Config) -> None:
     """Remove written pages. Purge calls this so deleted data does not survive in an old page."""
     shutil.rmtree(view_dir(config), ignore_errors=True)
-
-
-def _json_list(value: str | None) -> list[str]:
-    try:
-        parsed = json.loads(value or "[]")
-    except ValueError:
-        return []
-    return [str(item) for item in parsed if isinstance(item, str)] if isinstance(parsed, list) else []
 
 
 def _cap(text: str | None, limit: int) -> tuple[str, bool]:
@@ -170,9 +163,9 @@ def _turns(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
                 "outcome": row["outcome"],
                 "title": row["title"],
                 "type": row["type"],
-                "files": _json_list(row["files_json"])[:20],
-                "commands": _json_list(row["commands_json"])[:10],
-                "errors": _json_list(row["errors_json"])[:10],
+                "files": json_list(row["files_json"])[:20],
+                "commands": json_list(row["commands_json"])[:10],
+                "errors": json_list(row["errors_json"])[:10],
                 "work": row["work_tokens"],
             }
         )
@@ -257,7 +250,7 @@ def _learned(
         (*params, LIMITS["recipes"]),
     )
     for recipe in recipes:
-        recipe["files"] = _json_list(recipe.pop("files_json"))[:10]
+        recipe["files"] = json_list(recipe.pop("files_json"))[:10]
     rules = _rows(
         conn,
         "SELECT id, project_id, pattern, message, evidence, enabled, hits, overrides "

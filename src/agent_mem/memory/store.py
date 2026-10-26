@@ -15,7 +15,7 @@ from agent_mem.memory import learn
 MAX_KEY_CHARS = 12_000
 
 
-def _json_list(value: str | None) -> list[str]:
+def json_list(value: str | None) -> list[str]:
     try:
         parsed = json.loads(value or "[]")
     except ValueError:
@@ -47,13 +47,7 @@ def entity_id(conn: sqlite3.Connection, project_id: str | None, kind: str, key: 
 
 def set_search_key(conn: sqlite3.Connection, owner_type: str, owner_id: int, text: str) -> None:
     remove_search_keys(conn, owner_type, owner_id)
-    text = text.strip()
-    if not text:
-        return
-    key_id = conn.execute(
-        "INSERT INTO search_keys(owner_type, owner_id) VALUES (?, ?)", (owner_type, owner_id)
-    ).lastrowid
-    conn.execute("INSERT INTO search_fts(rowid, text) VALUES (?, ?)", (key_id, text[:MAX_KEY_CHARS]))
+    add_search_key(conn, owner_type, owner_id, text)
 
 
 def add_search_key(conn: sqlite3.Connection, owner_type: str, owner_id: int, text: str) -> None:
@@ -95,11 +89,11 @@ def index_turn(conn: sqlite3.Connection, turn_id: int) -> None:
     ).fetchone()
     if turn is None:
         return
-    files = _json_list(turn["files_json"])
-    commands = _json_list(turn["commands_json"])
-    errors = _json_list(turn["errors_json"])
-    commits = _json_list(turn["commits_json"])
-    defines = _json_list(turn["defines_json"])
+    files = json_list(turn["files_json"])
+    commands = json_list(turn["commands_json"])
+    errors = json_list(turn["errors_json"])
+    commits = json_list(turn["commits_json"])
+    defines = json_list(turn["defines_json"])
     head = f"[{turn['harness']}{' · ' + turn['branch'] if turn['branch'] else ''} · {timeutil.day(turn['started_at'])}]"
     parts = [head, turn["prompt"], turn["answer"]]
     if files:
