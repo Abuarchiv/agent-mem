@@ -14,13 +14,14 @@ from pathlib import Path
 import pytest
 
 from agent_mem.core import db
-from agent_mem.core.config import Config
+from agent_mem.core.config import Config, load
 from agent_mem.hooks import hook
 
 if importlib.util.find_spec("mem0") is None:
     pytest.skip("observer extra not installed", allow_module_level=True)
 
 pytestmark = pytest.mark.local  # runs only by hand: loads the embedding model
+_REAL = load()  # the user's model cache, read at import: the fixtures point HOME and the data dir at tmp
 
 
 def _payload(project: Path, session: str, **fields: object) -> str:
@@ -34,12 +35,9 @@ def _turn(config: Config, project: Path, session: str, prompt: str, answer: str)
 
 @pytest.fixture
 def observe_config(config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
-    from agent_mem.core.config import load
-
-    real = load()  # the user's model cache, so no download happens in tests
     config.semantic.enabled = True
-    config.semantic.model = real.semantic.model
-    model_dir = real.model_dir  # read before patching, or the property would call itself
+    config.semantic.model = _REAL.semantic.model
+    model_dir = _REAL.model_dir  # read before patching, or the property would call itself
     monkeypatch.setattr(Config, "model_dir", property(lambda self: model_dir))
     config.observe.providers = ["fake"]
     config.observe.idle_seconds = 0

@@ -86,7 +86,7 @@ testpaths = ["tests"]
 markers = [
   "local: needs the observer extra and a cached embedding model; run by hand, not in CI",
 ]
-addopts = "-q"
+addopts = "-q -m 'not local'"  # `-m local` runs them by hand
 pythonpath = ["."]
 
 [tool.ruff]
