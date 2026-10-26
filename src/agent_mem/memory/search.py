@@ -745,6 +745,24 @@ def output_candidates(
     return owners, passages
 
 
+def name_candidates(conn: sqlite3.Connection, terms: Sequence[str]) -> list[Owner]:
+    """Owners that name a rare file or identifier of the question, also without its extension: the question says
+    `006_work_tokens.sql`, the answer listing the migrations says `006_work_tokens`. In BM25 the long answer that
+    names it sank behind 80 shorter texts with the question's common words."""
+    owners: list[Owner] = []
+    for name in [t for t in terms if _CODE_NAME.fullmatch(t) and re.search(r"[^\W\d]", t)][:3]:
+        base = name.rsplit(".", 1)[0] if "." in name else name
+        found = conn.execute(
+            "SELECT DISTINCT k.owner_type, k.owner_id FROM search_fts JOIN search_keys k ON k.id = search_fts.rowid "
+            "WHERE search_fts MATCH ? LIMIT ?",
+            ('"' + (base if len(base) >= 5 else name).replace('"', '""') + '"', RARE_NAME_TURNS + 1),
+        ).fetchall()
+        if len(found) > RARE_NAME_TURNS:
+            continue
+        owners += [(row[0], int(row[1])) for row in found if (row[0], int(row[1])) not in owners]
+    return owners
+
+
 def search(
     conn: sqlite3.Connection,
     config: Config,
@@ -762,7 +780,7 @@ def search(
     by a third for one more answer."""
     terms = query_terms(query.text)
     projects = scope(conn, query.project_id)
-    lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms)}
+    lists: dict[str, list[Owner]] = {"fts": fts_candidates(conn, terms), "name": name_candidates(conn, terms)}
     passages: dict[Owner, str] = {}
     if tool_outputs:
         lists["output"], passages = output_candidates(conn, projects, terms, query.include_other_projects)
@@ -782,7 +800,7 @@ def search(
     weights = term_weights([_judged(hit) for hit in hits.values()], terms)
     # The output list only joins when a question names a rare file: counted here, it would lower every other hit's
     # score below the gate whenever some tool happened to print that name.
-    counted = len([name for name, owners in lists.items() if owners and name != "output"]) or 1
+    counted = len([name for name, owners in lists.items() if owners and name not in {"output", "name"}]) or 1
     max_rrf = counted / (config.retrieval.rrf_k + 1)
     candidates: list[Hit] = []
     for owner, (score, sources) in fused.items():

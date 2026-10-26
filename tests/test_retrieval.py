@@ -84,6 +84,21 @@ def test_a_commit_is_found_by_its_hash_and_its_subject(driver: Driver, conn, con
     assert retriever.search("was steht in 8760496", _pid(conn), record_shown=False)
 
 
+def test_a_file_named_with_its_extension_finds_the_answer_that_names_it_without(driver: Driver, conn, config: Config):
+    """The question says `006_work_tokens.sql`, the long answer listing the migrations `006_work_tokens`: in BM25
+    it sank behind every short text with "Schema" and "Migration" (real data: rank 85 of 225)."""
+    for n in range(80):  # more than the 60 word-search candidates
+        driver.prompt(f"s{n}", f"Schema-Migration {n} prüfen")
+        driver.stop(f"s{n}", "Schema-Migration geprüft, folgt morgen.")
+    driver.prompt("long", "liste die Migrationen auf")
+    report = "Bericht über den Umbau der Datenbank und der Hooks. " * 60
+    driver.stop("long", report + "\n- `006_work_tokens`: Token-Arbeit pro Turn\n- `007_relations`: Graph\n" + report)
+    hits = semantic.Retriever(conn, config).search(
+        "Welche Schema-Migration folgt auf 006_work_tokens.sql?", _pid(conn), limit=5, record_shown=False
+    )
+    assert any("007_relations" in h.answer for h in hits)
+
+
 def test_time_window_lists_every_turn_of_that_day(driver: Driver, conn, config: Config):
     driver.prompt("s1", "standup: shipped the auth fix")
     driver.stop("s1", "noted")
