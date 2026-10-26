@@ -431,8 +431,24 @@ def _on_session_start(call: _Call) -> None:
         learn.record_access(call.conn, block.owners, "injected", call.session_id, call.event.ts)
 
 
+REPEAT_SECONDS = 5  # the copies came within 0.2 s
+
+
 def _on_prompt(call: _Call) -> None:
     prompt = str(call.payload.get("prompt") or "")
+    latest = call.conn.execute(
+        "SELECT id, prompt, started_at FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (call.session_id,)
+    ).fetchone()
+    if (
+        latest is not None
+        and prompt
+        and latest["prompt"] == prompt
+        and abs(timeutil.hours_between(latest["started_at"], timeutil.parse(call.event.ts))) * 3600 < REPEAT_SECONDS
+    ):
+        # Every OpenCode process that loaded the plugin reports the same message: 21 of 38 OpenCode requests in a
+        # week were such copies, each closing the one before it without an answer.
+        call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (int(latest["id"]), call.event_id))
+        return
     previous = _open_turn(call.conn, call.session_id)
     if previous is None and signals.resumes_turn(prompt):
         previous = _reopen_cut_off_turn(call.conn, call.session_id)
