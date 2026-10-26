@@ -56,7 +56,34 @@ work = Path(tempfile.mkdtemp())
 master = work / "master.db"
 source, target = sqlite3.connect(LIVE), sqlite3.connect(master)
 source.backup(target)
-source.close(), target.close()
+source.close()
+# Work on this benchmark wrote its own answers down ("ncm10 drawEdges now found"): 7 of 56 questions had their
+# answer only in such entries. They leave the copy, so a hit means the memory knew it, not that it read the bench.
+_ABOUT_BENCH = re.compile(
+    r"\bn?(?:cm|am)\d{1,2}\b|versus|\bbench|benchmark|fragensatz|detailfrage|exakte code-details|exact code details"
+    r"|questions(?:_new)?\.json",
+    re.IGNORECASE,
+)
+target.create_function("about_bench", 1, lambda text: bool(_ABOUT_BENCH.search(text or "")))
+with target:
+    for owner, table, text in (
+        ("m", "memories", "title || ' ' || body"),
+        ("t", "turns", "COALESCE(prompt, '') || ' ' || COALESCE(answer, '') || ' ' || COALESCE(title, '')"),
+    ):
+        ids = f"SELECT id FROM {table} WHERE about_bench({text})"
+        target.execute(
+            f"DELETE FROM search_fts WHERE rowid IN (SELECT id FROM search_keys WHERE owner_type = '{owner}' AND owner_id IN ({ids}))"
+        )
+        target.execute(f"DELETE FROM search_keys WHERE owner_type = '{owner}' AND owner_id IN ({ids})")
+        target.execute(f"DELETE FROM vectors WHERE owner_type = '{owner}' AND owner_id IN ({ids})")
+    target.execute(
+        "UPDATE memories SET invalid_at = '2000-01-01T00:00:00.000Z' WHERE about_bench(title || ' ' || body)"
+    )
+    target.execute("DELETE FROM events WHERE turn_id IN (SELECT id FROM turns WHERE about_bench("
+                   "COALESCE(prompt, '') || ' ' || COALESCE(answer, '') || ' ' || COALESCE(title, '')))")  # fmt: skip
+    target.execute("UPDATE turns SET prompt = '', answer = '', title = NULL WHERE about_bench("
+                   "COALESCE(prompt, '') || ' ' || COALESCE(answer, '') || ' ' || COALESCE(title, ''))")  # fmt: skip
+target.close()
 
 
 def fresh() -> Path:
