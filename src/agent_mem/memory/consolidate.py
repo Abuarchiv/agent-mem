@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 from agent_mem.core import db, identity, signals, timeutil
@@ -34,7 +35,9 @@ def due(conn: sqlite3.Connection, config: Config) -> bool:
     return last is None or timeutil.hours_between(last) >= 24
 
 
-def run(conn: sqlite3.Connection, config: Config, embedder_matrix=None) -> dict[str, int]:
+def run(
+    conn: sqlite3.Connection, config: Config, embedder_matrix: Callable[[sqlite3.Connection], int] | None = None
+) -> dict[str, int]:
     stats: dict[str, int] = {}
     last = db.get_meta(conn, "consolidated_at")
     days = timeutil.hours_between(last) / 24.0 if last else 0.0

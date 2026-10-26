@@ -8,6 +8,7 @@ import contextlib
 import logging
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -271,7 +272,7 @@ class Retriever:
         self._vectors[project_id] = cache
         return cache
 
-    def vector_source(self, project_id: str | None):
+    def vector_source(self, project_id: str | None) -> Callable[[str, int], list[Owner]]:
         def source(text: str, limit: int) -> list[Owner]:
             cache = self._vector_matrix(project_id)
             if cache is None or self.embedder is None:

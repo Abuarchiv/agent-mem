@@ -570,7 +570,14 @@ _HISTORY = {"dead_end": ("Caution", 3), "decision": ("Decision", 2), "lesson": (
 HISTORY_MIN_BYTES = 1_500
 
 
-def _file_history(conn, config, project, project_id, session_id, tool_signal) -> inject.Block | None:
+def _file_history(
+    conn: sqlite3.Connection,
+    config: Config,
+    project: identity.Project | None,
+    project_id: str | None,
+    session_id: str,
+    tool_signal: signals.ToolSignal,
+) -> inject.Block | None:
     """Memories linked to the files a tool reads or edits, once per session each.
 
     Specific ones first (the file was one of few the memory names), dead ends before decisions before facts.

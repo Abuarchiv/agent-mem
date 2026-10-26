@@ -13,7 +13,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from filelock import FileLock, Timeout
 
@@ -22,6 +22,9 @@ from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
 from agent_mem.memory import consolidate, notes, store, work
+
+if TYPE_CHECKING:  # numpy and fastembed load only when the embedder does
+    from agent_mem.memory.semantic import Embedder
 
 
 def _apply_record(conn: sqlite3.Connection, config: Config, record: dict[str, Any]) -> None:
@@ -213,7 +216,7 @@ def _drain_spool(conn: sqlite3.Connection, config: Config) -> tuple[int, int]:
     return spool.drain(config.spool_dir, config.quarantine_dir, lambda record: _apply_record(conn, config, record))
 
 
-def _semantic(conn: sqlite3.Connection, config: Config, allow_download: bool, stats: dict[str, Any]) -> Any:
+def _semantic(conn: sqlite3.Connection, config: Config, allow_download: bool, stats: dict[str, Any]) -> Embedder | None:
     """Load the embedder, record whether it works, embed what is new and merge duplicate facts. Returns it or None."""
     if not config.semantic.enabled:
         return None
@@ -236,7 +239,9 @@ def _semantic(conn: sqlite3.Connection, config: Config, allow_download: bool, st
     return embedder
 
 
-def _neighbour_linker(conn: sqlite3.Connection, embedder: Any) -> Callable[[sqlite3.Connection], int] | None:
+def _neighbour_linker(
+    conn: sqlite3.Connection, embedder: Embedder | None
+) -> Callable[[sqlite3.Connection], int] | None:
     """Consolidation links memories to their nearest neighbours since the last run, when vectors exist."""
     if embedder is None:
         return None
