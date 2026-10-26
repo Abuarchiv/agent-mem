@@ -70,7 +70,9 @@ def render(lines: list[tuple[str, tuple[str, int] | None]], budget_tokens: int) 
     owners: list[tuple[str, int]] = []
     for line, owner in lines:
         line = _unframed(line).strip()
-        if not line:
+        # Two parts of a block can pick the same memory (a lesson slot and the open steps): show it once. A turn
+        # owns several lines (title, done, next steps), so only memories are checked.
+        if not line or (owner and owner[0] == "m" and owner in owners):
             continue
         cost = _cost(line)
         if used + cost + 1 > budget:

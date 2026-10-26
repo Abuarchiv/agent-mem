@@ -380,3 +380,14 @@ def test_the_panel_counts_in_singular_for_one(driver: Driver, conn):
     project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
     store.add_memory(conn, project_id=project_id, kind="fact", title="t", body="b", source="agent", trust="observer")
     assert inject.overview(conn, "claude:s1")[0] == "This project: 1 memory (1 new today) · 1 session · 1 request"
+
+
+def test_a_memory_found_by_two_parts_of_the_briefing_is_shown_once():
+    """A lesson picked for its slot and again as an open step must not cost its tokens twice."""
+    lines = [("- [M7 · lesson] Rename queue.py", ("m", 7)), ("- [M7 · lesson] Rename queue.py", ("m", 7))]
+
+    block = inject.render(lines, 200)
+
+    assert block is not None
+    assert block.text.count("[M7 ") == 1
+    assert block.owners == [("m", 7)]
