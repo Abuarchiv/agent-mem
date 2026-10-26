@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from agent_mem.cli import install
+from agent_mem.core.harness import HARNESSES
 
 PLUGINS = Path(__file__).resolve().parents[1] / "plugins"
 EXE = "/opt/agent-mem/bin/agent-mem"
@@ -114,7 +115,7 @@ def test_copilot_and_opencode_files(homes: Path) -> None:
 
 def test_detect_reports_binary_and_extras(homes: Path) -> None:
     found = install.detect()
-    assert set(found["harnesses"]) == set(install.HARNESSES)
+    assert set(found["harnesses"]) == set(HARNESSES)
     assert set(found["extras"]) == {"semantic", "observer"}
     assert found["binary"]
 
@@ -190,12 +191,13 @@ def test_claude_mcp_entry_is_replaced_and_a_failure_is_reported(homes: Path, mon
 
 
 def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes: Path) -> None:
-    from agent_mem.cli.health import LABELS, _hook_checks
+    from agent_mem.cli.health import _hook_checks
+    from agent_mem.core.harness import HARNESS_NAMES as LABELS
 
     exe = homes / "bin" / "agent-mem"
     exe.parent.mkdir()
     exe.write_text("")
-    for harness in install.HARNESSES:
+    for harness in HARNESSES:
         install.write(harness, PLUGINS, str(exe))
         assert not install.stale(harness)
 
@@ -212,19 +214,19 @@ def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes:
     copilot.write_text(copilot.read_text().replace('"timeoutSec"', '"timeout_sec"'))
     plugin = homes / ".config" / "opencode" / "plugins" / "agent-mem.ts"
     plugin.write_text(plugin.read_text() + "\n// older\n")
-    assert all(install.stale(harness) for harness in install.HARNESSES)
+    assert all(install.stale(harness) for harness in HARNESSES)
 
     shown = {c.name: c for c in _hook_checks(fix=False)}
     assert not shown["Claude Code hooks up to date"].ok and "older" in shown["Claude Code hooks up to date"].detail
 
     fixed = {c.name: c for c in _hook_checks(fix=True)}
-    assert all(fixed[f"{LABELS[h]} hooks up to date"].ok for h in install.HARNESSES)
+    assert all(fixed[f"{LABELS[h]} hooks up to date"].ok for h in HARNESSES)
     assert "/hooks" in fixed["Codex hooks up to date"].detail
     (copilot_line,) = [c for c in _hook_checks(fix=False) if c.name == "Copilot CLI hook command"]
     assert (
         copilot_line.ok and copilot_line.detail.startswith(f"{exe} hook copilot (") and "events)" in copilot_line.detail
     )
-    assert not any(install.stale(harness) for harness in install.HARNESSES)
+    assert not any(install.stale(harness) for harness in HARNESSES)
     assert install.hook_commands("claude") == [f"{exe} hook claude"]  # the path they used, not this test's binary
     assert "other-tool notify" in _hooks_commands(json.loads(settings.read_text())["hooks"])
 

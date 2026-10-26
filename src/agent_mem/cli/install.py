@@ -18,7 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-HARNESSES = ("claude", "codex", "copilot", "opencode")
+from agent_mem.core.harness import HARNESSES
+
 PROVIDERS = ("claude", "codex", "copilot", "ollama")
 MARK = "agent-mem"
 

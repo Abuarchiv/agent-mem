@@ -53,8 +53,6 @@ def classify(message: str) -> str:
 
 
 # Which stage a harness's turns may use without leaving their vendor (cross_vendor=False).
-VENDOR_OF_HARNESS = {"claude": "claude", "codex": "codex", "copilot": "copilot", "opencode": "opencode"}
-BINARY = {"claude": "claude", "codex": "codex", "copilot": "copilot", "opencode": "opencode", "ollama": "ollama"}
 
 
 def _flatten(messages: list[dict[str, Any]], wants_json: bool) -> str:
@@ -318,7 +316,7 @@ def model_for(config: Any, name: str) -> str | None:
 def available(name: str) -> bool:
     if name == "fake":
         return True
-    return shutil.which(BINARY.get(name, name)) is not None
+    return shutil.which(name) is not None
 
 
 def paused_until(conn: Any, name: str) -> str | None:
@@ -386,6 +384,5 @@ def _names(config: Any, harness: str) -> list[str]:
     """The configured stages a turn from ``harness`` may use (its own vendor, unless ``cross_vendor``)."""
     names = list(config.observe.providers)
     if not config.observe.cross_vendor:
-        own = VENDOR_OF_HARNESS.get(harness)
-        names = [n for n in names if n in {"ollama", own}]
+        names = [n for n in names if n in {"ollama", harness}]
     return names

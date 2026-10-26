@@ -18,6 +18,7 @@ from typing import Any
 from agent_mem.cli.install import claude_home, codex_home, copilot_home, opencode_home
 from agent_mem.core import db, spool, timeutil
 from agent_mem.core.config import Config
+from agent_mem.core.harness import HARNESS_NAMES, HARNESSES
 from agent_mem.memory import work
 
 HARNESS_MARKERS = {
@@ -68,9 +69,6 @@ def harness_installed(harness: str) -> bool:
     return any(_mentions(path, _HOOK_COMMAND) for path in HARNESS_MARKERS[harness])
 
 
-LABELS = {"claude": "Claude Code", "codex": "Codex", "copilot": "Copilot CLI", "opencode": "OpenCode"}
-
-
 def fact_stage(conn: sqlite3.Connection, config: Config, harness: str) -> dict[str, Any]:
     """Which model turns from ``harness`` go to for facts, and whether it is paused."""
     found = config.observe.stage_for(harness)
@@ -85,7 +83,6 @@ def fact_stage(conn: sqlite3.Connection, config: Config, harness: str) -> dict[s
 
 def agents(conn: sqlite3.Connection, config: Config) -> list[dict[str, Any]]:
     """One row per harness for the viewer: connected, CLI on PATH, fact model, today's fact runs."""
-    from agent_mem.cli import install
 
     today = timeutil.iso()[:10]
     calls: dict[str, tuple[int, int, str]] = {}
@@ -96,13 +93,13 @@ def agents(conn: sqlite3.Connection, config: Config) -> list[dict[str, Any]]:
         ):
             calls[row[0]] = (int(row[1] or 0), int(row[2] or 0), row[3])
     rows = []
-    for name in install.HARNESSES:
+    for name in HARNESSES:
         stage = fact_stage(conn, config, name)
         ok, failed, last = calls.get(stage["stage"] or "", (0, 0, None))
         rows.append(
             {
                 "harness": name,
-                "label": LABELS[name],
+                "label": HARNESS_NAMES[name],
                 "cli": shutil.which(name) is not None,
                 "connected": harness_installed(name),
                 **stage,
@@ -316,7 +313,7 @@ def _database_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
 def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
     """Whether each agent that is installed here has delivered events, and its last error."""
     checks: list[Check] = []
-    for harness in ("claude", "codex", "copilot", "opencode"):
+    for harness in HARNESSES:
         installed_here = harness_installed(harness)
         row = conn.execute("SELECT * FROM health WHERE component = ?", (f"hook:{harness}",)).fetchone()
         if not installed_here and row is None:
@@ -325,17 +322,23 @@ def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
             hint = (
                 "Start a session. For Codex, trust the hooks with /hooks."
                 if harness == "codex"
-                else f"Start a session in {LABELS.get(harness, harness)}."
+                else f"Start a session in {HARNESS_NAMES.get(harness, harness)}."
             )
             checks.append(
-                Check(f"{LABELS[harness]} recording", False, "connected, nothing recorded yet", hint, warn_only=True)
+                Check(
+                    f"{HARNESS_NAMES[harness]} recording",
+                    False,
+                    "connected, nothing recorded yet",
+                    hint,
+                    warn_only=True,
+                )
             )
             continue
         if not installed_here:
             # Recorded once, hooks gone since (removed by hand or by another tool rewriting the settings).
             checks.append(
                 Check(
-                    f"{LABELS[harness]} recording",
+                    f"{HARNESS_NAMES[harness]} recording",
                     False,
                     f"off, no agent-mem hooks; last {timeutil.local(row['last_ok_at'])}",
                     f"Run `agent-mem setup {harness} --write` to record it again.",
@@ -346,7 +349,7 @@ def _capture_checks(conn: sqlite3.Connection) -> list[Check]:
         failing = row["last_error_at"] and (not row["last_ok_at"] or row["last_error_at"] > row["last_ok_at"])
         checks.append(
             Check(
-                f"{LABELS[harness]} recording",
+                f"{HARNESS_NAMES[harness]} recording",
                 not failing,
                 f"last {timeutil.local(row['last_ok_at'])}" + (f" (last: {row['last_error']})" if failing else ""),
                 "See logs/hook.log in the data folder (`agent-mem paths`).",
@@ -543,7 +546,7 @@ def record_setup_health(config: Config) -> None:
     with contextlib.suppress(OSError, ValueError, sqlite3.Error):
         conn = db.connect(config)
         try:
-            for harness in install.HARNESSES:
+            for harness in HARNESSES:
                 if install.hook_commands(harness):
                     stale = install.stale(harness)
                     error = "hooks come from an older agent-mem release (`agent-mem doctor --fix` rewrites them)"
@@ -557,7 +560,7 @@ def _hook_checks(fix: bool) -> list[Check]:
     from agent_mem.cli import install
 
     checks: list[Check] = []
-    for harness in install.HARNESSES:
+    for harness in HARNESSES:
         commands = install.hook_commands(harness)
         if not commands:
             continue
@@ -582,7 +585,7 @@ def _hook_checks(fix: bool) -> list[Check]:
             detail += "; trust them again in Codex with /hooks"
         checks.append(
             Check(
-                f"{LABELS[harness]} hooks up to date",
+                f"{HARNESS_NAMES[harness]} hooks up to date",
                 not stale,
                 "from an older agent-mem release (events, matchers or timeouts changed)" if stale else detail,
                 "Run `agent-mem doctor --fix`.",
@@ -597,7 +600,7 @@ def _hook_checks(fix: bool) -> list[Check]:
             command = same[0] if len(same) == 1 else f"{exe} hook {harness} ({len(same)} events)"
             checks.append(
                 Check(
-                    f"{LABELS[harness]} hook command",
+                    f"{HARNESS_NAMES[harness]} hook command",
                     resolved.exists() and resolved.is_file(),
                     command if resolved.exists() else f"{command} (binary not found)",
                     f"Run `agent-mem setup {harness} --write` to rewrite the hooks with the current binary path.",

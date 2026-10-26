@@ -15,6 +15,7 @@ from datetime import datetime
 from agent_mem.core import config as config_module
 from agent_mem.core import signals, spool, timeutil
 from agent_mem.core.config import Config
+from agent_mem.core.harness import HARNESS_NAMES
 from agent_mem.core.signals import command_kind, first_line, looks_like_error, request_text
 from agent_mem.memory import learn, notes, search
 
@@ -602,7 +603,6 @@ _RULE = "─" * 64
 # The terminal shows the newest rows per group; the rest stays one `agent-mem view` away.
 WORK_ROWS = 5
 KIND_ROWS = 3
-AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex", "copilot": "Copilot CLI", "opencode": "OpenCode"}
 _KIND_ORDER = ["preference", "rule", "correction", "lesson", "dead_end", "decision", "fact", "summary", "native_note"]
 _KIND_NAME = {
     "preference": "Preferences",
@@ -758,7 +758,7 @@ def _read_entry(panel: _Panel, kind: str, text: str, ident: str) -> None:
     elif kind.startswith("last session"):
         if ", " in kind:
             agent = kind.split(", ", 1)[1]
-            panel.last_heading = f"Last session · {AGENT_NAMES.get(agent, agent)}"
+            panel.last_heading = f"Last session · {HARNESS_NAMES.get(agent, agent)}"
         panel.last.insert(0, (ident, "›", "1", text, ""))
     else:
         panel.kinds.setdefault(kind, []).append((ident, text))

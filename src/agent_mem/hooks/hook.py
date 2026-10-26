@@ -22,6 +22,7 @@ from typing import Any
 from agent_mem.core import db, logutil, proc, spool, timeutil
 from agent_mem.core.config import Config, env_flag, load
 from agent_mem.core.events import Event, PayloadError, without_lone_surrogates
+from agent_mem.core.harness import HARNESS_NAMES
 from agent_mem.hooks import capture, inject
 from agent_mem.hooks.normalize import normalize
 
@@ -128,7 +129,7 @@ def job_name(component: str) -> str:
     kind, _, harness = component.partition(":")
     if not harness:
         return _JOB_NAME.get(component, component)
-    return f"{inject.AGENT_NAMES.get(harness, harness)} {'hooks' if kind == 'hook' else 'connection'}"
+    return f"{HARNESS_NAMES.get(harness, harness)} {'hooks' if kind == 'hook' else 'connection'}"
 
 
 def problems(conn: sqlite3.Connection) -> list[str]:

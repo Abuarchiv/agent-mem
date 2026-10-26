@@ -19,6 +19,7 @@ from typing import Any
 from agent_mem import ui
 from agent_mem.core import db, identity, spool, timeutil
 from agent_mem.core.config import Config
+from agent_mem.core.harness import HARNESSES
 from agent_mem.memory import store, views
 from agent_mem.ui import server
 
@@ -631,7 +632,7 @@ def cmd_setup(ns: argparse.Namespace, config: Config) -> int:
 def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.cli import install
 
-    for name in install.HARNESSES if ns.harness == "all" else [ns.harness]:
+    for name in HARNESSES if ns.harness == "all" else [ns.harness]:
         touched = install.remove(name)
         if touched:
             print(f"{name}: removed agent-mem hooks and MCP entries from:")
@@ -641,7 +642,7 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
             print(f"{name}: nothing written by `setup --write` was found.")
     from agent_mem.cli.health import harness_installed
 
-    if not any(harness_installed(name) for name in ("claude", "codex", "copilot", "opencode")):
+    if not any(harness_installed(name) for name in HARNESSES):
         removed = server.remove_autostart()
         if removed:
             print(f"  removed the viewer login item {removed} (no agent left)")
