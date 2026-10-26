@@ -219,3 +219,29 @@ def test_copilot_turn_work_counts_input_minus_cache_reads(conn) -> None:
     )
     assert work.measure(conn) == 1
     assert conn.execute("SELECT work_tokens FROM turns WHERE id = ?", (turns[0],)).fetchone()[0] == 14141 + 61
+
+
+def _said(ts: str, text: str) -> dict:
+    return {"type": "assistant", "timestamp": ts, "message": {"id": ts, "content": [{"type": "text", "text": text}]}}
+
+
+def test_an_interrupted_turn_gets_its_last_messages_from_the_transcript(conn) -> None:
+    """Without a Stop (interrupted, usage limit) the turn kept no answer; the transcript still has what it did."""
+    now = "2026-10-13T12:"
+    turns = _session(conn, "claude", "s4", [(f"{now}00:00.000Z", f"{now}05:00.000Z"), (f"{now}06:00.000Z", None)])
+    conn.execute("UPDATE turns SET answer = '', outcome = 'unknown' WHERE id = ?", (turns[0],))
+    home = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-tmp-p"
+    _lines(
+        home / "s4.jsonl",
+        [
+            _said(f"{now}01:00.000Z", "Reading the parser."),
+            _said(f"{now}03:00.000Z", "The bug reproduces in parse.py."),
+            {**_said(f"{now}04:30.000Z", "API Error: 502"), "isApiErrorMessage": True},
+            _said(f"{now}06:30.000Z", "Next request already."),  # belongs to the open turn
+        ],
+    )
+    _lines(home / "s4" / "subagents" / "agent-y.jsonl", [_said(f"{now}04:00.000Z", "subagent text")])
+    assert work.fill_answers(conn, [turns[0], turns[1]]) == 1
+    answer = conn.execute("SELECT answer FROM turns WHERE id = ?", (turns[0],)).fetchone()[0]
+    assert answer == "(unfinished) Reading the parser.\nThe bug reproduces in parse.py."
+    assert work.fill_answers(conn, [turns[0]]) == 0  # an answer is never overwritten

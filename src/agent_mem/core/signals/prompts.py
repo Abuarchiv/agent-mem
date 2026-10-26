@@ -244,15 +244,21 @@ _HARNESS_PROMPT = re.compile(
 # Harness text that continues the running turn instead of asking something new: a finished background task, the
 # feedback of a blocking Stop hook, an interruption. A slash command the user typed is a new request.
 _CONTINUES_TURN = re.compile(r"^\s*(?:<task-notification>|Stop hook feedback:|\[Request interrupted)")
+# Sent for the user once a usage limit resets: the turn the limit cut off goes on, though it was closed meanwhile.
+_RESUMES_TURN = re.compile(r"^\s*Your [\w.]+ usage limit has reset\. Continue the task", re.IGNORECASE)
 
 
 def continues_turn(prompt: str | None) -> bool:
-    return bool(_CONTINUES_TURN.match(prompt or ""))
+    return bool(_CONTINUES_TURN.match(prompt or "")) or resumes_turn(prompt)
+
+
+def resumes_turn(prompt: str | None) -> bool:
+    return bool(_RESUMES_TURN.match(prompt or ""))
 
 
 def from_harness(prompt: str | None) -> bool:
     """True when the user did not type this prompt; it then never teaches rules, corrections or preferences."""
-    return bool(_HARNESS_PROMPT.match(prompt or ""))
+    return bool(_HARNESS_PROMPT.match(prompt or "")) or resumes_turn(prompt)
 
 
 def request_text(prompt: str | None) -> str:

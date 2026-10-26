@@ -15,6 +15,7 @@ from agent_mem.core.signals.prompts import (
     mentions_rule,
     preference_pairs,
     request_text,
+    resumes_turn,
 )
 from agent_mem.core.signals.text import (
     about_extraction,
@@ -82,6 +83,7 @@ __all__ = [
     "packages_of",
     "preference_pairs",
     "request_text",
+    "resumes_turn",
     "reusable_command",
     "reverted_files",
     "same_tool",

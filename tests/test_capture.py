@@ -375,3 +375,18 @@ def test_a_project_relative_exclusion_covers_the_absolute_path_a_tool_names(conn
     )  # fmt: skip
     payload = conn.execute("SELECT payload FROM events WHERE kind = 'tool'").fetchone()[0]
     assert "900000" not in payload and "excluded by privacy rules" in payload
+
+
+def test_a_turn_cut_off_by_the_usage_limit_continues_after_the_reset(driver, conn):
+    driver.prompt("s", "refactor the parser")
+    driver.bash("s", "pytest", "1 failed")
+    turn = conn.execute("SELECT id FROM turns").fetchone()[0]
+    conn.execute("UPDATE turns SET outcome = 'unknown', ended_at = started_at WHERE id = ?", (turn,))  # closed as stale
+    driver.prompt(
+        "s",
+        "Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; "
+        "do not repeat work that is already complete.",
+    )
+    driver.stop("s", "Parser refactored, tests pass.")
+    rows = conn.execute("SELECT id, prompt, answer, outcome FROM turns").fetchall()
+    assert [tuple(r) for r in rows] == [(turn, "refactor the parser", "Parser refactored, tests pass.", "ok")]

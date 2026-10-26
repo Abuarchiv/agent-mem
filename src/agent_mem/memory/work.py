@@ -21,7 +21,8 @@ from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 
-from agent_mem.core import db, timeutil
+from agent_mem.core import db, privacy, timeutil
+from agent_mem.memory import store
 
 LOOKBACK_DAYS = 30  # Claude Code deletes transcripts after 30 days by default
 # The label an entry starts with ("- [M12 · 2026-10-13 · fact]"); an id inside its text is only a mention.
@@ -244,3 +245,102 @@ def _chunks(ids: list[int], size: int = 500) -> Iterator[tuple[int, ...]]:
     """SQLite allows a bounded number of ``?`` per statement; a week of injections names thousands of ids."""
     for start in range(0, len(ids), size):
         yield tuple(ids[start : start + size])
+
+
+# The last messages of a turn that ended without a Stop: what it did before it was cut off.
+UNFINISHED_MESSAGES = 3
+
+
+def fill_answers(conn: sqlite3.Connection, turn_ids: list[int], chars: int = 16_000) -> int:
+    """Give closed turns without an answer (interrupted, usage limit, missing Stop) the agent's last messages from
+    the transcript, marked "(unfinished)". Only the main transcript counts: a subagent's text is not the answer.
+    Returns the turns filled."""
+    if not turn_ids:
+        return 0
+    marks = ",".join("?" * len(turn_ids))
+    rows = conn.execute(
+        "SELECT t.id, t.started_at, t.ended_at, s.harness, s.native_id, s.started_at AS session_start FROM turns t "
+        f"JOIN sessions s ON s.id = t.session_id WHERE t.id IN ({marks}) AND t.ended_at IS NOT NULL "
+        "AND COALESCE(t.answer, '') = '' AND s.native_id IS NOT NULL",
+        turn_ids,
+    ).fetchall()
+    said_by_file: dict[Path, list[tuple[str, str]]] = {}
+    filled = 0
+    for turn_id, start, end, harness, native_id, session_start in rows:
+        files = _transcripts(harness, native_id, session_start)
+        if not files:
+            continue
+        if files[0] not in said_by_file:
+            try:
+                said_by_file[files[0]] = _SAID[harness](files[0])
+            except OSError:
+                continue
+        texts = [text for ts, text in said_by_file[files[0]] if start <= ts <= end][-UNFINISHED_MESSAGES:]
+        if not texts:
+            continue
+        answer = privacy.clean_text("(unfinished) " + "\n".join(texts), chars)
+        with db.transaction(conn):
+            conn.execute("UPDATE turns SET answer = ? WHERE id = ? AND COALESCE(answer, '') = ''", (answer, turn_id))
+            store.index_turn(conn, int(turn_id))
+        filled += 1
+    return filled
+
+
+def _transcripts(harness: str, native_id: str, started_at: str) -> list[Path]:
+    if harness == "claude":
+        return _claude_files(native_id)
+    if harness == "codex":
+        return _codex_files(native_id, started_at)
+    if harness == "copilot":
+        return _copilot_files(native_id)
+    return []
+
+
+def _json_lines(path: Path, needle: str) -> Iterator[dict[str, object]]:
+    for _, _, line in _lines(path, 0):
+        if needle not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("timestamp"):
+            yield entry
+
+
+def _claude_said(path: Path) -> list[tuple[str, str]]:
+    said: list[tuple[str, str]] = []
+    for entry in _json_lines(path, '"text"'):
+        message = entry.get("message")
+        if entry.get("type") != "assistant" or not isinstance(message, dict) or entry.get("isApiErrorMessage"):
+            continue  # an API error is the harness reporting, not the agent's work
+        content = message.get("content")
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "text" and str(block.get("text") or "").strip():
+                said.append((str(entry["timestamp"]), str(block["text"]).strip()))
+    return said
+
+
+def _codex_said(path: Path) -> list[tuple[str, str]]:
+    said: list[tuple[str, str]] = []
+    for entry in _json_lines(path, '"agent_message"'):
+        payload = entry.get("payload")
+        if isinstance(payload, dict) and payload.get("type") == "agent_message" and payload.get("message"):
+            said.append((str(entry["timestamp"]), str(payload["message"]).strip()))
+    return said
+
+
+def _copilot_said(path: Path) -> list[tuple[str, str]]:
+    said: list[tuple[str, str]] = []
+    for entry in _json_lines(path, '"assistant.message"'):
+        data = entry.get("data")
+        if (
+            entry.get("type") == "assistant.message"
+            and isinstance(data, dict)
+            and str(data.get("content") or "").strip()
+        ):
+            said.append((str(entry["timestamp"]), str(data["content"]).strip()))
+    return said
+
+
+_SAID = {"claude": _claude_said, "codex": _codex_said, "copilot": _copilot_said}
