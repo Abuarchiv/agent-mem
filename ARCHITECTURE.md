@@ -41,13 +41,14 @@ SQLite (WAL)       the truth: sessions, turns, events, memories (facts), queue, 
 
 ```
 src/agent_mem/
-  core/      config, db + schema/, events, identity, privacy, signals, spool, timeutil, logutil
+  core/      config, db + schema/, events, identity, paths, privacy, proc, signals/, spool, timeutil, logutil
              standard library only; shared by every path
   hooks/     hook (entry point), normalize/ (Claude Code, Codex, Copilot CLI, OpenCode), capture, inject
              the hook path: payload in, SQLite write, context out; standard library only
-  memory/    store, search, semantic, learn, consolidate, views, indexer
+  memory/    store, search, semantic, learn, consolidate, views, notes, work, indexer
              memories, retrieval, embeddings, learning, background indexer
-  observe/   queue, bundle, providers, mem0_adapter, summary, review, worker, coding_instructions.md
+  observe/   queue, bundle, providers, mem0_adapter, summary, review, relations, spacy_model, worker,
+             coding_instructions.md
              the background fact worker; the only place that imports mem0 and qdrant
   mcp/       server: the stdio MCP server used by the plugins
   cli/       argument parsing, commands, install (setup --write, uninstall), health (status, doctor)
