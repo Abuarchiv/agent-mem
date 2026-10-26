@@ -13,16 +13,19 @@ import os
 import re
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
 from mem0.configs.llms.base import BaseLlmConfig
 from mem0.llms.base import LLMBase
 
-from agent_mem.core import proc
+from agent_mem.core import db, proc, timeutil
+from agent_mem.core.config import Config
 
 TIMEOUT_S = 120
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
@@ -303,7 +306,7 @@ def make_llm(kind: str, model: str | None = None) -> LLMBase:
 # --- chain ---------------------------------------------------------------------------------------
 
 
-def model_for(config: Any, name: str) -> str | None:
+def model_for(config: Config, name: str) -> str | None:
     return {
         "claude": config.observe.claude_model,
         "codex": config.observe.codex_model,
@@ -319,9 +322,7 @@ def available(name: str) -> bool:
     return shutil.which(name) is not None
 
 
-def paused_until(conn: Any, name: str) -> str | None:
-    from agent_mem.core import db
-
+def paused_until(conn: sqlite3.Connection, name: str) -> str | None:
     return db.get_meta(conn, f"observe.pause.{name}")
 
 
@@ -334,23 +335,17 @@ def provider_error(error: BaseException | None) -> ProviderError | None:
     return None
 
 
-def note_failure(conn: Any, config: Any, name: str, error: ProviderError) -> None:
+def note_failure(conn: sqlite3.Connection, config: Config, name: str, error: ProviderError) -> None:
     """A quota or login failure pauses the stage for ``pause_minutes`` instead of punishing the turn."""
     if error.kind not in {"quota", "login"}:
         return
-    from datetime import timedelta
-
-    from agent_mem.core import db, timeutil
-
     until = timeutil.iso(timeutil.now() + timedelta(minutes=config.observe.pause_minutes))
     db.set_meta(conn, f"observe.pause.{name}", until)
     db.set_meta(conn, f"observe.pause_kind.{name}", error.kind)
 
 
-def chain(config: Any, harness: str, conn: Any) -> list[str]:
+def chain(config: Config, harness: str, conn: sqlite3.Connection) -> list[str]:
     """Stages a turn from ``harness`` may use, in order, minus missing binaries and paused stages."""
-    from agent_mem.core import timeutil
-
     if "fake" in config.observe.providers:
         return ["fake"]
     names = _names(config, harness)
@@ -366,21 +361,19 @@ def chain(config: Any, harness: str, conn: Any) -> list[str]:
     return out
 
 
-def any_left(config: Any, harness: str, conn: Any) -> bool:
+def any_left(config: Config, harness: str) -> bool:
     """True while some stage might still succeed later (paused, not missing)."""
     return any(available(n) for n in _names(config, harness))
 
 
-def resumes_at(config: Any, harness: str, conn: Any) -> str | None:
+def resumes_at(config: Config, harness: str, conn: sqlite3.Connection) -> str | None:
     """When the first paused stage for ``harness`` may run again; None when none is paused."""
-    from agent_mem.core import timeutil
-
     now = timeutil.iso()
     pauses = [paused_until(conn, n) for n in _names(config, harness) if available(n)]
     return min((until for until in pauses if until and until > now), default=None)
 
 
-def _names(config: Any, harness: str) -> list[str]:
+def _names(config: Config, harness: str) -> list[str]:
     """The configured stages a turn from ``harness`` may use (its own vendor, unless ``cross_vendor``)."""
     names = list(config.observe.providers)
     if not config.observe.cross_vendor:

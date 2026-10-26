@@ -326,7 +326,7 @@ class Worker:
             except providers.ProviderError as error:
                 if until := providers.resumes_at(self.config, b.harness, self.conn):
                     queue.defer(self.conn, b.turn_ids, until)  # the failure paused the stage: wait, keep the attempt
-                elif providers.any_left(self.config, b.harness, self.conn):
+                elif providers.any_left(self.config, b.harness):
                     queue.fail(self.conn, b.turn_ids, str(error))
                     self.stats["failed"] += 1
                 else:
