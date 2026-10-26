@@ -302,10 +302,11 @@ def test_a_memory_whose_only_paths_are_gone_is_retired(driver: Driver, conn, con
     (home / "Company" / "agent-mem").mkdir(parents=True)
     (home / "Library" / "Application Support").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Windows takes home from here
     driver.prompt("s1", "setup")
     texts = {
         "fact": "The audit runs in the clone `~/Company/agent-mem-audit` on branch qualitaet.",
-        "lesson": f"Run checks in {home}/Company/agent-mem-audit with the workdir field.",
+        "lesson": "Run checks in ~/Company/agent-mem-audit/ with the workdir field.",
         "decision": "The repo moved to ~/Company/agent-mem, the clone ~/Company/agent-mem-audit is gone.",
         "preference": "The DB lives in ~/Library/Application Support/agent-mem.",
         "dead_end": "`docker info` fails: ~/.orbstack/run/docker.sock is missing while OrbStack is off.",

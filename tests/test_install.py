@@ -402,8 +402,9 @@ def test_every_install_line_with_the_model_extra_picks_a_python_it_has_wheels_fo
     lines = [
         line
         for name in ("install.sh", "install.ps1", "README.md", "Dockerfile")
+        if (repo / name).exists()  # the sdist has no Dockerfile
         for line in (repo / name).read_text(encoding="utf-8").splitlines()
         if "uv tool install" in line and "semantic" in line
     ]
-    assert len(lines) >= 4
+    assert len(lines) >= 3
     assert all("--python 3.1" in line for line in lines), lines
