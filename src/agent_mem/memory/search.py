@@ -517,7 +517,7 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
         placeholders = ",".join("?" for _ in turn_ids)
         for row in conn.execute(
             f"SELECT t.id, t.session_id, t.project_id, t.started_at, t.prompt, t.answer, t.importance, t.trust, "
-            f"t.files_json, t.commands_json, t.errors_json, t.commits_json, t.defines_json, t.outcome, s.harness FROM turns t "
+            f"t.files_json, t.commands_json, t.errors_json, t.commits_json, t.defines_json, t.outcome, t.title, s.harness FROM turns t "
             f"JOIN sessions s ON s.id = t.session_id WHERE t.id IN ({placeholders})",
             turn_ids,
         ):
@@ -541,7 +541,10 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
             hits[("t", row["id"])] = Hit(
                 owner=("t", row["id"]),
                 kind="turn",
-                title=first_line(request_text(row["prompt"]), 160) or first_line(row["answer"] or "", 160),
+                # Without an answer the request alone says nothing about what happened; the observer's title does.
+                title=(row["title"] if not (row["answer"] or "").strip() else "")
+                or first_line(request_text(row["prompt"]), 160)
+                or first_line(row["answer"] or "", 160),
                 text=text,
                 topic=topic,
                 answer=row["answer"] or "",

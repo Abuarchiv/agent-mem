@@ -551,3 +551,13 @@ def test_a_one_word_question_still_asks(driver: Driver, conn, config: Config):
     store.index_turn(conn, conn.execute("SELECT id FROM turns").fetchone()[0])
     assert inject.prompt_hints(conn, config, _pid(conn), "s2", "Dockerfile?", "claude") is not None
     assert inject.prompt_hints(conn, config, _pid(conn), "s3", "Dockerfile", "claude") is None  # an instruction
+
+
+def test_a_turn_without_answer_shows_the_observer_title(driver: Driver, conn):
+    """An unanswered request says nothing about what happened; the observer's title does."""
+    driver.prompt("s1", "mache weiter mit dem Parser")
+    turn = conn.execute("SELECT id FROM turns").fetchone()[0]
+    conn.execute("UPDATE turns SET title = 'Parser für Rechnungen fertig' WHERE id = ?", (turn,))
+    assert search.load_hits(conn, [("t", turn)])[("t", turn)].title == "Parser für Rechnungen fertig"
+    conn.execute("UPDATE turns SET answer = 'Parser steht.' WHERE id = ?", (turn,))
+    assert search.load_hits(conn, [("t", turn)])[("t", turn)].title == "mache weiter mit dem Parser"
