@@ -335,20 +335,35 @@ def _briefing_lines(
     profile = _profile_line(conn, project_id)
     if profile:
         lines.append((profile, None))
-    # At scale 1: 5 memories, 3 lessons, 10 work entries; render cuts the end when the budget is full. Another
-    # harness's notes (memory/notes.py) come only with a request they fit: 1,105 in start blocks went unused.
-    memories = _memory_lines(conn, project_id, harness, limit=round(5 * scale), session_id=session_id)
+    # What the next request needs first, since render cuts the end: the user's own rules, where the last session
+    # stopped and what it left open. Facts, lessons and the work log fill what is left; mem_search finds the rest
+    # (two thirds of the older entries agents used came from a search, not the start block).
+    rules = _memory_lines(
+        conn, project_id, harness, limit=round(3 * scale), kinds=("preference", "correction"), session_id=session_id
+    )
+    lines.extend(rules)
+    last = _last_session_lines(conn, project_id, session_id)
+    lines.extend(last)
+    lines.extend(_open_errors(conn, project_id, session_id))
+    taken = {owner for _, owner in rules if owner}
+    focus = _focus_lines(conn, config, project_id, session_id, harness, taken)
+    lines.extend(focus)
+    taken |= {owner for _, owner in focus if owner}
+    # Another harness's notes (memory/notes.py) come only with a request they fit: 1,105 in start blocks went unused.
+    memories = _memory_lines(
+        conn,
+        project_id,
+        harness,
+        limit=round(4 * scale),
+        kinds=("decision", "dead_end", "summary", "fact"),
+        session_id=session_id,
+    )
     lines.extend(memories)
     # Lessons have their own slots: rules for next time, ranked by use like the rest (``observe/summary.py``).
     lines.extend(
-        _memory_lines(conn, project_id, harness, limit=round(3 * scale), kinds=("lesson",), session_id=session_id)
+        _memory_lines(conn, project_id, harness, limit=round(2 * scale), kinds=("lesson",), session_id=session_id)
     )
-    lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
-    lines.extend(_open_errors(conn, project_id, session_id))
-    last = _last_session_lines(conn, project_id, session_id)
-    lines.extend(last)
-    # The work log as an index: titles with ids the agent can open (mem_get). Last, so the budget
-    # drops it before facts and lessons; the agent sees what happened lately and can tell a newer decision itself.
+    # The work log as an index: titles with ids the agent can open (mem_get).
     lines.extend(_work_lines(conn, project_id, session_id, {owner for _, owner in last if owner}, round(10 * scale)))
     return lines
 

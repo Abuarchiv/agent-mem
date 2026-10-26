@@ -225,7 +225,7 @@ Agents use these MCP tools: `mem_search`, `mem_timeline`, `mem_get`, `mem_rememb
   "excluded_projects": [],
   "exclude_globs": [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", "id_ecdsa*",
                     ".npmrc", ".netrc", ".pypirc", "secrets/**", "**/secrets/**", "*.kdbx", "credentials*"],
-  "budgets": {"session_start": 8000, "prompt": 2400, "failure": 400, "warning": 300, "file_history": 1200, "compact": 4000},
+  "budgets": {"session_start": 800, "prompt": 2400, "failure": 400, "warning": 300, "file_history": 1200, "compact": 4000},
   "semantic": {"enabled": true, "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
   "observe": {
     "enabled": true,

@@ -41,7 +41,9 @@ class Budgets:
     """Maximum injected tokens per moment (estimated as characters / 4). Context windows are large; these fill what
     each harness passes on in one hook output (``hooks/inject.HOST_TOKENS`` cuts them per harness)."""
 
-    session_start: int = 8000
+    # Held out on real data, a start block of 2,400 tokens held 4 of the 71 older entries agents used in the days
+    # after, one of 800 the same; codex and copilot spent 7,800 and 8,000 at every start.
+    session_start: int = 800
     prompt: int = 2400
     failure: int = 400
     warning: int = 300
