@@ -434,10 +434,10 @@ class Worker:
         try:
             result = call(providers.make_llm(name, providers.model_for(self.config, name)))
         except Exception as error:
-            if failure := providers.provider_error(error):
-                providers.note_failure(self.conn, self.config, name, failure)
             text = logutil.describe(error)
             _record_call(self.conn, name, purpose, time.perf_counter() - started, False, 0, [], text)
+            if failure := providers.provider_error(error):  # after the record: two timeouts in a row pause the stage
+                providers.note_failure(self.conn, self.config, name, failure)
             return None
         _record_call(self.conn, name, purpose, time.perf_counter() - started, True, 0, [], None)
         return result

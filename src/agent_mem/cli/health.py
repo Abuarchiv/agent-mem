@@ -492,8 +492,10 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
         until = providers.paused_until(conn, name)
         paused = ""
         if until and until > now:
-            login = db.get_meta(conn, f"observe.pause_kind.{name}") == "login"
-            paused = f", not logged in, retry at {until}" if login else f", usage limit, paused until {until}"
+            kind = db.get_meta(conn, f"observe.pause_kind.{name}")
+            login = kind == "login"
+            reason = {"login": "not logged in, retry at", "timeout": "no answer twice, paused until"}
+            paused = f", {reason.get(kind or '', 'usage limit, paused until')} {until}"
             logged_out += [name] if login else []
         shown.append(f"{name} ({providers.model_for(config, name) or 'CLI default'}{paused})")
     remedy = 'Install Claude Code, Codex, Copilot CLI or OpenCode, or add "ollama" to observe.providers.'

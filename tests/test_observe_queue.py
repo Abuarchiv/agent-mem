@@ -325,6 +325,30 @@ def test_a_too_long_prompt_is_not_a_quota_pause() -> None:
     assert providers.classify("claude exit 1: maximum context length exceeded") == "other"
     assert providers.classify("Prompt is too long") == "other"
     assert providers.classify("rate limit exceeded") == "quota"
+    assert providers.classify("You've hit your monthly spend limit · raise it") == "quota"
+
+
+def test_a_stage_that_times_out_twice_in_a_row_is_paused(config: Config) -> None:
+    """A stage that hangs keeps hanging: claude timed out six times in a row on 14.10, opencode five times on 22.10
+    while claude answered each turn in 4 to 40 s. Every turn spent 120 s on it before the next stage took over."""
+    from agent_mem.observe import providers, worker
+
+    conn = db.connect(config)
+    timeout = providers.ProviderError("claude: timeout after 120s")
+    worker._record_call(conn, "claude", "extract", 120, False, 10, [1], str(timeout))
+    providers.note_failure(conn, config, "claude", timeout)
+    assert providers.paused_until(conn, "claude") is None  # one slow call is no pattern
+    worker._record_call(conn, "claude", "review", 120, False, 0, [], f"ProviderError: {timeout}")
+    providers.note_failure(conn, config, "claude", timeout)
+    assert providers.paused_until(conn, "claude") is not None
+    assert db.get_meta(conn, "observe.pause_kind.claude") == "timeout"
+
+    worker._record_call(conn, "codex", "extract", 120, False, 10, [2], "codex: timeout after 120s")
+    worker._record_call(conn, "codex", "extract", 30, True, 10, [3], None)
+    worker._record_call(conn, "codex", "extract", 120, False, 10, [4], "codex: timeout after 120s")
+    providers.note_failure(conn, config, "codex", providers.ProviderError("codex: timeout after 120s"))
+    assert providers.paused_until(conn, "codex") is None  # an answer in between: not in a row
+    conn.close()
 
 
 def test_codex_observer_runs_without_hooks_or_memories(monkeypatch) -> None:

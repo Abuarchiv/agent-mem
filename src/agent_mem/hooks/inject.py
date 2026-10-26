@@ -690,6 +690,8 @@ def _facts_line(conn: sqlite3.Connection, config: Config, harness: str) -> str |
     if kind == "login":
         hint = config_module.login_hint([name]).rstrip(".")
         return f"Facts: paused, `{name}` is not logged in. {hint}; requests wait (next try {at})."
+    if kind == "timeout":
+        return f"Facts: paused until {at}, {name} did not answer twice in a row. Requests wait."
     return f"Facts: paused until {at}, the usage limit of {name} is reached. Requests wait."
 
 

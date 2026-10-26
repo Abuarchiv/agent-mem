@@ -40,7 +40,9 @@ class ProviderError(RuntimeError):
 
 
 # "exceeded" alone also matches "context length exceeded", which is about the turn, not the plan.
-_QUOTA = re.compile(r"rate.?limit|usage limit|quota|too many requests|\b429\b|limit reached|hit your limit", re.I)
+_QUOTA = re.compile(
+    r"rate.?limit|usage limit|quota|too many requests|\b429\b|limit reached|hit your limit|spend limit", re.I
+)
 _LOGIN = re.compile(r"not logged in|unauthori[sz]ed|login|authenticat|\b401\b|\b403\b|invalid api key", re.I)
 _ERROR_LINE = re.compile(r"^\s*(?:ERROR|Error|error)\b.*$", re.M)
 
@@ -336,10 +338,19 @@ def provider_error(error: BaseException | None) -> ProviderError | None:
 
 
 def note_failure(conn: sqlite3.Connection, config: Config, name: str, error: ProviderError) -> None:
-    """A quota or login failure pauses the stage for ``pause_minutes`` instead of punishing the turn."""
-    if error.kind not in {"quota", "login"}:
+    """A quota or login failure pauses the stage for ``pause_minutes`` instead of punishing the turn. So do two timeouts
+    in a row (the call is recorded first): a hanging stage keeps hanging, and each turn waited 120 s on it."""
+    if error.kind == "timeout":
+        last = conn.execute(
+            "SELECT ok, COALESCE(error, '') FROM observe_calls WHERE provider = ? ORDER BY id DESC LIMIT 2", (name,)
+        ).fetchall()
+        if len(last) < 2 or any(ok or classify(text) != "timeout" for ok, text in last):
+            return
+    elif error.kind not in {"quota", "login"}:
         return
-    until = timeutil.iso(timeutil.now() + timedelta(minutes=config.observe.pause_minutes))
+    # Replayed on the call log: 10 minutes caught 13 of 20 repeat timeouts, 60 also moved 69 calls that answered.
+    minutes = 10 if error.kind == "timeout" else config.observe.pause_minutes
+    until = timeutil.iso(timeutil.now() + timedelta(minutes=minutes))
     db.set_meta(conn, f"observe.pause.{name}", until)
     db.set_meta(conn, f"observe.pause_kind.{name}", error.kind)
 

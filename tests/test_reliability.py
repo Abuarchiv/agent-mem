@@ -488,6 +488,8 @@ def test_a_paused_stage_hands_over_in_the_panel(config: Config, monkeypatch):
     assert inject._facts_line(conn, config, "copilot") == "Facts written by haiku (claude)"
     db.set_meta(conn, "observe.pause.claude", "2999-01-01T10:00:00.000Z")
     assert "usage limit of opencode" in (inject._facts_line(conn, config, "copilot") or "")
+    db.set_meta(conn, "observe.pause_kind.opencode", "timeout")  # not a usage limit: the stage hung
+    assert "opencode did not answer twice in a row" in (inject._facts_line(conn, config, "copilot") or "")
     conn.close()
 
 
