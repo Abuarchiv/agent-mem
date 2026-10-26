@@ -31,7 +31,7 @@ interface Recipe {
 interface Rule { id: number; project_id: string | null; pattern: string; message: string; evidence: number; enabled: number; hits: number; overrides: number }
 interface ProfileItem { project_id: string | null; key: string; value: string; count: number }
 interface Component { last_ok_at: string | null; last_error_at: string | null; last_error: string | null; ok_count: number; error_count: number }
-interface Injected { tokens: number; work: number; saved_percent: number | null; measured_turns: number; built_from: number }
+interface Injected { tokens: number; work: number; measured_turns: number; built_from: number }
 interface Health {
   data_dir: string; db_mb: number; schema: number; semantic: string | null; paused_until: string | null; spool: number;
   quarantine: number; consolidated_at: string | null; components?: Record<string, Component>; config_warnings?: string[];
@@ -352,7 +352,7 @@ interface GraphController {
     const learning = data.learning;
     // Token economics: what the injected memories cost to read against the agent's measured work behind them.
     const injected: Partial<Injected> = data.health.injected ?? {};
-    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>${injected.saved_percent != null ? `${num(injected.saved_percent)}%` : "—"}</b><span>${injected.saved_percent != null ? "reduction from reuse" : injected.built_from ? "no numbers yet" : "counted when a session ends"}</span></div><div class="block-foot"><div class="stats">${stat(`~${num(Math.max(0, (injected.work ?? 0) - (injected.tokens ?? 0)))}`, "tokens saved")}${stat(`~${num(injected.tokens)}`, "tokens loaded")}</div><span class="caption">Your savings, last 7 days.</span></div></section>`;
+    const tokenBlock = `<section class="block block-green"><i class="block-deco deco-triangle"></i><h2>Tokens</h2><div class="big-number"><b>~${num(injected.tokens)}</b><span>tokens loaded</span></div><div class="block-foot"><div class="stats">${stat(injected.work ? `~${num(injected.work)}` : "—", injected.work ? "tokens of earlier work behind them" : injected.built_from ? "no work measured yet" : "counted when a session ends")}</div><span class="caption">Last 7 days.</span></div></section>`;
     const lessonCount = valid.filter((memory) => memory.kind === "lesson").length;
     const learnBlock = `<section class="block block-blue"><i class="block-deco deco-star"></i><h2>Learned <a href="${hashFor("learned")}" aria-label="Open what was learned">${icon("right", 20)}</a></h2><div class="big-number"><b>${num(lessonCount)}</b><span>${lessonCount === 1 ? "lesson" : "lessons"} from mistakes and fixes</span></div><div class="block-foot"><div class="stats">${stat(num(learning.errors_fixed), learning.errors_fixed === 1 ? "error fix" : "error fixes")}${stat(num(enabled), enabled === 1 ? "rule on" : "rules on")}</div><span class="caption">Given to the next agent so it does not repeat them.</span></div></section>`;
 
@@ -547,7 +547,7 @@ ${selected ? memoryDetail(selected) : ""}
 <div class="pill-group">${projectTag(memory.project_id)}${tag(memorySource(memory))}${memory.invalid_at ? tag("replaced", "warn") : ""}</div>
 <div class="text-box">${inline(memoryText(memory))}${memory.body && !memoryText(memory).startsWith(memory.body.trim()) && memory.body.trim() !== memory.title.trim() ? `\n\n${h(memory.body)}` : ""}</div>
 ${memory.truncated ? `<p class="notice"><span>Long text is shortened on this page. <code>agent-mem show ${id}</code> prints all of it.</span></p>` : ""}
-<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Outdated since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.work && memory.work > Math.ceil(memoryText(memory).length / 4) ? `<dt>Savings</dt><dd>~${num(memory.work - Math.ceil(memoryText(memory).length / 4))} tokens each time it is reused</dd>` : ""}${memory.turn_id ? `<dt>From request</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
+<dl class="facts"><dt>Created</dt><dd>${h(full(memory.created_at))}</dd>${memory.valid_from && dayKey(memory.valid_from) !== dayKey(memory.created_at) ? `<dt>Valid from</dt><dd>${h(full(memory.valid_from))}</dd>` : ""}${memory.invalid_at ? `<dt>Outdated since</dt><dd>${h(full(memory.invalid_at))}</dd>` : ""}${memory.superseded_by ? `<dt>Replaced by</dt><dd>${successor ? `<a href="${hashFor("memory", { m: String(successor.id) })}">M${successor.id}</a> ${h(firstLine(memoryText(successor), 80))}` : `M${h(memory.superseded_by)}`}</dd>` : ""}<dt>Given to agents</dt><dd>${h(usage)}</dd>${memory.work ? `<dt>Built from</dt><dd>~${num(memory.work)} tokens of earlier work</dd>` : ""}${memory.turn_id ? `<dt>From request</dt><dd><a href="${hashFor("timeline", { turn: String(memory.turn_id) })}">T${memory.turn_id}</a></dd>` : ""}</dl>
 <span class="section-label">Commands</span>
 <div class="copy-list">${copyable(`agent-mem show ${id}`)}${copyable(`agent-mem purge --id ${id}`)}</div>
 <p class="notice"><span><code>agent-mem purge</code> deletes it for good.</span></p>
@@ -883,7 +883,7 @@ ${progress < 100 ? `<p class="graph-progress">${icon("refresh", 16)}<span>${num(
 <div class="stack">
 <section class="panel"><div class="panel-head"><h2>Storage</h2></div>
 <div class="row"><b>Database</b><span class="value">${h(health.db_mb)} MB</span></div>
-<div class="row"><span class="grow wrap"><b>Your savings, last 7 days</b><span>~${num(Math.max(0, (health.injected?.work ?? 0) - (health.injected?.tokens ?? 0)))} tokens</span></span><span class="value">${health.injected?.saved_percent != null ? `${num(health.injected.saved_percent)}% reduction from reuse` : "—"}</span></div>
+<div class="row"><span class="grow wrap"><b>Loaded, last 7 days</b><span>~${num(health.injected?.tokens ?? 0)} tokens</span></span><span class="value">${health.injected?.work ? `built from ~${num(health.injected.work)} tokens of earlier work` : "—"}</span></div>
 <div class="row"><b>Waiting to be saved</b><span class="value">${plural(health.spool, "event")}</span></div>
 <div class="row"><span class="grow wrap"><b>Could not be read</b>${data.quarantine_latest ? `<span>Latest ${h(when(data.quarantine_latest.ts))}: ${h(data.quarantine_latest.reason)}</span>` : ""}</span><span class="value">${plural(health.quarantine, "file")}</span></div>
 <div class="row"><b>Data folder</b><span class="value"><code>${h(health.data_dir)}</code></span></div></section>
