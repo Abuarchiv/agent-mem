@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
+from typing import Any
 
 from agent_mem.core import db, identity, privacy, signals, timeutil
 from agent_mem.core.config import Config, env_flag, load_project_settings
@@ -35,6 +36,25 @@ class Response:
     wants_indexer: bool = False
     stored: bool = False
     work: int = 0  # measured agent work behind the injected memories (memory/work.py)
+
+
+@dataclass
+class _Call:
+    """One recorded event as the handlers below see it."""
+
+    conn: sqlite3.Connection
+    config: Config
+    event: Event
+    project: identity.Project | None
+    session_id: str
+    event_id: int
+    payload: dict[str, Any]  # the event as stored (JSON)
+    response: Response
+    with_context: bool
+
+    @property
+    def project_id(self) -> str | None:
+        return self.project.id if self.project else None
 
 
 def dedupe_key(event: Event) -> str:
@@ -161,7 +181,6 @@ def _apply(
     with_context: bool,
 ) -> Response:
     session_id = _upsert_session(conn, event, project)
-    project_id = project.id if project else None
     payload = _payload(config, event, project)
     inserted = conn.execute(
         "INSERT INTO events(session_id, turn_id, ts, kind, tool, tool_use_id, payload, trust, dedupe_key) "
@@ -191,7 +210,7 @@ def _apply(
         "compact": _on_compact,
         "session_end": _on_session_end,
     }[event.kind]
-    handler(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context)
+    handler(_Call(conn, config, event, project, session_id, event_id, payload, response, with_context))
     if not with_context:
         response.context = None
         response.deny = None
@@ -379,51 +398,55 @@ def _rel_files(project: identity.Project | None, files: tuple[str, ...]) -> list
 # --- handlers ----------------------------------------------------------------
 
 
-def _on_session_start(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    if not with_context or project_id is None:
+def _on_session_start(call: _Call) -> None:
+    if not call.with_context or call.project_id is None:
         return
-    if event.source == "compact":
-        block = inject.compact(conn, config, session_id)
+    if call.event.source == "compact":
+        block = inject.compact(call.conn, call.config, call.session_id)
     else:
-        block = inject.session_start(conn, config, project_id, session_id, event.harness)
+        block = inject.session_start(call.conn, call.config, call.project_id, call.session_id, call.event.harness)
     if block:
-        response.context = block.text
-        learn.record_access(conn, block.owners, "injected", session_id, event.ts)
+        call.response.context = block.text
+        learn.record_access(call.conn, block.owners, "injected", call.session_id, call.event.ts)
 
 
-def _on_prompt(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    prompt = str(payload.get("prompt") or "")
-    previous = _open_turn(conn, session_id)
-    if previous is not None and signals.continues_turn(prompt) and previous["started_at"] <= event.ts:
+def _on_prompt(call: _Call) -> None:
+    prompt = str(call.payload.get("prompt") or "")
+    previous = _open_turn(call.conn, call.session_id)
+    if previous is not None and signals.continues_turn(prompt) and previous["started_at"] <= call.event.ts:
         # Claude Code delivers a finished background task as a prompt while the turn runs: it belongs to that turn.
-        conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (int(previous["id"]), event_id))
+        call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (int(previous["id"]), call.event_id))
         return
     # A prompt replayed from the spool after a later one must not close that later turn, which is still running.
-    if previous is not None and previous["started_at"] <= event.ts:
-        _close_turn(conn, config, int(previous["id"]), "unknown", event.ts)
-    last = conn.execute(
-        "SELECT id, prompt, commands_json FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)
+    if previous is not None and previous["started_at"] <= call.event.ts:
+        _close_turn(call.conn, call.config, int(previous["id"]), "unknown", call.event.ts)
+    last = call.conn.execute(
+        "SELECT id, prompt, commands_json FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (call.session_id,)
     ).fetchone()
-    turn_id = _new_turn(conn, session_id, project_id, event.ts, prompt)
-    conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn_id, event_id))
+    turn_id = _new_turn(call.conn, call.session_id, call.project_id, call.event.ts, prompt)
+    call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn_id, call.event_id))
 
-    _learn_from_prompt(conn, config, prompt, project_id, turn_id, last)
+    _learn_from_prompt(call.conn, call.config, prompt, call.project_id, turn_id, last)
     if _OVERRIDE.search(prompt):
-        conn.execute(
+        call.conn.execute(
             "UPDATE rules SET overrides = overrides + 1, enabled = CASE WHEN overrides + 1 >= 2 THEN 0 ELSE enabled END "
             "WHERE (project_id IS ? OR project_id IS NULL) AND last_hit_at IS NOT NULL AND last_hit_at >= ?",
-            (project_id, timeutil.iso(timeutil.now() - timedelta(minutes=15))),
+            (call.project_id, timeutil.iso(timeutil.now() - timedelta(minutes=15))),
         )
-    compacted = db.get_meta(conn, f"compacted.{session_id}")
+    compacted = db.get_meta(call.conn, f"compacted.{call.session_id}")
     if compacted:
-        conn.execute("DELETE FROM meta WHERE key = ?", (f"compacted.{session_id}",))
-    if with_context and project_id is not None:
-        blocks = [inject.compact(conn, config, session_id)] if compacted else []
-        blocks.append(inject.prompt_hints(conn, config, project_id, session_id, prompt, event.harness))
+        call.conn.execute("DELETE FROM meta WHERE key = ?", (f"compacted.{call.session_id}",))
+    if call.with_context and call.project_id is not None:
+        blocks = [inject.compact(call.conn, call.config, call.session_id)] if compacted else []
+        blocks.append(
+            inject.prompt_hints(call.conn, call.config, call.project_id, call.session_id, prompt, call.event.harness)
+        )
         if any(blocks):
-            response.context = "\n".join(b.text for b in blocks if b)
+            call.response.context = "\n".join(b.text for b in blocks if b)
             # The event's time: prompt_hints tells a start block's entries and a compaction apart by it.
-            learn.record_access(conn, [o for b in blocks if b for o in b.owners], "injected", session_id, event.ts)
+            learn.record_access(
+                call.conn, [o for b in blocks if b for o in b.owners], "injected", call.session_id, call.event.ts
+            )
 
 
 def _learn_from_prompt(
@@ -518,25 +541,27 @@ def _matching_rules(conn: sqlite3.Connection, project_id: str | None, command: s
     return [r for r in rows if r["pattern"] in names]
 
 
-def _on_pre_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    if not with_context:
+def _on_pre_tool(call: _Call) -> None:
+    if not call.with_context:
         return
-    tool_signal = signals.analyze_tool(event.tool or "", event.tool_input)
+    tool_signal = signals.analyze_tool(call.event.tool or "", call.event.tool_input)
     lines: list[tuple[str, tuple[str, int] | None]] = []
     if tool_signal.command:
-        for rule in _matching_rules(conn, project_id, tool_signal.command):
-            conn.execute("UPDATE rules SET hits = hits + 1, last_hit_at = ? WHERE id = ?", (timeutil.iso(), rule["id"]))
+        for rule in _matching_rules(call.conn, call.project_id, tool_signal.command):
+            call.conn.execute(
+                "UPDATE rules SET hits = hits + 1, last_hit_at = ? WHERE id = ?", (timeutil.iso(), rule["id"])
+            )
             if rule["enabled"]:
-                response.deny = (
+                call.response.deny = (
                     f"agent-mem rule R{rule['id']}: {rule['message']} (you were corrected {rule['evidence']}x)."
                 )
                 return
             lines.append(
                 (f"- Note (R{rule['id']}): earlier correction — {rule['message']} ({rule['evidence']}x).", None)
             )
-    block = inject.warnings_block(lines, config)
-    history = _file_history(conn, config, project, project_id, session_id, tool_signal)
-    response.context = "\n".join(b.text for b in (block, history) if b) or None
+    block = inject.warnings_block(lines, call.config)
+    history = _file_history(call.conn, call.config, call.project, call.project_id, call.session_id, tool_signal)
+    call.response.context = "\n".join(b.text for b in (block, history) if b) or None
 
 
 # Kind, label and weight in the file history: what went wrong before matters most when touching a file.
@@ -638,77 +663,83 @@ def _remember_command(
     )
 
 
-def _on_tool(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    tool_signal = signals.analyze_tool(event.tool or "", event.tool_input)
-    turn_id = _turn_for_tool(conn, session_id, project_id, event.ts)
-    if project is not None:
-        _narrow_turn(conn, turn_id, project)
-    files = _rel_files(project, tool_signal.files)
-    error_sig = payload.get("error_sig")
-    conn.execute(
+def _on_tool(call: _Call) -> None:
+    tool_signal = signals.analyze_tool(call.event.tool or "", call.event.tool_input)
+    turn_id = _turn_for_tool(call.conn, call.session_id, call.project_id, call.event.ts)
+    if call.project is not None:
+        _narrow_turn(call.conn, turn_id, call.project)
+    files = _rel_files(call.project, tool_signal.files)
+    error_sig = call.payload.get("error_sig")
+    call.conn.execute(
         "UPDATE events SET turn_id = ?, command_key = ?, exit_code = ?, error_sig = ?, files_json = ? WHERE id = ?",
-        (turn_id, tool_signal.command_key, event.exit_code, error_sig, json.dumps(files), event_id),
+        (turn_id, tool_signal.command_key, call.event.exit_code, error_sig, json.dumps(files), call.event_id),
     )
     if tool_signal.category in {"edit", "read"}:
-        _append_json(conn, turn_id, "files_json", files)
+        _append_json(call.conn, turn_id, "files_json", files)
     if tool_signal.command:
-        _append_json(conn, turn_id, "commands_json", [privacy.clean_text(tool_signal.command, 200)])
+        _append_json(call.conn, turn_id, "commands_json", [privacy.clean_text(tool_signal.command, 200)])
     if (
-        not event.tool_failed
+        not call.event.tool_failed
         and not any(store.scratch_path(f) for f in files)
-        and not _excluded(project, tool_signal.files, exclude_globs(config, project))
+        and not _excluded(call.project, tool_signal.files, exclude_globs(call.config, call.project))
     ):
-        tool_input = event.tool_input
+        tool_input = call.event.tool_input
         if isinstance(tool_input, dict):
             tool_input = {k: privacy.strip_private(v) if isinstance(v, str) else v for k, v in tool_input.items()}
         elif isinstance(tool_input, str):
             tool_input = privacy.strip_private(tool_input)
         names = signals.defined_names(tool_signal.category, tool_input)
-        _append_json(conn, turn_id, "defines_json", names[:12], cap=30)
-    if tool_signal.command_kind == "commit" and not event.tool_failed:
+        _append_json(call.conn, turn_id, "defines_json", names[:12], cap=30)
+    if tool_signal.command_kind == "commit" and not call.event.tool_failed:
         _append_json(
-            conn, turn_id, "commits_json", signals.commits_made(payload.get("output"), tool_signal.command), cap=20
+            call.conn,
+            turn_id,
+            "commits_json",
+            signals.commits_made(call.payload.get("output"), tool_signal.command),
+            cap=20,
         )
-    if payload.get("error_line") and payload.get("trust") != "tool_external":
-        _append_json(conn, turn_id, "errors_json", [str(payload["error_line"])[:200]], cap=10)
+    if call.payload.get("error_line") and call.payload.get("trust") != "tool_external":
+        _append_json(call.conn, turn_id, "errors_json", [str(call.payload["error_line"])[:200]], cap=10)
 
-    _raise_importance(conn, turn_id, _tool_importance(tool_signal, event.tool_failed))
+    _raise_importance(call.conn, turn_id, _tool_importance(tool_signal, call.event.tool_failed))
 
-    if tool_signal.packages and project_id is not None:
-        ids = [store.entity_id(conn, project_id, "package", name) for name in tool_signal.packages]
-        store.link(conn, "t", turn_id, ids)
+    if tool_signal.packages and call.project_id is not None:
+        ids = [store.entity_id(call.conn, call.project_id, "package", name) for name in tool_signal.packages]
+        store.link(call.conn, "t", turn_id, ids)
 
     # Error-to-fix recipes only for the project's own commands: a failed `cat` or `cd` followed by one that worked
     # is looking around, not a fix worth repeating.
     project_command = tool_signal.command_kind in PROJECT_COMMANDS
-    if event.tool_failed and error_sig and tool_signal.command_key and project_command:
-        recipe = conn.execute(
+    if call.event.tool_failed and error_sig and tool_signal.command_key and project_command:
+        recipe = call.conn.execute(
             "SELECT * FROM recipes WHERE project_id IS ? AND error_sig = ? ORDER BY command_key = ? DESC, successes DESC LIMIT 1",
-            (project_id, error_sig, tool_signal.command_key),
+            (call.project_id, error_sig, tool_signal.command_key),
         ).fetchone()
         if recipe is not None:
-            conn.execute("UPDATE recipes SET recurrences = recurrences + 1 WHERE id = ?", (recipe["id"],))
-            if with_context:
-                block = inject.recipe_hint(recipe, config)
+            call.conn.execute("UPDATE recipes SET recurrences = recurrences + 1 WHERE id = ?", (recipe["id"],))
+            if call.with_context:
+                block = inject.recipe_hint(recipe, call.config)
                 if block:
-                    response.context = block.text
-    elif not event.tool_failed and tool_signal.command_key:
+                    call.response.context = block.text
+    elif not call.event.tool_failed and tool_signal.command_key:
         if project_command:
-            _resolve_failures(conn, project_id, session_id, turn_id, tool_signal.command_key, event.ts)
-            _remember_command(conn, project_id, tool_signal, event.ts)
+            _resolve_failures(
+                call.conn, call.project_id, call.session_id, turn_id, tool_signal.command_key, call.event.ts
+            )
+            _remember_command(call.conn, call.project_id, tool_signal, call.event.ts)
 
-    if tool_signal.command_kind == "revert" and not event.tool_failed:
-        _record_dead_end(conn, project_id, session_id, turn_id, tool_signal)
-        store.guards_exist(config)
+    if tool_signal.command_kind == "revert" and not call.event.tool_failed:
+        _record_dead_end(call.conn, call.project_id, call.session_id, turn_id, tool_signal)
+        store.guards_exist(call.config)
 
-    if tool_signal.category == "edit" and files and project_id is not None:
-        _feedback_used(conn, project_id, session_id, files)
+    if tool_signal.category == "edit" and files and call.project_id is not None:
+        _feedback_used(call.conn, call.project_id, call.session_id, files)
 
     # Copilot does not fire plugin preToolUse hooks (copilot-cli#2540); after the call is the next chance.
-    if with_context and not response.context:
-        history = _file_history(conn, config, project, project_id, session_id, tool_signal)
+    if call.with_context and not call.response.context:
+        history = _file_history(call.conn, call.config, call.project, call.project_id, call.session_id, tool_signal)
         if history:
-            response.context = history.text
+            call.response.context = history.text
 
 
 def _resolve_failures(
@@ -832,28 +863,28 @@ def _feedback_used(conn: sqlite3.Connection, project_id: str, session_id: str, f
     learn.record_access(conn, fresh, "used", session_id)
 
 
-def _on_stop(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    turn = _turn_at(conn, session_id, event.ts)
+def _on_stop(call: _Call) -> None:
+    turn = _turn_at(call.conn, call.session_id, call.event.ts)
     if turn is None:
-        turn = conn.execute(
-            "SELECT * FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)
+        turn = call.conn.execute(
+            "SELECT * FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (call.session_id,)
         ).fetchone()
         if turn is None:
             return
     turn_id = int(turn["id"])
-    conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn_id, event_id))
-    answer = str(payload.get("answer") or "")
+    call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn_id, call.event_id))
+    answer = str(call.payload.get("answer") or "")
     if answer:
-        conn.execute("UPDATE turns SET answer = ? WHERE id = ?", (answer, turn_id))
-        _raise_importance(conn, turn_id, signals.IMPORTANCE["answer"] if len(answer) > 200 else 0.3)
+        call.conn.execute("UPDATE turns SET answer = ? WHERE id = ?", (answer, turn_id))
+        _raise_importance(call.conn, turn_id, signals.IMPORTANCE["answer"] if len(answer) > 200 else 0.3)
         cited = {(kind.lower(), int(number)) for kind, number in _CITED.findall(answer)}
-        existing = [o for o in cited if _owner_exists(conn, o)]
-        learn.record_access(conn, existing, "cited", session_id)
+        existing = [o for o in cited if _owner_exists(call.conn, o)]
+        learn.record_access(call.conn, existing, "cited", call.session_id)
     if turn["outcome"] == "open":
-        _close_turn(conn, config, turn_id, "ok", event.ts)
+        _close_turn(call.conn, call.config, turn_id, "ok", call.event.ts)
     else:
-        store.index_turn(conn, turn_id)
-    response.wants_indexer = True
+        store.index_turn(call.conn, turn_id)
+    call.response.wants_indexer = True
 
 
 def _owner_exists(conn: sqlite3.Connection, owner: tuple[str, int]) -> bool:
@@ -861,33 +892,33 @@ def _owner_exists(conn: sqlite3.Connection, owner: tuple[str, int]) -> bool:
     return conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (owner[1],)).fetchone() is not None
 
 
-def _on_subagent_stop(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    turn = _open_turn(conn, session_id)
+def _on_subagent_stop(call: _Call) -> None:
+    turn = _open_turn(call.conn, call.session_id)
     if turn is not None:
-        conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], event_id))
+        call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], call.event_id))
 
 
-def _on_compact(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    turn = _open_turn(conn, session_id)
+def _on_compact(call: _Call) -> None:
+    turn = _open_turn(call.conn, call.session_id)
     if turn is not None:
-        conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], event_id))
-    if event.harness == "copilot":
+        call.conn.execute("UPDATE events SET turn_id = ? WHERE id = ?", (turn["id"], call.event_id))
+    if call.event.harness == "copilot":
         # Copilot ignores context here and starts no session after compaction (CLI 1.0.102): the next request
         # brings the essentials back, as Claude Code's and Codex's start after compaction does.
-        db.set_meta(conn, f"compacted.{session_id}", event.ts)
-    elif with_context:
+        db.set_meta(call.conn, f"compacted.{call.session_id}", call.event.ts)
+    elif call.with_context:
         # Harnesses that accept context before compaction (OpenCode) keep the essentials in the summary.
-        block = inject.compact(conn, config, session_id)
+        block = inject.compact(call.conn, call.config, call.session_id)
         if block:
-            response.context = block.text
+            call.response.context = block.text
 
 
-def _on_session_end(conn, config, event, project, project_id, session_id, event_id, payload, response, with_context):
-    turn = _open_turn(conn, session_id)
+def _on_session_end(call: _Call) -> None:
+    turn = _open_turn(call.conn, call.session_id)
     if turn is not None:
-        _close_turn(conn, config, int(turn["id"]), "ok" if turn["answer"] else "unknown", event.ts)
-    conn.execute("UPDATE sessions SET ended_at = ? WHERE id = ?", (event.ts, session_id))
-    response.wants_indexer = True
+        _close_turn(call.conn, call.config, int(turn["id"]), "ok" if turn["answer"] else "unknown", call.event.ts)
+    call.conn.execute("UPDATE sessions SET ended_at = ? WHERE id = ?", (call.event.ts, call.session_id))
+    call.response.wants_indexer = True
 
 
 def close_stale_turns(conn: sqlite3.Connection, config: Config) -> int:
