@@ -514,3 +514,23 @@ def test_in_docker_the_login_hint_names_the_launcher(config: Config, monkeypatch
     assert "`agent-mem login claude`" in (inject._facts_line(conn, config, "claude") or "")
     assert health._provider_check(conn, config).fix == "Run `agent-mem login claude` once."
     conn.close()
+
+
+def test_doctor_names_a_cli_whose_last_calls_all_failed(config: Config, monkeypatch):
+    """Codex failed 4 of 4 fact calls ("workspace routing discovery failed") and Copilot 3 of 3 in three days, while
+    doctor showed both green: their pauses had run out, and an error that is no limit never pauses."""
+    from agent_mem.cli import health
+    from agent_mem.observe import worker
+
+    monkeypatch.setattr(health.shutil, "which", lambda name: f"/bin/{name}" if name in {"claude", "codex"} else None)
+    conn = db.connect(config)
+    for ok in (True, False, False):
+        worker._record_call(conn, "claude", "extract", 3.0, ok, 10, [], None if ok else "claude: timeout after 120s")
+    assert health._provider_check(conn, config).ok
+    for _ in range(3):
+        worker._record_call(conn, "codex", "extract", 9.0, False, 10, [], "codex exit 1: ERROR: Reconnecting... 5/5\n"
+                            "ERROR: workspace routing discovery failed")  # fmt: skip
+    check = health._provider_check(conn, config)
+    assert not check.ok and "codex" in check.detail and "workspace routing discovery failed" in check.detail
+    assert "`codex`" in (check.fix or "")
+    conn.close()
