@@ -53,6 +53,25 @@ def test_claude_hooks_get_absolute_path_and_keep_foreign_hooks(homes: Path) -> N
     assert _hooks_commands(data["hooks"]) == {"other-tool notify"} and data["theme"] == "dark"
 
 
+def test_foreign_hooks_that_merely_name_agent_mem_survive(homes: Path) -> None:
+    """A user's hook from a folder called agent-mem or a tool called agent-memory is theirs, not ours."""
+    settings = homes / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    foreign = ["~/agent-memory-system/hook.sh", "~/Company/agent-mem/scripts/lint.sh", "agent-mem-sync hook push"]
+    groups = [{"hooks": [{"type": "command", "command": command}]} for command in foreign]
+    settings.write_text(json.dumps({"hooks": {"Stop": groups}}))
+
+    install.write("claude", PLUGINS, EXE)
+    install.remove("claude")
+    assert _hooks_commands(json.loads(settings.read_text())["hooks"]) == set(foreign)
+    for ours in (
+        "agent-mem hook claude",
+        "'/my tools/agent-mem' hook claude",
+        "& 'C:\\a\\agent-mem.exe' hook copilot x",
+    ):
+        assert install._is_ours({"command": ours})
+
+
 def test_codex_hooks_and_toml_block(homes: Path) -> None:
     toml = homes / ".codex" / "config.toml"
     toml.parent.mkdir()

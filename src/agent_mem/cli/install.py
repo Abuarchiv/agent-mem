@@ -101,8 +101,13 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     _write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
+# ``<exe> hook <harness>`` with ``agent-mem`` as the program's name: a user's ``~/agent-memory/x.sh`` or a script in a
+# folder called agent-mem is theirs, and setup and uninstall rewrite the file without it.
+_OUR_COMMAND = re.compile(r"""(?:^|[\s/\\'"])agent-mem(?:\.exe)?['"]?\s+hook\s""")
+
+
 def _is_ours(hook: dict[str, Any]) -> bool:
-    return any(MARK in str(hook.get(key, "")) for key in ("command", "bash", "powershell"))
+    return any(_OUR_COMMAND.search(str(hook.get(key, ""))) for key in ("command", "bash", "powershell"))
 
 
 def _merge_hooks(existing: dict[str, Any], ours: dict[str, Any]) -> dict[str, Any]:
