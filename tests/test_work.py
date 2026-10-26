@@ -223,3 +223,28 @@ def test_copilot_turn_work_counts_input_minus_cache_reads(conn) -> None:
     )
     assert work.measure(conn) == 1
     assert conn.execute("SELECT work_tokens FROM turns WHERE id = ?", (turns[0],)).fetchone()[0] == 14141 + 61
+
+
+def test_a_turn_that_ended_without_stop_gets_its_answer_from_the_transcript(conn) -> None:
+    """A spend limit, an API error or Esc ends a turn without Stop: 54 of 70 such Claude turns had the agent's last
+    words in the transcript, and without them the longest work was stored as "result unknown"."""
+    now = "2026-10-13T12:"
+    lost, kept = _session(
+        conn, "claude", "s7", [(f"{now}00:00.000Z", f"{now}05:00.000Z"), (f"{now}06:00.000Z", f"{now}09:00.000Z")]
+    )
+    conn.execute("UPDATE turns SET answer = 'Done.' WHERE id = ?", (kept,))
+    reply = _assistant(f"{now}02:00.000Z", "a", 10, 5)
+    reply["message"]["content"] = [{"type": "text", "text": "Kurzstand: Tests grün, Commit folgt."}]
+    limit = _assistant(f"{now}03:00.000Z", "b", 1, 1)
+    limit["message"]["content"] = [{"type": "text", "text": "You've hit your monthly spend limit · raise it"}]
+    limit["message"]["model"], limit["isApiErrorMessage"] = "<synthetic>", True  # Claude Code's own notice
+    later = _assistant(f"{now}07:00.000Z", "c", 1, 1)
+    later["message"]["content"] = [{"type": "text", "text": "Second turn's own words"}]
+    _lines(Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-tmp-p" / "s7.jsonl", [reply, limit, later])
+
+    assert work.recover_answers(conn, 16_000) == 1
+
+    answers = dict(conn.execute("SELECT id, answer FROM turns").fetchall())
+    assert answers == {lost: "Kurzstand: Tests grün, Commit folgt.", kept: "Done."}
+    conn.execute("UPDATE turns SET answer = '' WHERE id = ?", (lost,))
+    assert work.recover_answers(conn, 16_000) == 0  # each turn is read once, not at every indexer run

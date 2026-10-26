@@ -179,6 +179,7 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
     stats["spool_applied"], stats["spool_quarantined"] = _drain_spool(conn, config)
     stats["stale_turns_closed"] = capture.close_stale_turns(conn, config)
     stats["work_measured"] = work.measure(conn)
+    stats["answers_recovered"] = work.recover_answers(conn, config.limits.answer_chars)
     stats["native_notes"] = notes.ingest(conn, config)
     with db.transaction(conn):
         stats["retired_unindexed"] = store.drop_retired_keys(conn)

@@ -150,6 +150,64 @@ def _copilot_usage(path: Path, offset: int = 0) -> tuple[list[Call], int]:
     return calls, end
 
 
+def _claude_last_words(path: Path) -> list[tuple[str, str]]:
+    """(timestamp, text) of each assistant text block. Claude Code's own notices (spend limit, API error) are
+    ``<synthetic>`` messages: not the agent's words."""
+    found: list[tuple[str, str]] = []
+    for _, _, line in _lines(path, 0):
+        if '"text"' not in line or '"assistant"' not in line or '"<synthetic>"' in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        message = entry.get("message") if isinstance(entry, dict) else None
+        if entry.get("type") != "assistant" or not isinstance(message, dict) or not entry.get("timestamp"):
+            continue
+        for part in message.get("content") or []:
+            if isinstance(part, dict) and part.get("type") == "text" and str(part.get("text") or "").strip():
+                found.append((str(entry["timestamp"]), str(part["text"]).strip()))
+    return found
+
+
+def recover_answers(conn: sqlite3.Connection, limit_chars: int) -> int:
+    """A Claude turn that ended without Stop (spend limit, API error, Esc) has no answer; its last words are in the
+    transcript: 54 of 70 such turns. Without them the longest work was stored as "result unknown". Returns turns
+    filled."""
+    from agent_mem.core import privacy
+    from agent_mem.memory import store
+
+    since = timeutil.iso(timeutil.now() - timedelta(days=LOOKBACK_DAYS))
+    rows = conn.execute(
+        "SELECT t.id, t.session_id, s.native_id, t.started_at, t.ended_at, "
+        "(SELECT MIN(n.started_at) FROM turns n WHERE n.session_id = t.session_id AND n.started_at > t.started_at) "
+        "FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.harness = 'claude' AND t.ended_at IS NOT NULL "
+        "AND COALESCE(t.answer, '') = '' AND t.started_at >= ? AND t.id NOT IN "
+        "(SELECT CAST(substr(key, 16) AS INTEGER) FROM meta WHERE key LIKE 'answer.checked:%')",
+        (since,),
+    ).fetchall()
+    words: dict[str, list[tuple[str, str]]] = {}
+    filled = 0
+    for turn_id, session_id, native_id, start, end, following in rows:
+        if session_id not in words:
+            files = _claude_files(native_id)
+            try:
+                words[session_id] = _claude_last_words(files[0]) if files else []
+            except OSError:
+                words[session_id] = []
+        stop = min(end, following) if following else end
+        said = [text for ts, text in words[session_id] if start <= ts <= stop]
+        with db.transaction(conn):
+            db.set_meta(conn, f"answer.checked:{turn_id}", "1")  # read once, found or not
+            if said:
+                conn.execute(
+                    "UPDATE turns SET answer = ? WHERE id = ?", (privacy.clean_text(said[-1], limit_chars), turn_id)
+                )
+                store.index_turn(conn, turn_id)
+                filled += 1
+    return filled
+
+
 def measure(conn: sqlite3.Connection) -> int:
     """Fill ``turns.work_tokens`` for closed turns of Claude Code, Codex and Copilot sessions whose transcript exists.
     A turn without a model call in its window gets 0 (measured, nothing spent). Returns the turns measured.
