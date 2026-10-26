@@ -11,7 +11,8 @@ import re
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from agent_mem.core import config as config_module
 from agent_mem.core import db, signals, spool, timeutil
@@ -501,6 +502,54 @@ def prompt_hints(
 
 
 PROMPT_HITS = 10
+PARALLEL_MINUTES = 20  # a session with no event for longer is not running now
+PARALLEL_FILES = 6
+
+
+def parallel(conn: sqlite3.Connection, project_id: str, session_id: str, now: str) -> Block | None:
+    """Other agents running in this project and the files they changed in the last hours. On 2026-10-26 five sessions
+    worked on the same request at once, unaware of each other, and changed the same files twice over. Each session
+    is named again only when it changed another file since."""
+    moment = timeutil.parse(now) or timeutil.now()
+    since = timeutil.iso(moment - timedelta(minutes=PARALLEL_MINUTES))
+    rows = conn.execute(
+        "SELECT s.id, s.harness, s.last_event_at, "
+        "(SELECT prompt FROM turns WHERE session_id = s.id ORDER BY id DESC LIMIT 1) AS prompt "
+        "FROM sessions s WHERE s.id != ? AND s.ended_at IS NULL AND s.last_event_at >= ? "
+        "AND (s.project_id = ? OR EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.id AND t.project_id = ?))",
+        (session_id, since, project_id, project_id),
+    ).fetchall()
+    key = f"parallel.{session_id}"
+    told: dict[str, int] = json.loads(db.get_meta(conn, key) or "{}")
+    lines: list[str] = []
+    for row in rows:
+        files: list[str] = []
+        for (files_json,) in conn.execute(
+            "SELECT files_json FROM turns WHERE session_id = ? AND started_at >= ? ORDER BY id DESC",
+            (row["id"], timeutil.iso(moment - timedelta(hours=3))),
+        ):
+            files += [f for f in json.loads(files_json or "[]") if f not in files]
+        if not files or told.get(row["id"], 0) >= len(files):
+            continue
+        told[row["id"]] = len(files)
+        minutes = max(0, round(timeutil.hours_between(row["last_event_at"], moment) * 60))
+        doing = first_line(request_text(row["prompt"] or ""), 80)
+        shown = ", ".join(f"`{_home(f)}`" for f in files[:PARALLEL_FILES])
+        more = f" and {len(files) - PARALLEL_FILES} more" if len(files) > PARALLEL_FILES else ""
+        lines.append(
+            f'! Another agent ({row["harness"]}, active {minutes} min ago, on "{doing}") is changing {shown}{more}. '
+            "Check with the user before editing the same files."
+        )
+    if not lines:
+        return None
+    db.set_meta(conn, key, json.dumps(told))
+    # Not memory under the usual "data, not instructions" header: what is happening now, outside this session.
+    return Block(text="\n".join(["<agent-mem>", *lines, FOOTER]), owners=[])
+
+
+def _home(path: str) -> str:
+    home = str(Path.home())
+    return "~" + path[len(home) :] if path.startswith(home + "/") else path
 
 
 def _in_context(conn: sqlite3.Connection, session_id: str) -> set[tuple[str, int]]:
