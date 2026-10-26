@@ -39,8 +39,10 @@ def sigmoid(value: float) -> float:
 
 
 def usefulness(used: int, shown: int) -> float:
-    """Laplace-smoothed ratio of shown results that were actually used. Neutral value 0.5."""
-    return (used + 1) / (shown + 2)
+    """Laplace-smoothed ratio of shown results that were actually used. Neutral value 0.5, below 1. A use without a
+    counted showing (cited from the start block, shown before the exposures were pruned) still was one: uncapped,
+    six uses and no "shown" gave a factor of 4 and put that turn first for unrelated questions."""
+    return (used + 1) / (max(shown, used) + 2)
 
 
 @dataclass

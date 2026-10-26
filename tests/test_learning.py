@@ -12,6 +12,7 @@ def test_activation_grows_with_use_and_decays_with_age():
     assert frequent > fresh > old
     assert math.isclose(learn.usefulness(0, 0), 0.5)
     assert learn.usefulness(5, 5) > learn.usefulness(0, 5)
+    assert learn.usefulness(6, 0) == learn.usefulness(6, 6) < 1  # a ratio, however few showings were counted
 
 
 def test_corrections_become_rules_and_deny(driver: Driver, conn, config):
