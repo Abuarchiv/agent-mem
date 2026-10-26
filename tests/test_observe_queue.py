@@ -673,4 +673,7 @@ def test_housekeeping_goes_to_the_vendor_whose_recent_calls_failed_least(config:
     worker._record_call(conn, "codex", "graph", 5, True, 0, [], None)
     assert w._provider_for("p1", "graph") == "claude"
     assert w._provider_for("p1", "review") == "opencode"  # graph failures say nothing about reviews
+    for _ in range(3):  # claude fails at everything now, though its graph calls worked before
+        worker._record_call(conn, "claude", "extract", 1, False, 0, [], "workspace routing discovery failed")
+    assert w._provider_for("p1", "graph") == "opencode"
     conn.close()

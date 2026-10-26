@@ -33,6 +33,7 @@ from agent_mem.observe.mem0_adapter import Fact, Mem0Adapter
 POLL_SECONDS = 2.0
 GRAPH_BATCHES = 3
 RECENT_CALLS = 10  # the calls per stage and purpose that decide which stage does housekeeping
+FAILING_CALLS = 3  # ... unless its last calls all failed (doctor names it the same way)
 
 
 def namespace_for(project_id: str | None) -> str:
@@ -437,6 +438,13 @@ class Worker:
         names = list(dict.fromkeys(n for h in harnesses for n in providers.chain(self.config, h, self.conn)))
 
         def success(name: str) -> float:
+            # A CLI failing now ("workspace routing discovery failed") is never paused; its old successes at this
+            # task do not count while its last calls for any task all failed.
+            last = self.conn.execute(
+                "SELECT ok FROM observe_calls WHERE provider = ? ORDER BY id DESC LIMIT ?", (name, FAILING_CALLS)
+            ).fetchall()
+            if len(last) == FAILING_CALLS and not any(int(r[0]) for r in last):
+                return 0.0
             rows = self.conn.execute(
                 "SELECT ok FROM observe_calls WHERE provider = ? AND purpose = ? ORDER BY id DESC LIMIT ?",
                 (name, purpose, RECENT_CALLS),
