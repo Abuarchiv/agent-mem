@@ -674,6 +674,31 @@ def _on_tool(call: _Call) -> None:
         "UPDATE events SET turn_id = ?, command_key = ?, exit_code = ?, error_sig = ?, files_json = ? WHERE id = ?",
         (turn_id, tool_signal.command_key, call.event.exit_code, error_sig, json.dumps(files), call.event_id),
     )
+    _add_to_turn(call, turn_id, tool_signal, files)
+    _raise_importance(call.conn, turn_id, _tool_importance(tool_signal, call.event.tool_failed))
+
+    if tool_signal.packages and call.project_id is not None:
+        ids = [store.entity_id(call.conn, call.project_id, "package", name) for name in tool_signal.packages]
+        store.link(call.conn, "t", turn_id, ids)
+
+    _error_to_fix(call, turn_id, tool_signal, error_sig)
+
+    if tool_signal.command_kind == "revert" and not call.event.tool_failed:
+        _record_dead_end(call.conn, call.project_id, call.session_id, turn_id, tool_signal)
+        store.guards_exist(call.config)
+
+    if tool_signal.category == "edit" and files and call.project_id is not None:
+        _feedback_used(call.conn, call.project_id, call.session_id, files)
+
+    # Copilot does not fire plugin preToolUse hooks (copilot-cli#2540); after the call is the next chance.
+    if call.with_context and not call.response.context:
+        history = _file_history(call.conn, call.config, call.project, call.project_id, call.session_id, tool_signal)
+        if history:
+            call.response.context = history.text
+
+
+def _add_to_turn(call: _Call, turn_id: int, tool_signal: signals.ToolSignal, files: list[str]) -> None:
+    """What the turn's search key and its card list: files, commands, defined names, commits, errors."""
     if tool_signal.category in {"edit", "read"}:
         _append_json(call.conn, turn_id, "files_json", files)
     if tool_signal.command:
@@ -691,55 +716,33 @@ def _on_tool(call: _Call) -> None:
         names = signals.defined_names(tool_signal.category, tool_input)
         _append_json(call.conn, turn_id, "defines_json", names[:12], cap=30)
     if tool_signal.command_kind == "commit" and not call.event.tool_failed:
-        _append_json(
-            call.conn,
-            turn_id,
-            "commits_json",
-            signals.commits_made(call.payload.get("output"), tool_signal.command),
-            cap=20,
-        )
+        commits = signals.commits_made(call.payload.get("output"), tool_signal.command)
+        _append_json(call.conn, turn_id, "commits_json", commits, cap=20)
     if call.payload.get("error_line") and call.payload.get("trust") != "tool_external":
         _append_json(call.conn, turn_id, "errors_json", [str(call.payload["error_line"])[:200]], cap=10)
 
-    _raise_importance(call.conn, turn_id, _tool_importance(tool_signal, call.event.tool_failed))
 
-    if tool_signal.packages and call.project_id is not None:
-        ids = [store.entity_id(call.conn, call.project_id, "package", name) for name in tool_signal.packages]
-        store.link(call.conn, "t", turn_id, ids)
-
-    # Error-to-fix recipes only for the project's own commands: a failed `cat` or `cd` followed by one that worked
-    # is looking around, not a fix worth repeating.
-    project_command = tool_signal.command_kind in PROJECT_COMMANDS
-    if call.event.tool_failed and error_sig and tool_signal.command_key and project_command:
-        recipe = call.conn.execute(
-            "SELECT * FROM recipes WHERE project_id IS ? AND error_sig = ? ORDER BY command_key = ? DESC, successes DESC LIMIT 1",
-            (call.project_id, error_sig, tool_signal.command_key),
-        ).fetchone()
-        if recipe is not None:
-            call.conn.execute("UPDATE recipes SET recurrences = recurrences + 1 WHERE id = ?", (recipe["id"],))
-            if call.with_context:
-                block = inject.recipe_hint(recipe, call.config)
-                if block:
-                    call.response.context = block.text
-    elif not call.event.tool_failed and tool_signal.command_key:
-        if project_command:
-            _resolve_failures(
-                call.conn, call.project_id, call.session_id, turn_id, tool_signal.command_key, call.event.ts
-            )
-            _remember_command(call.conn, call.project_id, tool_signal, call.event.ts)
-
-    if tool_signal.command_kind == "revert" and not call.event.tool_failed:
-        _record_dead_end(call.conn, call.project_id, call.session_id, turn_id, tool_signal)
-        store.guards_exist(call.config)
-
-    if tool_signal.category == "edit" and files and call.project_id is not None:
-        _feedback_used(call.conn, call.project_id, call.session_id, files)
-
-    # Copilot does not fire plugin preToolUse hooks (copilot-cli#2540); after the call is the next chance.
-    if call.with_context and not call.response.context:
-        history = _file_history(call.conn, call.config, call.project, call.project_id, call.session_id, tool_signal)
-        if history:
-            call.response.context = history.text
+def _error_to_fix(call: _Call, turn_id: int, tool_signal: signals.ToolSignal, error_sig: object) -> None:
+    """A failure with a known fix shows the fix; a success after failures turns them into a recipe. Only the
+    project's own commands: a failed `cat` or `cd` followed by one that worked is looking around, not a fix."""
+    if not tool_signal.command_key or tool_signal.command_kind not in PROJECT_COMMANDS:
+        return
+    if not call.event.tool_failed:
+        _resolve_failures(call.conn, call.project_id, call.session_id, turn_id, tool_signal.command_key, call.event.ts)
+        _remember_command(call.conn, call.project_id, tool_signal, call.event.ts)
+        return
+    if not error_sig:
+        return
+    recipe = call.conn.execute(
+        "SELECT * FROM recipes WHERE project_id IS ? AND error_sig = ? ORDER BY command_key = ? DESC, successes DESC LIMIT 1",
+        (call.project_id, error_sig, tool_signal.command_key),
+    ).fetchone()
+    if recipe is None:
+        return
+    call.conn.execute("UPDATE recipes SET recurrences = recurrences + 1 WHERE id = ?", (recipe["id"],))
+    block = inject.recipe_hint(recipe, call.config) if call.with_context else None
+    if block:
+        call.response.context = block.text
 
 
 def _resolve_failures(
