@@ -73,7 +73,9 @@ class _Server(http.server.ThreadingHTTPServer):
         port = config.viewer.port
         self.hosts = {HOST, "localhost"}
         # Docker publishes the port to the host's 127.0.0.1 only; inside the container loopback is unreachable.
-        super().__init__((os.environ.get("AGENT_MEM_VIEWER_BIND") or HOST, port), _Handler)
+        # Anywhere else a wider bind would hand every memory to the network: the Host check stops browsers, not curl.
+        bind = os.environ.get("AGENT_MEM_VIEWER_BIND") if env_flag("AGENT_MEM_IN_DOCKER") else None
+        super().__init__((bind or HOST, port), _Handler)
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):

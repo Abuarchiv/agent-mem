@@ -295,10 +295,23 @@ def test_viewer_cache_stays_bounded_whatever_the_address_says(config: Config, dr
         httpd.server_close()
 
 
+def test_viewer_outside_a_container_stays_on_loopback(config: Config, monkeypatch):
+    """Bound to all addresses, anyone on the network reads every memory: the Host check only needs a forged header."""
+    monkeypatch.setenv("AGENT_MEM_VIEWER_BIND", "0.0.0.0")
+    monkeypatch.delenv("AGENT_MEM_IN_DOCKER", raising=False)
+    httpd = _serve(config)
+    try:
+        assert httpd.server_address[0] == "127.0.0.1"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_viewer_in_a_container_listens_on_all_addresses(config: Config, monkeypatch):
     """In Docker the port is published to the host's 127.0.0.1; inside, the viewer must listen beyond loopback.
     The Host check stays: only 127.0.0.1 and localhost are answered."""
     monkeypatch.setenv("AGENT_MEM_VIEWER_BIND", "0.0.0.0")
+    monkeypatch.setenv("AGENT_MEM_IN_DOCKER", "1")
     httpd = _serve(config)
     try:
         assert httpd.server_address[0] == "0.0.0.0"
