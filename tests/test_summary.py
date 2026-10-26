@@ -271,7 +271,7 @@ def test_briefing_rotates_what_is_injected_but_never_used(driver: Driver, conn, 
 
 
 def test_briefing_leaves_out_what_was_injected_often_and_never_used(driver: Driver, conn, config: Config):
-    """The briefing fills its budget: ranking alone kept the same old notes and lessons in it at 40 to 50 starts
+    """The briefing fills its budget: ranking alone kept the same old lessons in it at 40 to 50 starts
     without one use (14 of 50 entries in the Lernen project). A preference the user stated stays: it is followed
     without being cited."""
     from agent_mem.memory import learn
@@ -279,8 +279,8 @@ def test_briefing_leaves_out_what_was_injected_often_and_never_used(driver: Driv
     driver.prompt("s1", "setup")
     driver.stop("s1", "ok")
     project_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
-    worn = _memory(conn, project_id, "Agent note about an old release check", "native_note")
-    opened = _memory(conn, project_id, "Agent note about the viewer port", "native_note")
+    worn = _memory(conn, project_id, "Lesson about an old release check", "lesson")
+    opened = _memory(conn, project_id, "Lesson about the viewer port", "lesson")
     stated = _memory(conn, project_id, "Always answer in German")
     for n in range(learn.WORN_OUT):
         learn.record_access(conn, [("m", worn), ("m", opened), ("m", stated)], "injected", f"claude:s{n}")

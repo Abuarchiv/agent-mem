@@ -106,14 +106,17 @@ def test_symlinks_big_files_and_unknown_projects_are_skipped(conn, config: Confi
     assert "password" not in bodies
 
 
-def test_each_harness_sees_the_other_harness_notes_but_not_its_own(conn, config: Config, project: Path):
+def test_each_harness_finds_the_other_harness_notes_but_not_its_own(conn, config: Config, project: Path):
+    """Notes come with the request they fit, not in the start block: 1,105 start-block notes in 14 days were never
+    opened or cited, while 37 found by a request or a search were opened."""
     _claude_note(project, "worker-drain.md", NOTE)
     _codex_note(project, "s1.md", "Codex found the pnpm lockfile is authoritative")
     notes.ingest(conn, config)
-    claude = Driver(conn, config, project, harness="claude").start("c1").context or ""
-    codex = Driver(conn, config, project, harness="codex").start("x1").context or ""
-    assert "pnpm lockfile" in claude and "drains its queue" not in claude
-    assert "drains its queue" in codex and "pnpm lockfile" not in codex
+    claude, codex = Driver(conn, config, project, harness="claude"), Driver(conn, config, project, harness="codex")
+    assert "pnpm lockfile" not in (claude.start("c1").context or "")
+    assert "pnpm lockfile" in (claude.prompt("c1", "Is the pnpm lockfile authoritative?").context or "")
+    assert "drains its queue" not in (claude.prompt("c1", "Does the observer drain its queue?").context or "")
+    assert "drains its queue" in (codex.prompt("x1", "Does the observer drain its queue?").context or "")
 
 
 def test_notes_can_be_switched_off(conn, config: Config, project: Path):

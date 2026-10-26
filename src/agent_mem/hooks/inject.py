@@ -335,17 +335,13 @@ def _briefing_lines(
     profile = _profile_line(conn, project_id)
     if profile:
         lines.append((profile, None))
-    # At scale 1: 5 memories, 3 lessons, 2 notes, 10 work entries; render cuts the end when the budget is full.
+    # At scale 1: 5 memories, 3 lessons, 10 work entries; render cuts the end when the budget is full. Another
+    # harness's notes (memory/notes.py) come only with a request they fit: 1,105 in start blocks went unused.
     memories = _memory_lines(conn, project_id, harness, limit=round(5 * scale), session_id=session_id)
     lines.extend(memories)
     # Lessons have their own slots: rules for next time, ranked by use like the rest (``observe/summary.py``).
     lines.extend(
         _memory_lines(conn, project_id, harness, limit=round(3 * scale), kinds=("lesson",), session_id=session_id)
-    )
-    # Another harness's notes (memory/notes.py) get their own slots: long session summaries would otherwise
-    # take every fact slot of a project the user mostly works in with that harness.
-    lines.extend(
-        _memory_lines(conn, project_id, harness, limit=round(2 * scale), kinds=("native_note",), session_id=session_id)
     )
     lines.extend(_focus_lines(conn, config, project_id, session_id, harness, {owner for _, owner in memories}))
     lines.extend(_open_errors(conn, project_id, session_id))
