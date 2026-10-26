@@ -218,11 +218,11 @@ class _Worker(threading.Thread):
                 self.summary = inject.session_summary(conn, session, _color(self.event.harness))
         except db.MigrationPendingError as error:
             # The indexer migrates (with backup) outside the deadline and then replays the spool.
-            self.error = f"{type(error).__name__}: {error}"
+            self.error = logutil.describe(error)
             self.spool()
             _spawn_for_migration(self.config)
         except sqlite3.OperationalError as error:
-            self.error = f"{type(error).__name__}: {error}"
+            self.error = logutil.describe(error)
             self.spool()
             self.read_only_context()
         except (
@@ -230,10 +230,10 @@ class _Worker(threading.Thread):
             db.MigrationInProgressError,
             sqlite3.DatabaseError,
         ) as error:
-            self.error = f"{type(error).__name__}: {error}"
+            self.error = logutil.describe(error)
             self.spool()
         except Exception as error:
-            self.error = f"{type(error).__name__}: {error}"
+            self.error = logutil.describe(error)
             self.spool()
             if conn is not None:
                 with contextlib.suppress(sqlite3.Error):
@@ -448,7 +448,7 @@ def main(argv: list[str], stdin_bytes: bytes | None = None) -> int:
             config = load()
             logutil.write(config.log_dir, "hook", harness=harness, error=f"unexpected {type(error).__name__}")
             # The event is lost; a note makes doctor and the viewer say so instead of staying silent.
-            _quarantine_note(config, harness, event_name, f"unexpected {type(error).__name__}: {error}")
+            _quarantine_note(config, harness, event_name, f"unexpected {logutil.describe(error)}")
         text = ""
     if text:
         sys.stdout.write(text)
