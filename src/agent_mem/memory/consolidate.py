@@ -3,7 +3,8 @@
 1. Hebbian edges decay; weak edges are pruned.
 2. Preferences seen in two or more projects become global.
 3. Newer facts/decisions with the same title supersede older ones.
-4. Memories anchored to deleted files are invalidated; anchors are recorded.
+4. Memories anchored to deleted files are invalidated; anchors are recorded. So are memories whose every path under
+   home is gone.
 5. Rules that never fire expire.
 6. A-MEM-style linking: new memories add their key to their nearest neighbours.
 7. Recorded test/build/lint/install commands keep only the part that does the job; scripts are dropped.
@@ -12,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 from collections.abc import Callable
@@ -24,6 +26,7 @@ from agent_mem.memory import learn, store
 reusable_command = signals.reusable_command
 
 _NORMALIZE = re.compile(r"[\W_]+")  # Unicode-aware: Cyrillic, CJK etc. keep their letters
+_PATH = re.compile(r"(?<![\w/.~-])~?/[^\s`'\"()<>\[\]{},;:*|]+")  # ends at a space: see _gone
 
 
 def _norm(text: str) -> str:
@@ -51,6 +54,7 @@ def run(
         stats["entities_dropped"] = _drop_noise_entities(conn)
     stats["anchors"] = record_anchors(conn)
     stats["invalidated"] = _invalidate_deleted(conn)
+    stats["paths_gone"] = _retire_gone_paths(conn)
     if embedder_matrix is not None:
         stats["linked"] = embedder_matrix(conn)
     with db.transaction(conn):
@@ -260,6 +264,42 @@ def _invalidate_deleted(conn: sqlite3.Connection) -> int:
                 store.supersede(conn, int(row["id"]), None)  # its mem0 copy goes too, or extraction keeps it current
             count += 1
     return count
+
+
+def _gone(text: str) -> bool | None:
+    """True when ``text`` is a path under home that is missing while its folder is there. None (no evidence) when the
+    folder is missing too (another machine, a moved tree), outside home (``/opt/models`` lives in a Docker image) or
+    when the path was cut at a space (``~/Library/Application`` of ``Application Support``)."""
+    path = Path(os.path.expanduser(text.rstrip(".")))
+    if not path.is_relative_to(Path.home()) or path == Path.home():
+        return None
+    if path.exists():
+        return False
+    try:
+        siblings = os.listdir(path.parent)
+    except OSError:
+        return None
+    return None if any(name.startswith(path.name + " ") for name in siblings) else True
+
+
+def _retire_gone_paths(conn: sqlite3.Connection) -> int:
+    """A memory whose every path under home is gone describes a place that no longer exists: M2635 kept sending each
+    session to a deleted clone. Notes and summaries tell what happened and stay; a dead end names the missing file as
+    its failure."""
+    rows = conn.execute(
+        "SELECT id, title, body FROM memories WHERE invalid_at IS NULL "
+        "AND kind NOT IN ('native_note', 'summary', 'dead_end') AND (title || COALESCE(body, '')) LIKE '%/%'"
+    ).fetchall()
+    gone = []
+    for row in rows:
+        found = [_gone(path) for path in _PATH.findall(f"{row['title']} {row['body'] or ''}")]
+        verdicts = [state for state in found if state is not None]
+        if verdicts and all(verdicts):
+            gone.append(int(row["id"]))
+    with db.transaction(conn):
+        for memory_id in gone:
+            store.supersede(conn, memory_id, None)
+    return len(gone)
 
 
 def link_neighbours(conn: sqlite3.Connection, model: str, since: str | None, threshold: float = 0.85) -> int:

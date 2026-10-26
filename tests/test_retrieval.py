@@ -254,6 +254,33 @@ def test_a_decision_about_a_deleted_file_leaves_mem0_too(driver: Driver, conn, c
     assert [r[0] for r in conn.execute("SELECT mem0_id FROM observe_forget")] == ["abc"]
 
 
+def test_a_memory_whose_only_paths_are_gone_is_retired(driver: Driver, conn, config: Config, tmp_path, monkeypatch):
+    """M2635 sent every session to the clone `~/Company/agent-mem-audit` after it was deleted. A path proves nothing
+    when its folder is missing too (another machine, a moved tree), when it was cut at a space, or outside home
+    (`/opt/models` lives in the Docker image); a dead end names the missing file as its failure."""
+    home = tmp_path / "home"
+    (home / "Company" / "agent-mem").mkdir(parents=True)
+    (home / "Library" / "Application Support").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    driver.prompt("s1", "setup")
+    texts = {
+        "fact": "The audit runs in the clone `~/Company/agent-mem-audit` on branch qualitaet.",
+        "lesson": f"Run checks in {home}/Company/agent-mem-audit with the workdir field.",
+        "decision": "The repo moved to ~/Company/agent-mem, the clone ~/Company/agent-mem-audit is gone.",
+        "preference": "The DB lives in ~/Library/Application Support/agent-mem.",
+        "dead_end": "`docker info` fails: ~/.orbstack/run/docker.sock is missing while OrbStack is off.",
+    }
+    texts_kept = ["Models go to /opt/models in the image.", "Notes are in ~/Old/tree/notes.md."]
+    with db.transaction(conn):
+        for kind, text in [*texts.items(), *(("fact", t) for t in texts_kept)]:
+            store.add_memory(conn, project_id=_pid(conn), kind=kind, title=text, body="", source="agent", trust="agent")
+
+    assert consolidate.run(conn, config)["paths_gone"] == 2
+
+    retired = "SELECT kind FROM memories WHERE invalid_at IS NOT NULL ORDER BY kind"
+    assert [r[0] for r in conn.execute(retired)] == ["fact", "lesson"]
+
+
 def test_link_neighbours_adds_related_keys(driver: Driver, conn, config: Config):
     driver.prompt("s1", "setup")
     pid = _pid(conn)
