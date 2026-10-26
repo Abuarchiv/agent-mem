@@ -1,0 +1,253 @@
+{
+ "note": "2026-10-13 ~20:30: 12+12 records sampled at random from each store since 13:00, paraphrased; 8 off-topic reused",
+ "cases": [
+  {
+   "id": "ncm1",
+   "src": "claude-mem",
+   "q": "Welchen Pfad nimmt agent-mem, wenn mehrere registrierte Projektpfade zum Arbeitsordner passen?",
+   "expect": [
+    "longest",
+    "längste"
+   ]
+  },
+  {
+   "id": "ncm2",
+   "src": "claude-mem",
+   "q": "Welche Header entfernt die Schwärzung in agent-mem jetzt zusätzlich ganz?",
+   "expect": [
+    "Cookie"
+   ]
+  },
+  {
+   "id": "ncm3",
+   "src": "claude-mem",
+   "q": "Welche Installationsskripte liegen jetzt im sdist von agent-mem?",
+   "expect": [
+    "install.ps1"
+   ]
+  },
+  {
+   "id": "ncm4",
+   "src": "claude-mem",
+   "q": "Unter welchem meta-Schlüssel speichert agent-mem die Pause eines Faktenmodells?",
+   "expect": [
+    "observe.pause"
+   ]
+  },
+  {
+   "id": "ncm5",
+   "src": "claude-mem",
+   "q": "Woran merkt sich agent-mem, dass die Graph-Extraktion eines Projekts fehlgeschlagen ist?",
+   "expect": [
+    "graph.failed"
+   ]
+  },
+  {
+   "id": "ncm6",
+   "src": "claude-mem",
+   "q": "Wie viele gültige, nach mem0 gespiegelte Fakten zählte der Drift-Abgleich?",
+   "expect": [
+    "545"
+   ]
+  },
+  {
+   "id": "ncm7",
+   "src": "claude-mem",
+   "q": "Welche Schema-Migration folgt auf 006_work_tokens.sql?",
+   "expect": [
+    "007_relations"
+   ]
+  },
+  {
+   "id": "ncm8",
+   "src": "claude-mem",
+   "q": "In welchem Commit wurde build_snapshot aufgeteilt und ungenutztes CSS entfernt?",
+   "expect": [
+    "8760496"
+   ]
+  },
+  {
+   "id": "ncm9",
+   "src": "claude-mem",
+   "q": "Welcher Commit holt nur noch selbst zurückgezogene Notizen zurück?",
+   "expect": [
+    "f2c4796"
+   ]
+  },
+  {
+   "id": "ncm10",
+   "src": "claude-mem",
+   "q": "In welche Funktionen wurde das Zeichnen des Graphen im Viewer aufgeteilt?",
+   "expect": [
+    "drawEdges"
+   ]
+  },
+  {
+   "id": "ncm11",
+   "src": "claude-mem",
+   "q": "Welche Funktion nahm beim schrittweisen Lesen des Transkripts kein offset-Argument?",
+   "expect": [
+    "_claude_usage"
+   ]
+  },
+  {
+   "id": "ncm12",
+   "src": "claude-mem",
+   "q": "Womit bildet der Panel-Kopf in inject.py die Mehrzahl?",
+   "expect": [
+    "chr(115)"
+   ]
+  },
+  {
+   "id": "nam1",
+   "src": "agent-mem",
+   "q": "Ab wie vielen Zeichen pro Sessionstart bräuchte Claude Code einen zweiten Hook?",
+   "expect": [
+    "10.000",
+    "10000",
+    "10,000"
+   ]
+  },
+  {
+   "id": "nam2",
+   "src": "agent-mem",
+   "q": "Welche Umgebungsvariable bestimmt, wohin setup copilot schreibt?",
+   "expect": [
+    "COPILOT_HOME"
+   ]
+  },
+  {
+   "id": "nam3",
+   "src": "agent-mem",
+   "q": "Welche Testhilfe simuliert in den Session-Tests die Hook-Ereignisse?",
+   "expect": [
+    "Driver"
+   ]
+  },
+  {
+   "id": "nam4",
+   "src": "agent-mem",
+   "q": "Für welche Befehle bildet agent-mem Fehler-zu-Fix-Rezepte?",
+   "expect": [
+    "PROJECT_COMMANDS"
+   ]
+  },
+  {
+   "id": "nam5",
+   "src": "agent-mem",
+   "q": "Ab welcher Ähnlichkeit ersetzt ein neuer Fakt einen alten ohne Modellaufruf?",
+   "expect": [
+    "0,90",
+    "0.90",
+    "0.9"
+   ]
+  },
+  {
+   "id": "nam6",
+   "src": "agent-mem",
+   "q": "Was passierte, als die Suche hart nach Zeitwörtern filterte?",
+   "expect": [
+    "Wochenende",
+    "weekend"
+   ]
+  },
+  {
+   "id": "nam7",
+   "src": "agent-mem",
+   "q": "Wie lange blockierte spaCy in link_new die Hooks?",
+   "expect": [
+    "8 s",
+    "8s",
+    "8 Sekunden"
+   ]
+  },
+  {
+   "id": "nam8",
+   "src": "agent-mem",
+   "q": "Welche Variablen braucht eine Testinstallation von agent-mem in einer Sandbox?",
+   "expect": [
+    "UV_TOOL_BIN_DIR"
+   ]
+  },
+  {
+   "id": "nam9",
+   "src": "agent-mem",
+   "q": "Welcher Datenbankindex beschleunigt die Fehlerauflösung im Hook?",
+   "expect": [
+    "events_session_ts"
+   ]
+  },
+  {
+   "id": "nam10",
+   "src": "agent-mem",
+   "q": "Wie viele erfolgreiche Turns galten fälschlich als Fehler, weil ein cat auf eine fehlende Datei zählte?",
+   "expect": [
+    "4 of 7",
+    "4 von 7"
+   ]
+  },
+  {
+   "id": "nam11",
+   "src": "agent-mem",
+   "q": "Was soll man testen, bevor man eine geänderte Meldung von agent-mem search committet?",
+   "expect": [
+    "zero-hit",
+    "ohne Treffer",
+    "zero hit",
+    "without results",
+    "ohne Ergebnis"
+   ]
+  },
+  {
+   "id": "nam12",
+   "src": "agent-mem",
+   "q": "In wie viele Prüfgruppen ist agent-mem doctor aufgeteilt?",
+   "expect": [
+    "vier Prüfgruppen",
+    "four check groups",
+    "four groups",
+    "vier Gruppen"
+   ]
+  },
+  {
+   "id": "off1",
+   "abstain": true,
+   "q": "Wie backe ich ein Sauerteigbrot?"
+  },
+  {
+   "id": "off2",
+   "abstain": true,
+   "q": "Was ist die Hauptstadt von Kanada?"
+  },
+  {
+   "id": "off3",
+   "abstain": true,
+   "q": "Welche Aktie sollte ich dieses Jahr kaufen?"
+  },
+  {
+   "id": "off4",
+   "abstain": true,
+   "q": "Wie lange muss ein Ei kochen, damit es weich bleibt?"
+  },
+  {
+   "id": "off5",
+   "abstain": true,
+   "q": "Wer hat die Fußball-WM 2014 gewonnen?"
+  },
+  {
+   "id": "off6",
+   "abstain": true,
+   "q": "Wie wird das Wetter morgen in Berlin?"
+  },
+  {
+   "id": "off7",
+   "abstain": true,
+   "q": "Übersetze Guten Morgen ins Japanische"
+  },
+  {
+   "id": "off8",
+   "abstain": true,
+   "q": "Was kostet ein Flug nach Tokio im Dezember?"
+  }
+ ]
+}

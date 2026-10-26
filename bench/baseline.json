@@ -1,0 +1,28 @@
+{
+ "fixture": {
+  "hit@1": 1.0,
+  "injected_hit@1": 0.9,
+  "injected_abstention": 1.0,
+  "mcp_hit@1": 0.95,
+  "mcp_abstention": 1.0
+ },
+ "lme40": {
+  "R@5": 1.0,
+  "All@5": 0.85
+ },
+ "questions": {
+  "auto_am": 20,
+  "search_am": 23,
+  "silent_am": 8,
+  "prompt_chars_am": 89480
+ },
+ "questions_new": {
+  "auto_am": 16,
+  "search_am": 16,
+  "silent_am": 8,
+  "prompt_chars_am": 49099
+ },
+ "start": {
+  "prompt_chars_start": 8896
+ }
+}

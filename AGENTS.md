@@ -28,7 +28,9 @@ Binding rules for every agent and contributor.
   tests && uv run ruff format --check src tests && uv run pyright`. Tests marked `local` need the
   observer extra and a cached embedding model; run them by hand before a release. `uv.lock` is
   committed so pins are reproducible. Never run `uv sync` while a measurement is running against the
-  same venv. Before a release: CI green on Linux, macOS (arm64, x64) and Windows, plus one real
+  same venv. A change to what is found or injected runs `uv run python bench/check.py` (fixture,
+  LongMemEval-40, versus questions on a fresh copy of the live database; `bench/pre-push` runs it
+  before every push). Before a release: CI green on Linux, macOS (arm64, x64) and Windows, plus one real
   session per harness by hand (capture, recall in a new session, compaction, uninstall).
 - **R10 Git.** Local commits only, no push, no releases, until the user explicitly allows it. No AI
   attributions in commits, PRs, tags or files. Never commit the user's own uncommitted deletions or
