@@ -440,7 +440,8 @@ def _on_prompt(call: _Call) -> None:
         "SELECT id, prompt, started_at FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT 1", (call.session_id,)
     ).fetchone()
     if (
-        latest is not None
+        call.event.harness == "opencode"  # a developer saying the same thing twice means it twice
+        and latest is not None
         and prompt
         and latest["prompt"] == prompt
         and abs(timeutil.hours_between(latest["started_at"], timeutil.parse(call.event.ts))) * 3600 < REPEAT_SECONDS
