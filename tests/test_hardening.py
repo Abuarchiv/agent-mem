@@ -370,3 +370,15 @@ def test_purge_of_a_path_inside_a_project_deletes_nothing(driver: Driver, config
         assert os.path.normcase(f"--project {project}") in os.path.normcase(capsys.readouterr().err)
     assert driver.conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 1
     assert cli.main([*base, "purge", "--project", str(project), "--yes"]) == 0
+
+
+def test_doctor_fix_reports_a_failing_index_run(config, monkeypatch):
+    from agent_mem.cli import health
+    from agent_mem.memory import indexer
+
+    def broken(*args, **kwargs):
+        raise ValueError("model file damaged")
+
+    monkeypatch.setattr(indexer, "run", broken)
+    failed = [c for c in health.doctor(config, fix=True) if c.name == "index after fix"]
+    assert failed and not failed[0].ok and "model file damaged" in failed[0].detail

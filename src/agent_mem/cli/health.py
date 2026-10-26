@@ -230,8 +230,10 @@ def doctor(config: Config, *, fix: bool = False) -> list[Check]:
     if fix:
         from agent_mem.memory import indexer
 
-        with contextlib.suppress(Exception):
+        try:
             indexer.run(config, allow_download=False)
+        except Exception as error:  # the indexer records it in health too; doctor shows it instead of crashing
+            checks.append(Check("index after fix", False, f"{type(error).__name__}: {error}", "Run `agent-mem index`."))
     return checks
 
 

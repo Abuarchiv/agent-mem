@@ -219,22 +219,22 @@ class _Worker(threading.Thread):
         except db.MigrationPendingError as error:
             # The indexer migrates (with backup) outside the deadline and then replays the spool.
             self.error = f"{type(error).__name__}: {error}"
-            self._spool()
+            self.spool()
             _spawn_for_migration(self.config)
         except sqlite3.OperationalError as error:
             self.error = f"{type(error).__name__}: {error}"
-            self._spool()
-            self._read_only_context()
+            self.spool()
+            self.read_only_context()
         except (
             db.SchemaTooNewError,
             db.MigrationInProgressError,
             sqlite3.DatabaseError,
         ) as error:
             self.error = f"{type(error).__name__}: {error}"
-            self._spool()
+            self.spool()
         except Exception as error:
             self.error = f"{type(error).__name__}: {error}"
-            self._spool()
+            self.spool()
             if conn is not None:
                 with contextlib.suppress(sqlite3.Error):
                     db.record_health(conn, f"hook:{self.event.harness}", self.error)
@@ -243,7 +243,7 @@ class _Worker(threading.Thread):
                 with contextlib.suppress(sqlite3.Error):
                     conn.close()
 
-    def _read_only_context(self) -> None:
+    def read_only_context(self) -> None:
         # WAL lets a reader in while another process holds the write lock: the session still gets its memory,
         # and the spooled event is recorded later.
         if self.event.kind not in {"session_start", "prompt"} or self.event.extra.get("reads_context") is False:
@@ -255,7 +255,7 @@ class _Worker(threading.Thread):
             finally:
                 conn.close()
 
-    def _spool(self) -> None:
+    def spool(self) -> None:
         # Called by the worker on error and by the main thread on deadline; both can race.
         with self._spool_lock:
             if self.spooled:
@@ -303,19 +303,17 @@ def run(
         # Processed now, it would overtake that one; a Stop would answer the wrong turn, a prompt close a running
         # one. The indexer replays the spool in order.
         worker = _Worker(config, event)
-        worker._spool()
+        worker.spool()
         _spawn_for_migration(config, every=REPLAY_THROTTLE_SECONDS)  # the session waits until the replay ran
         logutil.write(
             config.log_dir, "hook", harness=harness, kind=event.kind, error=worker.error or "queued behind spool"
         )
-        worker._read_only_context()  # queued for recording, but the agent still gets its memory
+        worker.read_only_context()  # queued for recording, but the agent still gets its memory
         output = render(harness, event, worker.response) if worker.response is not None else None
         if not worker.spooled and harness in TERMINAL:
             text = f"agent-mem cannot save events ({worker.error}). This session is not being recorded."
             if _notice_due(config, text):
-                return _dump(
-                    harness, {**(output or {}), "systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text}
-                )
+                return _dump(harness, {**(output or {}), "systemMessage": _red(text, harness)})
         # A lock of a few seconds passes unnoticed. Events waiting longer mean the database is unusable: say so,
         # or a broken database would go silent after its first error.
         text = "agent-mem cannot save events: they wait in the spool. Run `agent-mem doctor`."
@@ -324,13 +322,13 @@ def run(
             and spool.oldest_age(config.spool_dir) >= SPOOL_STUCK_SECONDS
             and (event.kind == "session_start" or _notice_due(config, text))
         ):
-            output = {**(output or {}), "systemMessage": f"\x1b[31m{text}\x1b[0m" if _color(harness) else text}
+            output = {**(output or {}), "systemMessage": _red(text, harness)}
         return _dump(harness, output) if output else ""
     worker = _Worker(config, event)
     worker.start()
     worker.join(config.hook_deadline_ms / 1000)
     if worker.is_alive():
-        worker._spool()
+        worker.spool()
         logutil.write(config.log_dir, "hook", harness=harness, kind=event.kind, error="deadline")
         return ""
     if worker.error:
@@ -359,6 +357,10 @@ def _dump(harness: str, output: dict[str, Any]) -> str:
     rest = {key: value for key, value in output.items() if key != "systemMessage"}
     line = json.dumps({"type": "progress", "message": output["systemMessage"]})
     return f"{line}\n{json.dumps(rest)}" if rest else line
+
+
+def _red(text: str, harness: str) -> str:
+    return f"\x1b[31m{text}\x1b[0m" if _color(harness) else text
 
 
 def _color(harness: str = "claude") -> bool:
