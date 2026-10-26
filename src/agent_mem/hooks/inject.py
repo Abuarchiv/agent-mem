@@ -190,13 +190,18 @@ def _last_session_lines(
     return lines
 
 
+# A turn with no recorded answer and no changed file has a title like "bug hunt asked for, nothing recorded": 61 of 325
+# work log entries, nothing behind them to open.
+_DID_SOMETHING = "AND (COALESCE(answer, '') != '' OR COALESCE(files_json, '[]') != '[]')"
+
+
 def recent_work(conn: sqlite3.Connection, session_id: str, limit: int = 8) -> list[tuple[str, str, str, str]]:
     """(id, time, type, title) of the latest titled turns in this project, oldest first: the terminal's work log."""
     row = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
     if row is None or row[0] is None:
         return []
     rows = conn.execute(
-        "SELECT id, started_at, type, title FROM turns WHERE project_id = ? AND title IS NOT NULL "
+        f"SELECT id, started_at, type, title FROM turns WHERE project_id = ? AND title IS NOT NULL {_DID_SOMETHING} "
         "ORDER BY started_at DESC, id DESC LIMIT ?",
         (row[0], limit),
     ).fetchall()
@@ -380,7 +385,7 @@ def _work_lines(
 ) -> list[tuple[str, tuple[str, int] | None]]:
     rows = conn.execute(
         "SELECT id, started_at, type, title FROM turns WHERE project_id = ? AND session_id != ? AND title IS NOT NULL "
-        "ORDER BY started_at DESC, id DESC LIMIT ?",
+        f"{_DID_SOMETHING} ORDER BY started_at DESC, id DESC LIMIT ?",
         (project_id, session_id, limit + len(taken)),
     ).fetchall()
     picked = [r for r in rows if ("t", int(r["id"])) not in taken][:limit]

@@ -391,3 +391,17 @@ def test_a_memory_found_by_two_parts_of_the_briefing_is_shown_once():
     assert block is not None
     assert block.text.count("[M7 ") == 1
     assert block.owners == [("m", 7)]
+
+
+def test_the_work_log_leaves_out_turns_with_no_answer_and_no_change(driver: Driver, conn):
+    """ "Bug hunt asked for, nothing recorded" was 61 of 325 work log titles: tokens at every start, nothing to open."""
+    session_id, (first, second) = _session(driver, conn)
+    conn.execute("UPDATE turns SET answer = '', files_json = '[]' WHERE id = ?", (second,))
+    conn.execute("UPDATE turns SET title = 'Real work', answer = 'Done.' WHERE id = ?", (first,))
+    conn.execute("UPDATE turns SET title = 'Nothing recorded' WHERE id = ?", (second,))
+    project_id = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()[0]
+
+    lines = " ".join(line for line, _ in inject._work_lines(conn, project_id, "claude:s9", set(), limit=5))
+
+    assert "Real work" in lines and "Nothing recorded" not in lines
+    assert [t for _, _, _, t in inject.recent_work(conn, session_id)] == ["Real work"]
