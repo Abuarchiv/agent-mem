@@ -124,8 +124,38 @@ def test_cited_ids_count_as_use(driver: Driver, conn):
     driver.prompt("s1", "first")
     driver.stop("s1", "done")
     driver.prompt("s2", "second")
+    learn.record_access(conn, [("t", 1)], "shown", "claude:s2")
     driver.stop("s2", "Following T1 as before.")
     assert conn.execute("SELECT COUNT(*) FROM accesses WHERE kind = 'cited' AND owner_id = 1").fetchone()[0] == 1
+
+
+def test_an_id_the_session_never_saw_is_no_citation(driver: Driver, conn):
+    """Example ids in code and tests (`mem_get(["T42"])`) were 49 of 69 citations; one turn with six ranked first
+    for unrelated questions."""
+    for n in range(3):
+        driver.prompt("s1", f"turn {n}")
+        driver.stop("s1", "done")
+    driver.prompt("s2", "second")
+    learn.record_access(conn, [("t", 2)], "get")  # mem_get carries no session
+    driver.stop("s2", 'Following T2; the test calls `mem_get(["T1"])`.')
+    cited = conn.execute("SELECT owner_id FROM accesses WHERE kind = 'cited'").fetchall()
+    assert [r[0] for r in cited] == [2]
+
+
+def test_citations_stored_before_the_check_lose_the_unseen_once(driver: Driver, conn):
+    driver.prompt("s1", "first")
+    driver.stop("s1", "done")
+    driver.prompt("s2", "second")
+    learn.record_access(conn, [("t", 1)], "injected", "claude:s2")
+    learn.record_access(conn, [("t", 1), ("m", 7)], "cited", "claude:s2")
+    learn.record_access(conn, [("m", 7)], "cited", "claude:s2", "2020-01-01T00:00:00.000Z")  # too old to judge
+
+    assert learn.drop_unseen_citations(conn, "2026-01-01T00:00:00.000Z") == 1
+
+    left = conn.execute("SELECT owner_type, owner_id, ts FROM accesses WHERE kind = 'cited' ORDER BY ts").fetchall()
+    assert [(r[0], r[1]) for r in left] == [("m", 7), ("t", 1)] and left[0][2].startswith("2020")
+    learn.record_access(conn, [("m", 7)], "cited", "claude:s2")
+    assert learn.drop_unseen_citations(conn, "2026-01-01T00:00:00.000Z") == 0  # once per database
 
 
 def _project_id(conn):

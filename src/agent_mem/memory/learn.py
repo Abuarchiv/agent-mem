@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from agent_mem.core import timeutil
+from agent_mem.core import db, timeutil
 
 DECAY = 0.5
 # An injection is an exposure, not a retrieval: counted as one, it would raise the activation of whatever was
@@ -122,6 +122,38 @@ def record_access(
         "INSERT INTO accesses(owner_type, owner_id, ts, kind, session_id) VALUES (?, ?, ?, ?, ?)",
         [(owner_type, owner_id, stamp, kind, session_id) for owner_type, owner_id in owners],
     )
+
+
+def seen(conn: sqlite3.Connection, owner: tuple[str, int], session_id: str | None, since: str, until: str) -> bool:
+    """Whether a session saw ``owner`` before ``until``: injected into it, shown by its search or opened. MCP calls
+    carry no session, so one from ``since`` (the turn's start) on counts too. An id the session never saw is an
+    example in code or a test (`mem_get(["T42"])`), not a citation: 49 of 69 "cited" were such ids, and one turn
+    with six of them ranked first for unrelated questions."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM accesses WHERE owner_type = ? AND owner_id = ? AND kind IN ('shown', 'injected', 'get') "
+            "AND ts <= ? AND (session_id = ? OR (session_id IS NULL AND ts >= ?)) LIMIT 1",
+            (owner[0], owner[1], until, session_id, since),
+        ).fetchone()
+        is not None
+    )
+
+
+def drop_unseen_citations(conn: sqlite3.Connection, since: str) -> int:
+    """Once per database: citations recorded before :func:`seen` was checked lose those the session never saw.
+    Only from ``since`` on, where the exposures are still kept; older ones cannot be judged."""
+    if db.get_meta(conn, "unseen_citations_dropped"):
+        return 0
+    rows = conn.execute(
+        "SELECT a.id, a.owner_type, a.owner_id, a.session_id, a.ts, (SELECT MAX(t.started_at) FROM turns t "
+        "WHERE t.session_id = a.session_id AND t.started_at <= a.ts) FROM accesses a WHERE a.kind = 'cited' "
+        "AND a.ts >= ?",
+        (since,),
+    ).fetchall()
+    unseen = [(row[0],) for row in rows if not seen(conn, (row[1], int(row[2])), row[3], row[5] or row[4], row[4])]
+    conn.executemany("DELETE FROM accesses WHERE id = ?", unseen)
+    db.set_meta(conn, "unseen_citations_dropped", timeutil.iso())
+    return len(unseen)
 
 
 def hebbian_update(conn: sqlite3.Connection, entity_ids: list[int], ts: str | None = None) -> None:

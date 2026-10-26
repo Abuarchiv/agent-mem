@@ -886,18 +886,14 @@ def _on_stop(call: _Call) -> None:
         call.conn.execute("UPDATE turns SET answer = ? WHERE id = ?", (answer, turn_id))
         _raise_importance(call.conn, turn_id, signals.IMPORTANCE["answer"] if len(answer) > 200 else 0.3)
         cited = {(kind.lower(), int(number)) for kind, number in _CITED.findall(answer)}
-        existing = [o for o in cited if _owner_exists(call.conn, o)]
-        learn.record_access(call.conn, existing, "cited", call.session_id)
+        now = timeutil.iso()
+        seen = [o for o in cited if learn.seen(call.conn, o, call.session_id, turn["started_at"], now)]
+        learn.record_access(call.conn, seen, "cited", call.session_id, now)
     if turn["outcome"] == "open":
         _close_turn(call.conn, call.config, turn_id, "ok", call.event.ts)
     else:
         store.index_turn(call.conn, turn_id)
     call.response.wants_indexer = True
-
-
-def _owner_exists(conn: sqlite3.Connection, owner: tuple[str, int]) -> bool:
-    table = "turns" if owner[0] == "t" else "memories"
-    return conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (owner[1],)).fetchone() is not None
 
 
 def _on_subagent_stop(call: _Call) -> None:

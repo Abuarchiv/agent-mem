@@ -12,6 +12,7 @@ import os
 import sqlite3
 import time
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,7 @@ from agent_mem.core import db, identity, logutil, paths, spool, timeutil
 from agent_mem.core.config import Config
 from agent_mem.core.events import Event, PayloadError
 from agent_mem.hooks import capture
-from agent_mem.memory import consolidate, notes, store, work
+from agent_mem.memory import consolidate, learn, notes, store, work
 
 if TYPE_CHECKING:  # numpy and fastembed load only when the embedder does
     from agent_mem.memory.semantic import Embedder
@@ -70,7 +71,6 @@ def recover_if_corrupt(config: Config) -> bool:
 
 
 def retention(conn: sqlite3.Connection, config: Config) -> dict[str, int]:
-    from datetime import timedelta
 
     now = timeutil.now()
     payload_cutoff = timeutil.iso(now - timedelta(days=config.retention.payload_days))
@@ -187,6 +187,9 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         stats["defines_backfilled"] = store.backfill_defines(conn)
         stats["observer_facts_cleaned"] = store.clean_observer_facts(conn)
         stats["note_headers_cleaned"] = notes.clean_headers(conn)
+        stats["unseen_citations_dropped"] = learn.drop_unseen_citations(
+            conn, timeutil.iso(timeutil.now() - timedelta(days=config.retention.access_days))
+        )
     # Outside the transaction: it runs git (about 25 ms per repository), and hooks wait 150 ms for the write lock.
     stats["identity_aliases"] = identity.record_aliases(conn)
     _mark_guards(conn, config)
