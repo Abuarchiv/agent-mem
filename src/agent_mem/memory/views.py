@@ -8,7 +8,7 @@ import sqlite3
 from agent_mem.core import timeutil
 from agent_mem.core.signals import first_line, request_text
 from agent_mem.memory import consolidate, learn, search
-from agent_mem.memory.store import owner_label, parse_owner
+from agent_mem.memory.store import parse_owner
 
 AGENT_FOOTER = "Use mem_get with ids for details, mem_timeline for context."
 
@@ -153,7 +153,3 @@ def timeline(conn: sqlite3.Connection, raw_id: str, before: int = 3, after: int 
             + (f"\n    → {first_line(row['answer'], 160)}" if row["answer"] else "")
         )
     return "\n".join(lines)
-
-
-def label(owner: tuple[str, int]) -> str:
-    return owner_label(*owner)

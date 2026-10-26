@@ -196,5 +196,5 @@ def review(conn: sqlite3.Connection, llm: Any, project_id: str) -> int:
     pairs = parse(text, facts)
     with db.transaction(conn):
         for old, new in pairs:
-            store.retire(conn, old, new)
+            store.supersede(conn, old, new)
     return len(pairs)

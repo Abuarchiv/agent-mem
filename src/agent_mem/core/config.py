@@ -139,16 +139,8 @@ class Observe:
         ]
 
     def stage_for(self, harness: str) -> tuple[str, str] | None:
-        """The stage and model turns from ``harness`` go to first, as in ``observe.providers.chain`` (without
-        pauses, which live in the database). Each harness CLI is its own vendor."""
-        import shutil
-
-        if not self.enabled:
-            return None
-        for name in self.providers:
-            if (self.cross_vendor or name in {"ollama", harness}) and shutil.which(name):
-                return name, getattr(self, f"{name}_model", "") or "CLI default"
-        return None
+        """The stage turns from ``harness`` go to first (pauses live in the database and are not applied)."""
+        return next(iter(self.stages_for(harness)), None)
 
 
 @dataclass

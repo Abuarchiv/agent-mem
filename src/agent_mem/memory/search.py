@@ -423,11 +423,6 @@ def fts_candidates(conn: sqlite3.Connection, terms: Sequence[str], limit: int = 
     return seen
 
 
-def matching_entities(conn: sqlite3.Connection, project_id: str | None, terms: Sequence[str]) -> list[int]:
-    """Entities named in the query, strongest first (``seed_strengths``)."""
-    return list(seed_strengths(conn, project_id, terms))
-
-
 def seed_strengths(conn: sqlite3.Connection, project_id: str | None, terms: Sequence[str]) -> dict[int, float]:
     """Entities named in the query and how surely: the exact key or a file's name 1.0, a word inside a path 0.3
     ("viewer" inside every path of the viewer package says little about which file is meant). Matched in SQL."""

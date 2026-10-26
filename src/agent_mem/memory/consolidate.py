@@ -181,7 +181,7 @@ def _supersede_duplicates(conn: sqlite3.Connection) -> int:
             continue
         key = (row["project_id"], row["kind"], normalized)
         if key in latest:
-            store.retire(conn, latest[key], int(row["id"]))  # the mem0 copy goes too
+            store.supersede(conn, latest[key], int(row["id"]))  # the mem0 copy goes too
             count += 1
         latest[key] = int(row["id"])
     return count
@@ -254,7 +254,7 @@ def _invalidate_deleted(conn: sqlite3.Connection) -> int:
         states = anchor_status(conn, ("m", int(row["id"])))
         if states and all(state == "deleted" for _, state in states):
             with db.transaction(conn):
-                store.retire(conn, int(row["id"]), None)  # its mem0 copy goes too, or extraction keeps it current
+                store.supersede(conn, int(row["id"]), None)  # its mem0 copy goes too, or extraction keeps it current
             count += 1
     return count
 

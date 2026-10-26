@@ -221,7 +221,7 @@ def merge_duplicates(conn: sqlite3.Connection, config: Config, model: str) -> in
                 pairs.append((old, int(ids[index])))
     with db.transaction(conn):
         for old, new in pairs:
-            store.retire(conn, old, new)
+            store.supersede(conn, old, new)
         db.set_meta(conn, "duplicates.last_memory_id", str(int(ids.max())))
     return len(pairs)
 
@@ -288,7 +288,7 @@ class Retriever:
     def graph_source(
         self, conn: sqlite3.Connection, project_id: str | None, terms: list[str], limit: int
     ) -> list[Owner]:
-        seeds = search.matching_entities(conn, project_id, terms)
+        seeds = list(search.seed_strengths(conn, project_id, terms))
         if not seeds:
             return []
         graph = self._graph(project_id)

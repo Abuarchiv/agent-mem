@@ -18,7 +18,7 @@ def test_retired_duplicates_leave_the_index_so_the_valid_fact_ranks_first(conn) 
     retired = [_memory(conn, f"Der Viewer läuft auf Port 37778 (Variante {n})") for n in range(5)]
     conn.execute("INSERT INTO vectors(owner_type, owner_id, model, vec) VALUES ('m', ?, 'x', x'00')", (retired[0],))
     for old in retired:
-        store.retire(conn, old, valid)
+        store.supersede(conn, old, valid)
     assert search.fts_candidates(conn, ["läuft", "viewer"])[0] == ("m", valid)
     assert conn.execute("SELECT COUNT(*) FROM vectors WHERE owner_id = ?", (retired[0],)).fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM memories WHERE invalid_at IS NOT NULL").fetchone()[0] == 5  # rows stay

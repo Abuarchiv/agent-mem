@@ -224,9 +224,6 @@ def drop_retired_keys(conn: sqlite3.Connection) -> int:
     return len(ids)
 
 
-retire = supersede  # the name the observer's callers use
-
-
 SCRUB_MESSAGES = "observe.scrub_messages"
 
 
