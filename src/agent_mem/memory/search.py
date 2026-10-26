@@ -371,6 +371,7 @@ class Hit:
     defines: list[str] = field(default_factory=list)  # functions and classes its changes defined
     coverage: float = 0.0
     matched_terms: int = 0
+    weighted_coverage: float = 0.0  # coverage with rare words counting more: what the order uses
     origin: str | None = None
     answer: str = ""
     # What a turn is about: request, answer, files, errors. Command lines are left out: their paths and
@@ -578,12 +579,28 @@ def load_hits(conn: sqlite3.Connection, owners: list[Owner]) -> dict[Owner, Hit]
 TOPIC_ANSWER_CHARS = 600
 
 
-def coverage(text: str, terms: Sequence[str]) -> tuple[float, int]:
+def coverage(text: str, terms: Sequence[str], weights: dict[str, float] | None = None) -> tuple[float, int]:
+    """Share of the question's words ``text`` names, and how many. With ``weights`` the share counts each word by its
+    weight."""
     if not terms:
         return 0.0, 0
     lowered = text.lower()
-    matched = sum(1 for term in terms if stem(term) in lowered or _head(term) in lowered)
-    return matched / len(terms), matched
+    named = [term for term in terms if stem(term) in lowered or _head(term) in lowered]
+    if weights is None:
+        return len(named) / len(terms), len(named)
+    return sum(weights[term] for term in named) / sum(weights[term] for term in terms), len(named)
+
+
+def term_weights(texts: Sequence[str], terms: Sequence[str]) -> dict[str, float]:
+    """Inverse document frequency of each word among the candidates: in the agent-mem project "agent" and "mem" are in
+    nearly every entry and "prüfgruppen" in one, yet each counted a fifth of the coverage, so the entry that named the
+    rare word lost to entries that only named the project. Counted on what was loaded anyway: the whole index cost
+    the hook 25 ms."""
+    lowered = [text.lower() for text in texts]
+    return {
+        term: math.log(1 + len(lowered) / (1 + sum(1 for text in lowered if stem(term) in text or _head(term) in text)))
+        for term in terms
+    }
 
 
 WINDOW_CHARS, WINDOW_STEP, WINDOW_MIN_TERMS = 360, 120, 3
@@ -762,6 +779,7 @@ def search(
     if not fused:
         return []
     hits = load_hits(conn, list(fused))
+    weights = term_weights([_judged(hit) for hit in hits.values()], terms)
     # The output list only joins when a question names a rare file: counted here, it would lower every other hit's
     # score below the gate whenever some tool happened to print that name.
     counted = len([name for name, owners in lists.items() if owners and name != "output"]) or 1
@@ -776,15 +794,15 @@ def search(
         hit.rrf = score / max_rrf if max_rrf else 0.0
         hit.sources = sources
         hit.passage = passages.get(owner, "")
-        # A long memory (another harness's session summary) contains nearly any word; like a turn it is judged by its
-        # start.
-        judged = hit.topic + "\n" + hit.passage if hit.owner[0] == "t" else hit.text[:800]
+        judged = _judged(hit)
         hit.coverage, hit.matched_terms = coverage(judged, terms)
+        hit.weighted_coverage = coverage(judged, terms, weights)[0]
         if tool_outputs and hit.owner[0] == "t" and not hit.passage and len(hit.answer) > TOPIC_ANSWER_CHARS:
             matched, snippet = best_window(hit.answer[TOPIC_ANSWER_CHARS:], terms)
             if matched >= WINDOW_MIN_TERMS and matched > hit.matched_terms:
                 hit.passage, hit.passage_from = snippet, "answer"
                 hit.coverage, hit.matched_terms = coverage(judged + "\n" + snippet, terms)
+                hit.weighted_coverage = coverage(judged + "\n" + snippet, terms, weights)[0]
         candidates.append(hit)
     stats = learn.owner_stats(conn, [h.owner for h in candidates], now)
     for hit in candidates:
@@ -801,7 +819,9 @@ def search(
     # it names. The score itself stays what the abstention gate was calibrated on.
     candidates.sort(
         key=lambda h: (
-            h.score * (1 - COVERAGE_WEIGHT + COVERAGE_WEIGHT * h.coverage) * (1 + GRAPH_WEIGHT * tie.get(h.owner, 0))
+            h.score
+            * (1 - COVERAGE_WEIGHT + COVERAGE_WEIGHT * (h.coverage + h.weighted_coverage) / 2)
+            * (1 + GRAPH_WEIGHT * tie.get(h.owner, 0))
         ),
         reverse=True,
     )
@@ -809,6 +829,12 @@ def search(
     if record_shown and results:
         learn.record_access(conn, [h.owner for h in results], "shown", query.exclude_session)
     return results
+
+
+def _judged(hit: Hit) -> str:
+    """A long memory (another harness's session summary) contains nearly any word; like a turn it is judged by its
+    start."""
+    return hit.topic + "\n" + hit.passage if hit.owner[0] == "t" else hit.text[:800]
 
 
 NAMED_TERMS, NAMED_COVERAGE = 3, 0.6

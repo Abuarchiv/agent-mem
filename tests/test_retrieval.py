@@ -119,6 +119,18 @@ def test_query_terms_drop_question_words_and_split_compounds():
     # A long compound is about its first word: the install scripts are install.sh and install.ps1.
     assert search.coverage("`install.sh` und `install.ps1` liegen im sdist", ["installationsskripte"]) == (1.0, 1)
     assert search.coverage("ein anderer Text", ["installationsskripte"]) == (0.0, 0)
+
+
+def test_a_rare_word_of_the_question_counts_more_than_the_project_name():
+    """ "In wie viele Prüfgruppen ist agent-mem doctor aufgeteilt?" ranked the answer sixth on the real database: every
+    entry of the project names "agent" and "mem", only the answer names "prüfgruppen"."""
+    terms = search.query_terms("In wie viele Prüfgruppen ist agent-mem doctor aufgeteilt?")
+    answer = "`doctor` in `cli/health.py` ist in vier Prüfgruppen aufgeteilt."
+    others = [f"`agent-mem doctor` zeigt {what} an." for what in ("das Modell je Stufe", "Hooks", "die Datenbank")]
+    weights = search.term_weights([answer, *others], terms)
+    assert weights["prüfgruppen"] > weights["agent"] > weights["doctor"]
+    assert search.coverage(answer, terms)[0] == search.coverage(others[0], terms)[0]
+    assert search.coverage(answer, terms, weights)[0] > search.coverage(others[0], terms, weights)[0]
     assert search.stem("branches") == "branch" and search.stem("code") == "code" and search.stem("v1.2") == "v1.2"
 
 
