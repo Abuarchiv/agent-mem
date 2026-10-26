@@ -517,3 +517,16 @@ def test_turns_filed_under_the_start_folder_move_once_to_where_all_their_work_wa
     assert roots == ["app", "lernen", "lernen"]
     assert conn.execute("SELECT project_id FROM memories").fetchone()[0] != home_id
     assert capture.refile_turns(conn) == 0
+
+
+def test_a_ping_that_only_echoes_its_prompt_is_not_the_last_session(driver: Driver, conn, config, project):
+    """Another session checking that a CLI answers ("Antworte nur: ok" → "ok") did no work to pick up from."""
+    driver.prompt("s1", "Fix the empty invoice crash")
+    driver.edit("s1", "invoices/parse.py")
+    driver.stop("s1", "Empty invoices now give an empty list.")
+    ping = Driver(conn, config, project, harness="codex")
+    ping.prompt("p1", "Antworte nur: ok")
+    ping.stop("p1", "ok")
+    context = Driver(conn, config, project, harness="claude").start("n1").context or ""
+    assert "Empty invoices now give an empty list." in context or "Fix the empty invoice crash" in context
+    assert "Antworte nur" not in context

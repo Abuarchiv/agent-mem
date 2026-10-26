@@ -152,8 +152,9 @@ def _last_session_lines(
 ) -> list[tuple[str, tuple[str, int] | None]]:
     # Through the turns: a session that started in a parent folder still worked here (capture._narrow_turn).
     session = conn.execute(
-        "SELECT s.id, s.harness, s.title, s.summary_json FROM turns t JOIN sessions s ON s.id = t.session_id "
-        "WHERE t.project_id = ? AND t.session_id != ? ORDER BY t.started_at DESC, t.id DESC LIMIT 1",
+        "SELECT s.id, s.harness, s.title, s.summary_json FROM turns JOIN sessions s ON s.id = turns.session_id "
+        f"WHERE turns.project_id = ? AND turns.session_id != ? {_DID_SOMETHING} "
+        "ORDER BY turns.started_at DESC, turns.id DESC LIMIT 1",
         (project_id, session_id),
     ).fetchone()
     if session is None:
@@ -194,8 +195,14 @@ def _last_session_lines(
 
 
 # A turn with no recorded answer and no changed file has a title like "bug hunt asked for, nothing recorded": 61 of 325
-# work log entries, nothing behind them to open.
-_DID_SOMETHING = "AND (COALESCE(answer, '') != '' OR COALESCE(files_json, '[]') != '[]')"
+# work log entries, nothing behind them to open. Nor does a check that a CLI answers, whose answer the prompt already
+# holds ("Antworte nur: ok" → "ok"): another session's ping was shown as the last session.
+_DID_SOMETHING = (
+    "AND (COALESCE(turns.files_json, '[]') != '[]' "
+    "OR EXISTS (SELECT 1 FROM events e WHERE e.turn_id = turns.id AND e.kind = 'tool') "
+    "OR (TRIM(COALESCE(turns.answer, ''), ' .!') != '' "
+    "AND INSTR(LOWER(turns.prompt), LOWER(TRIM(turns.answer, ' .!'))) = 0))"
+)
 
 
 def recent_work(conn: sqlite3.Connection, session_id: str, limit: int = 8) -> list[tuple[str, str, str, str]]:
