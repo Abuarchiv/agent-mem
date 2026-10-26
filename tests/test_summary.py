@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -428,3 +429,91 @@ def test_the_work_log_leaves_out_turns_with_no_answer_and_no_change(driver: Driv
 
     assert "Real work" in lines and "Nothing recorded" not in lines
     assert [t for _, _, _, t in inject.recent_work(conn, session_id)] == ["Real work"]
+
+
+def test_a_turn_belongs_to_the_project_it_works_in_outside_the_folder_the_session_started_in(
+    conn, config: Config, tmp_path
+):
+    """Claude Code reports the folder a session started in, and its shell goes back there after each command: a
+    week of work on ~/Company/agent-mem from a session in ~/Lernen was filed under ~/Lernen."""
+    import subprocess
+
+    from tests.conftest import Driver as Fresh
+
+    home, app = tmp_path / "lernen", tmp_path / "company" / "app"
+    for root in (home, app):
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    driver = Fresh(conn, config, home)
+    driver.prompt("s1", "fix the app")
+    driver.edit("s1", str(app / "app.py"))  # an absolute path outside the session's folder
+    driver.stop("s1", "Fixed.")
+    driver.prompt("s1", "run its tests")
+    driver.bash("s1", f"cd {app} && uv run pytest -q", "3 passed")
+    driver.stop("s1", "Green.")
+    driver.prompt("s1", "note it down")
+    driver.edit("s1", "notes.md")  # back in the session's own folder
+    driver.stop("s1", "Noted.")
+    roots = [
+        Path(r[0]).name
+        for r in conn.execute("SELECT p.root FROM turns t JOIN projects p ON p.id = t.project_id ORDER BY t.id")
+    ]
+    assert roots == ["app", "app", "lernen"]
+    files = conn.execute("SELECT files_json FROM turns ORDER BY id").fetchone()[0]
+    assert files == '["app.py"]'  # relative to the project it belongs to
+
+
+def test_a_session_in_the_folder_gets_the_rules_of_the_project_its_sessions_work_in(conn, config: Config, tmp_path):
+    import subprocess
+
+    from tests.conftest import Driver as Fresh
+
+    home, app = tmp_path / "lernen", tmp_path / "company" / "app"
+    for root in (home, app):
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    driver = Fresh(conn, config, home)
+    driver.prompt("s1", "fix the app")
+    driver.edit("s1", str(app / "app.py"))
+    driver.stop("s1", "Fixed.")
+    from agent_mem.core import identity
+
+    app_project = identity.resolve(conn, app)
+    assert app_project is not None
+    _memory(conn, app_project.id, "In app.py never print, log instead")
+    start = driver.start("s2").context or ""
+    assert "never print" in start
+    assert conn.execute("SELECT root FROM projects p JOIN sessions s ON s.project_id = p.id").fetchone()[0] == str(
+        home.resolve()
+    )  # the session keeps the folder it started in; the next one from there starts where the work went
+
+
+def test_turns_filed_under_the_start_folder_move_once_to_where_all_their_work_was(conn, config: Config, tmp_path):
+    import subprocess
+
+    from agent_mem.hooks import capture
+    from tests.conftest import Driver as Fresh
+
+    home, app = tmp_path / "lernen", tmp_path / "company" / "app"
+    for root in (home, app):
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+    driver = Fresh(conn, config, home)
+    for n, files in enumerate(([str(app / "a.py")], [str(app / "b.py"), "notes.md"], [str(home / "scratchpad" / "x")])):
+        driver.prompt("s1", f"step {n}")
+        for path in files:
+            driver.edit("s1", path)
+        driver.stop("s1", "done")
+    home_id = conn.execute("SELECT project_id FROM sessions").fetchone()[0]
+    conn.execute("UPDATE turns SET project_id = ?", (home_id,))  # as recorded before turns followed the work
+    _memory(conn, home_id, "A fact from step 0")
+    conn.execute("UPDATE memories SET turn_id = 1")
+
+    assert capture.refile_turns(conn) == 1  # step 1 also worked at home, step 2 only in a scratchpad
+    roots = [
+        Path(r[0]).name
+        for r in conn.execute("SELECT p.root FROM turns t JOIN projects p ON p.id = t.project_id ORDER BY t.id")
+    ]
+    assert roots == ["app", "lernen", "lernen"]
+    assert conn.execute("SELECT project_id FROM memories").fetchone()[0] != home_id
+    assert capture.refile_turns(conn) == 0

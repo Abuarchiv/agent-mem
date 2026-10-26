@@ -191,6 +191,8 @@ def _work(conn: sqlite3.Connection, config: Config, force_consolidate: bool, all
         stats["unseen_citations_dropped"] = learn.drop_unseen_citations(
             conn, timeutil.iso(timeutil.now() - timedelta(days=config.retention.access_days))
         )
+    with db.transaction(conn):  # runs git for folders not yet known, once per database
+        stats["turns_refiled"] = capture.refile_turns(conn)
     # Outside the transaction: it runs git (about 25 ms per repository), and hooks wait 150 ms for the write lock.
     stats["identity_aliases"] = identity.record_aliases(conn)
     _mark_guards(conn, config)

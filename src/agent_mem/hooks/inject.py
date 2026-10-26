@@ -311,6 +311,22 @@ SEARCH_LINE = (
 NO_MCP_INSTRUCTIONS = {"copilot"}
 
 
+def work_project(conn: sqlite3.Connection, project_id: str) -> str:
+    """The project a folder's sessions work in: most of the last 20 turns of sessions started there, else the
+    folder's own. A session in ~/Lernen that works on ~/Company/agent-mem needs agent-mem's rules and last state."""
+    rows = conn.execute(
+        "SELECT t.project_id FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.project_id = ? "
+        "ORDER BY t.started_at DESC LIMIT 20",
+        (project_id,),
+    ).fetchall()
+    counts: dict[str, int] = {}
+    for (turn_project,) in rows:
+        if turn_project:
+            counts[turn_project] = counts.get(turn_project, 0) + 1
+    top = max(counts, key=lambda key: counts[key], default=project_id)
+    return top if counts.get(top, 0) * 2 > len(rows) else project_id
+
+
 def session_start(
     conn: sqlite3.Connection, config: Config, project_id: str, session_id: str, harness: str
 ) -> Block | None:

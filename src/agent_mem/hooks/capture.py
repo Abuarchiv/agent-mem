@@ -151,10 +151,16 @@ def context_only(conn: sqlite3.Connection, config: Config, event: Event) -> Resp
         if event.source == "compact":
             block = inject.compact(conn, config, session_id)
         else:
-            block = inject.session_start(conn, config, project.id, session_id, event.harness)
+            block = inject.session_start(conn, config, inject.work_project(conn, project.id), session_id, event.harness)
     elif event.kind == "prompt":
         block = inject.prompt_hints(
-            conn, config, project.id, session_id, event.prompt or "", event.harness, record=False
+            conn,
+            config,
+            inject.work_project(conn, project.id),
+            session_id,
+            event.prompt or "",
+            event.harness,
+            record=False,
         )
     else:
         return Response()
@@ -389,17 +395,106 @@ def _raise_importance(conn: sqlite3.Connection, turn_id: int, value: float) -> N
     conn.execute("UPDATE turns SET importance = MAX(importance, ?) WHERE id = ?", (value, turn_id))
 
 
-def _narrow_turn(conn: sqlite3.Connection, turn_id: int, project: identity.Project) -> None:
-    """A turn asked in a parent folder belongs to the nested project its tools work in (``cd agent-mem && …``),
-    so its facts land where a session in that project finds them."""
+_CD = re.compile(r"""^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*(?:&&|;)""")
+_TEMP_ROOTS = {"/tmp", "/private/tmp", "/var/folders", "/private/var/folders"}  # noqa: S108
+
+
+def _work_project(conn: sqlite3.Connection, tool_signal: signals.ToolSignal) -> identity.Project | None:
+    """The project a tool works in: the folder of the file it edits, or the one a test, build, lint, install or
+    commit changes into first (``cd ~/Company/agent-mem && uv run pytest``). A ``cd`` to grep through another
+    repository is reading, not working there; a scratchpad, the temp folder and the home folder are no project."""
+    if tool_signal.category == "edit" and tool_signal.files:
+        folder = os.path.dirname(tool_signal.files[0])
+    elif (
+        tool_signal.command
+        and tool_signal.command_kind in PROJECT_COMMANDS | {"commit"}
+        and (match := _CD.match(tool_signal.command))
+    ):
+        folder = os.path.expanduser(match.group(1).strip("'\""))
+    else:
+        return None
+    if not os.path.isabs(folder) or "/scratchpad" in folder.replace(os.sep, "/"):
+        return None
+    found = identity.resolve(conn, folder, register=False)
+    if found is None:
+        return None
+    known = conn.execute(
+        "SELECT root FROM projects WHERE id = ?", (found.id,)
+    ).fetchone()  # found.root: the mapped path
+    root = os.path.normcase(str(known[0] if known else found.root)).rstrip("/\\")
+    if root in {os.path.normcase(os.path.expanduser("~")), os.sep, ""} | _TEMP_ROOTS:
+        return None
+    return found
+
+
+def _worked_in(
+    conn: sqlite3.Connection, started_in: identity.Project | None, tool_signal: signals.ToolSignal
+) -> identity.Project | None:
+    """The project a tool works in when it is not the one the session started in. The harness reports the folder a
+    session started in, and the shell goes back there after each command: 71 turns of a week's work on
+    ~/Company/agent-mem were filed under ~/Lernen, and the project's 96 rules never reached those sessions."""
+    found = _work_project(conn, tool_signal)
+    if found is None or (started_in is not None and found.id == started_in.id):
+        return None
+    identity.register_project(conn, found, found.root)
+    return found
+
+
+def refile_turns(conn: sqlite3.Connection) -> int:
+    """Once per database: a turn recorded before :func:`_worked_in` whose work all happened in one other project
+    moves there, with the memories learned from it. A turn that also worked in its own project stays. Returns the
+    turns moved."""
+    if db.get_meta(conn, "turns_refiled"):
+        return 0
+    places: dict[int, dict[str, identity.Project | None]] = {}
+    for turn_id, tool, payload, project_id in conn.execute(
+        "SELECT e.turn_id, e.tool, e.payload, t.project_id FROM events e JOIN turns t ON t.id = e.turn_id "
+        "WHERE e.kind = 'tool' AND e.trimmed = 0 ORDER BY e.turn_id, e.id"
+    ).fetchall():
+        data = json.loads(payload)
+        if data.get("failed"):
+            continue
+        try:
+            tool_input = json.loads(data.get("input") or "null")
+        except ValueError:
+            continue
+        found = _work_project(conn, signals.analyze_tool(tool or "", tool_input))
+        if found is not None:
+            places.setdefault(int(turn_id), {"": None})[found.id] = found
+            places[int(turn_id)][""] = project_id  # type: ignore[assignment]
+    moved = 0
+    for turn_id, found in places.items():
+        own = found.pop("")
+        if len(found) != 1 or own in found:
+            continue
+        (target,) = found.values()
+        assert target is not None
+        identity.register_project(conn, target, target.root)
+        _narrow_turn(conn, turn_id, target, own)  # type: ignore[arg-type]
+        conn.execute(
+            "UPDATE memories SET project_id = ? WHERE turn_id = ? AND project_id IS ?", (target.id, turn_id, own)
+        )
+        moved += 1
+    db.set_meta(conn, "turns_refiled", timeutil.iso())
+    return moved
+
+
+def _narrow_turn(
+    conn: sqlite3.Connection, turn_id: int, project: identity.Project, started_in: str | None = None
+) -> None:
+    """A turn belongs to the project its tools work in: a nested one (``cd agent-mem && …``), or another one when the
+    turn still has the folder its session started in. Its facts then land where a session in that project finds
+    them."""
     row = conn.execute(
         "SELECT t.project_id, p.root FROM turns t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
         (turn_id,),
     ).fetchone()
     if row is None or row["project_id"] == project.id:
         return
-    if row["root"] is None or identity.is_within(project.root, row["root"]):
+    nested = row["root"] is None or identity.is_within(project.root, row["root"])
+    if nested or row["project_id"] == started_in:
         conn.execute("UPDATE turns SET project_id = ? WHERE id = ?", (project.id, turn_id))
+    if nested:
         # The session follows: started in a parent folder, it belongs to the nested project once it works there.
         conn.execute(
             "UPDATE sessions SET project_id = ? WHERE id = (SELECT session_id FROM turns WHERE id = ?) "
@@ -423,7 +518,9 @@ def _on_session_start(call: _Call) -> None:
     if call.event.source == "compact":
         block = inject.compact(call.conn, call.config, call.session_id)
     else:
-        block = inject.session_start(call.conn, call.config, call.project_id, call.session_id, call.event.harness)
+        block = inject.session_start(
+            call.conn, call.config, inject.work_project(call.conn, call.project_id), call.session_id, call.event.harness
+        )
     if block:
         call.response.context = block.text
         learn.record_access(call.conn, block.owners, "injected", call.session_id, call.event.ts)
@@ -460,7 +557,14 @@ def _on_prompt(call: _Call) -> None:
     if call.with_context and call.project_id is not None:
         blocks = [inject.compact(call.conn, call.config, call.session_id)] if compacted else []
         blocks.append(
-            inject.prompt_hints(call.conn, call.config, call.project_id, call.session_id, prompt, call.event.harness)
+            inject.prompt_hints(
+                call.conn,
+                call.config,
+                inject.work_project(call.conn, call.project_id),
+                call.session_id,
+                prompt,
+                call.event.harness,
+            )
         )
         if any(blocks):
             call.response.context = "\n".join(b.text for b in blocks if b)
@@ -728,7 +832,10 @@ def _remember_command(
 def _on_tool(call: _Call) -> None:
     tool_signal = signals.analyze_tool(call.event.tool or "", call.event.tool_input)
     turn_id = _turn_for_tool(call.conn, call.session_id, call.project_id, call.event.ts)
-    if call.project is not None:
+    if (elsewhere := _worked_in(call.conn, call.project, tool_signal)) is not None:
+        _narrow_turn(call.conn, turn_id, elsewhere, call.project_id)
+        call.project = elsewhere  # its files, links and history are that project's
+    elif call.project is not None:
         _narrow_turn(call.conn, turn_id, call.project)
     files = _rel_files(call.project, tool_signal.files)
     error_sig = call.payload.get("error_sig")
