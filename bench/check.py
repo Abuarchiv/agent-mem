@@ -1,5 +1,6 @@
-"""Before a push: fixture, LongMemEval-40 and the versus questions on a fresh copy of the live database, compared with
-bench/baseline.json. Exit 1 when a number drops. `--update` writes the current numbers as the new baseline.
+"""Before a push: fixture, LongMemEval-40 and the versus questions on a frozen copy of the live database, compared with
+bench/baseline.json. Exit 1 when a number drops. `--update` freezes a new copy of the live database and writes its
+numbers as the new baseline.
 
 The git hook: `ln -s ../../bench/pre-push .git/hooks/pre-push` (skip once with `git push --no-verify`).
 """
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -16,6 +18,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 BASELINE = REPO / "bench" / "baseline.json"
 DATA = Path.home() / "Library/Application Support/agent-mem"
+# The live database grows with every request: measured on it, a baseline drifts without a code change (20 -> 19 on
+# 2026-10-26). `--update` freezes a copy next to the eval data; every check after measures that same copy.
+SNAPSHOT = Path(os.environ.get("AM_SNAPSHOT") or Path.home() / ".cache/agent-mem/eval/bench-snapshot.db")
 LME = Path(os.environ.get("AM_LME") or Path.home() / ".cache/agent-mem/eval/longmemeval_s.json")
 # Higher is better for all of them; prompt_chars only reported (fewer tokens for the same hits is the goal).
 TRACKED = {
@@ -57,9 +62,23 @@ def measure() -> dict[str, dict[str, float]]:
             for group, values in numbers.items()}  # fmt: skip
 
 
+def freeze() -> None:
+    SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
+    source, copy = sqlite3.connect(DATA / "memory.db"), sqlite3.connect(SNAPSHOT)
+    with copy:
+        source.backup(copy)
+    source.close()
+    copy.close()
+    SNAPSHOT.chmod(0o600)  # the developer's own requests and answers
+
+
 def main() -> int:
+    update = "--update" in sys.argv or not BASELINE.exists() or not SNAPSHOT.exists()
+    if update:
+        freeze()
+    os.environ["AM_DB"] = str(SNAPSHOT)  # bench/versus.py copies it per question
     now = measure()
-    if "--update" in sys.argv or not BASELINE.exists():
+    if update:
         BASELINE.write_text(json.dumps(now, indent=1) + "\n", encoding="utf-8")
         print(f"bench: baseline written to {BASELINE}")
         return 0
@@ -77,10 +96,7 @@ def main() -> int:
                 print(f"{group:14} {key:20} {before.get(group, {}).get(key)} -> {value}")
     if worse:
         print("bench: worse than bench/baseline.json:\n  " + "\n  ".join(worse), file=sys.stderr)
-        print(
-            "The live data grows: check out the baseline commit and run this again to tell data from code.",
-            file=sys.stderr,
-        )
+        print(f"Measured on the frozen copy {SNAPSHOT}: the code made it worse, not new data.", file=sys.stderr)
         return 1
     return 0
 

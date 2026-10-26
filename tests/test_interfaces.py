@@ -162,3 +162,18 @@ def test_doctor_says_when_an_agent_that_recorded_has_no_hooks_any_more(driver: D
     assert not check.ok and check.warn_only and check.detail.startswith("off, no agent-mem hooks")
     monkeypatch.setattr(health, "harness_installed", lambda harness: True)
     assert next(c for c in health._capture_checks(conn) if c.name == "Claude Code recording").ok
+
+
+def test_retrieval_does_not_fall_below_its_measured_floor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The anonymous fixed questions in CI: bench/check.py measures the developer's own database before a push, which CI
+    does not have. Word search only (no model download); raise the floor when a change lifts it."""
+    from agent_mem.bench import evaluate
+
+    monkeypatch.setenv("AGENT_MEM_DATA_DIR", str(tmp_path / "evaldata"))
+    fixtures = Path(__file__).parent / "fixtures"
+    runner = evaluate.Runner("sqlite", semantic_search=False)
+    report = runner.fixture(fixtures / "memory_cases.json")
+    floor = {"hit@1": 1.0, "abstention": 0.7, "injected_hit@1": 0.9, "injected_abstention": 1.0, "mcp_hit@1": 0.9}
+    assert all(report[key] >= value for key, value in floor.items()), report
+    life = runner.longmemeval(fixtures / "coding_agent_life_v1.json")["overall"]
+    assert life["R@5"] == 1.0 and life["All@5"] == 1.0, life

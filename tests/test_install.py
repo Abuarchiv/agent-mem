@@ -393,3 +393,17 @@ def test_models_can_live_outside_the_data_folder(config, monkeypatch, tmp_path: 
     assert config.model_dir == config.data_dir / "models"
     monkeypatch.setenv("AGENT_MEM_MODEL_DIR", str(tmp_path / "image-models"))
     assert config.model_dir == tmp_path / "image-models"
+
+
+def test_every_install_line_with_the_model_extra_picks_a_python_it_has_wheels_for():
+    """On a fresh Debian, uv picked the newest Python (3.15), onnxruntime (fastembed) has no wheels for it yet, and the
+    install failed with "network or git missing?"."""
+    repo = Path(__file__).resolve().parents[1]
+    lines = [
+        line
+        for name in ("install.sh", "install.ps1", "README.md", "Dockerfile")
+        for line in (repo / name).read_text(encoding="utf-8").splitlines()
+        if "uv tool install" in line and "semantic" in line
+    ]
+    assert len(lines) >= 4
+    assert all("--python 3.1" in line for line in lines), lines
