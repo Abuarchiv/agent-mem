@@ -5,8 +5,8 @@ from pathlib import Path
 
 from agent_mem.core import db, identity
 from agent_mem.core.events import Event
-from agent_mem.hooks import capture
-from agent_mem.memory import consolidate
+from agent_mem.hooks import capture, inject
+from agent_mem.memory import consolidate, store
 from tests.conftest import Driver
 
 
@@ -117,6 +117,21 @@ def test_prompt_hints_oldest_first_best_kept(driver: Driver, conn, config, proje
     config.budgets.prompt = 60  # room for one hit: the best-ranked one stays
     context = other.prompt("c2", "Which Postgres version runs the staging database now, after the upgrade?").context
     assert context and context.count("\n- [") == 1
+
+
+def test_a_subagent_gets_a_short_start_block_with_the_users_rules(driver: Driver, conn, config, project):
+    """Its parent has the full block; 30 subagents with it took a fifth of a week's injected entries."""
+    driver.prompt("s1", "Build the billing export")
+    project_id = identity.resolve(conn, project).id
+    for n, kind in enumerate(["preference"] + ["fact"] * 30):
+        text = "Never push without asking" if n == 0 else f"Export step {n} writes billing_{n}.csv with pandas " * 3
+        store.add_memory(
+            conn, project_id=project_id, kind=kind, title=text, body=text, source="agent", trust="agent", dedupe=str(n)
+        )
+    full = driver.start("c1").context or ""
+    short = driver.start("c1", source="subagent").context or ""
+    assert "Never push without asking" in short
+    assert inject.tokens(short) <= 300 < inject.tokens(full)
 
 
 def test_prompt_hints_skip_what_the_context_already_holds(driver: Driver, conn, config, project):

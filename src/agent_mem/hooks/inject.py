@@ -391,12 +391,15 @@ def _briefing_lines(
 # file the model is not told to read. Claude Code: 10,000 characters per string, no setting (code.claude.com hooks).
 # Codex: about 2,500 tokens unless the handler sets ``additionalContextLimit`` (plugins/codex/hooks.json sets 8,000).
 # Copilot: postToolUse 10 KB, sessionStart 10 MiB. OpenCode: our plugin passes everything.
-# A subagent (kind "subagent") gets a short start block: it works on one task and its parent has the full one.
 HOST_TOKENS: dict[str, dict[str, int]] = {
     "claude": {"*": 2_400},
     "codex": {"session_start": 7_800, "prompt": 7_800, "tool": 7_800, "*": 2_400},
-    "copilot": {"tool": 2_400, "pre_tool": 2_400, "subagent": 2_400},
+    "copilot": {"tool": 2_400, "pre_tool": 2_400},
 }
+# A subagent works on one task its parent wrote and the parent has the full start block: the project's commands, the
+# user's first rules and the last session. With the full block 30 subagents of one session took 1,366 of a week's
+# 6,579 injected entries.
+SUBAGENT_TOKENS = 300
 
 
 def for_host(config: Config, harness: str, kind: str) -> Config:
@@ -404,6 +407,8 @@ def for_host(config: Config, harness: str, kind: str) -> Config:
     warning and the file history go out together, so the history gets what the warning leaves."""
     caps = HOST_TOKENS.get(harness, {})
     cap = caps.get(kind, caps.get("*"))
+    if kind == "subagent":
+        cap = min(cap or SUBAGENT_TOKENS, SUBAGENT_TOKENS)
     if cap is None:
         return config
     budgets = config.budgets
