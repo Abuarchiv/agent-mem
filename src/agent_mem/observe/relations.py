@@ -99,12 +99,16 @@ def render(project: str, rows: list[sqlite3.Row]) -> str:
     return head + "\n".join(lines)
 
 
-def _items(data: dict, field: str) -> list:
+# (source key, relation type, target key, memory id)
+Relation = tuple[str, str, str, int]
+
+
+def _items(data: dict[str, Any], field: str) -> list[Any]:
     value = data.get(field)
     return value if isinstance(value, list) else []
 
 
-def parse(text: str, memory_ids: set[int], project: str) -> tuple[dict[str, tuple[str, str]], list[tuple]]:
+def parse(text: str, memory_ids: set[int], project: str) -> tuple[dict[str, tuple[str, str]], list[Relation]]:
     """Entities by key -> (label, type) and relations (source key, type, target key, memory id). Anything that
     does not fit the schema, names an unknown memory or links a thing to itself is dropped."""
     data = json.loads(_FENCE.sub("", text.strip()).strip())
@@ -121,7 +125,7 @@ def parse(text: str, memory_ids: set[int], project: str) -> tuple[dict[str, tupl
             parts = name.rstrip("/").split("/")
             label = "/".join(parts[-2:] if parts[-1] == "__init__.py" else parts[-1:]) if kind == "file" else name
             entities.setdefault(key(name), (label, kind))
-    relations: list[tuple] = []
+    relations: list[Relation] = []
     for item in _items(data, "relations"):
         if not isinstance(item, dict) or item.get("type") not in RELATION_TYPES:
             continue

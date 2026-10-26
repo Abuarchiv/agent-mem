@@ -113,3 +113,6 @@ include = ["src"]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
 reportMissingImports = "warning"
+# From strict: bare `dict` or `list` and untyped parameters hide what a function takes.
+reportMissingTypeArgument = "error"
+reportMissingParameterType = "error"

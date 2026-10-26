@@ -18,6 +18,7 @@ import contextlib
 import json
 import sqlite3
 from dataclasses import dataclass
+from typing import Any
 
 from agent_mem.core import privacy, signals
 from agent_mem.core.config import Config
@@ -40,7 +41,7 @@ class Bundle:
         return sum(len(m["content"]) for m in self.messages)
 
 
-def _defines_line(payload: dict, files: list[str]) -> str | None:
+def _defines_line(payload: dict[str, Any], files: list[str]) -> str | None:
     """The names a change defines ("[edit] ui/app.js: defines drawEdges, drawNodes"): the change itself stays out,
     but "which function does X" is answered by these names. Scripts that rewrite files count."""
     category = str(payload.get("category") or "")
@@ -57,7 +58,7 @@ def _defines_line(payload: dict, files: list[str]) -> str | None:
     return f"{where}: defines {', '.join(names[:12])}"
 
 
-def _tool_line(payload: dict, per_call: int) -> str | None:
+def _tool_line(payload: dict[str, Any], per_call: int) -> str | None:
     """One tool call as the extractor sees it: what ran or was read, then the start of what came back."""
     output = " ".join(str(payload.get("output") or "").split())
     if len(output) < 40 or payload.get("category") == "edit":  # nothing learned, or the change itself

@@ -226,14 +226,14 @@ def _memories(conn: sqlite3.Connection, scope: _Scope) -> list[dict[str, Any]]:
         (*params, LIMITS["memories"]),
     ):
         body, body_cut = _cap(row["body"], BODY_CHARS)
-        entry = {**dict(row), "body": body, "truncated": body_cut}
+        entry: dict[str, Any] = {**dict(row), "body": body, "truncated": body_cut}
         entry["harness"] = entry["harness"] or _ORIGIN_HARNESS.get(entry["origin"] or "", entry["origin"])
         memories.append(entry)
     stats = learn.owner_stats(conn, [("m", int(memory["id"])) for memory in memories])
     for memory in memories:
-        entry = stats[("m", int(memory["id"]))]
-        memory["used"] = entry.used
-        memory["shown"] = entry.shown
+        counts = stats[("m", int(memory["id"]))]
+        memory["used"] = counts.used
+        memory["shown"] = counts.shown
 
     return memories
 
@@ -351,7 +351,7 @@ def memory_graph(conn: sqlite3.Connection, project_id: str | None) -> dict[str, 
         "GROUP BY r.source_id, r.target_id, r.type ORDER BY COUNT(*) DESC LIMIT ?",
         (*params, LIMITS["graph_edges"]),
     ).fetchall()
-    edges = [
+    edges: list[dict[str, Any]] = [
         {
             "a": row["source_id"],
             "b": row["target_id"],
