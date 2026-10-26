@@ -14,15 +14,15 @@
   "auto_am": 20,
   "search_am": 23,
   "silent_am": 8,
-  "prompt_chars_am": 89480
+  "prompt_chars_am": 73881
  },
  "questions_new": {
   "auto_am": 16,
-  "search_am": 16,
+  "search_am": 17,
   "silent_am": 8,
-  "prompt_chars_am": 49099
+  "prompt_chars_am": 37239
  },
  "start": {
-  "prompt_chars_start": 8896
+  "prompt_chars_start": 2909
  }
 }
