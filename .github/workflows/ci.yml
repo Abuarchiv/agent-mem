@@ -45,6 +45,18 @@ jobs:
           echo '{"hook_event_name":"UserPromptSubmit","session_id":"ci","cwd":"'"$PWD"'","prompt":"ci smoke"}' | agent-mem hook claude
           agent-mem status --json
           agent-mem doctor || true
+      - name: Run the hook command setup writes, as Claude Code does (Git Bash on Windows)
+        shell: bash
+        env:
+          AGENT_MEM_DATA_DIR: ${{ runner.temp }}/agent-mem-setup
+          AGENT_MEM_NO_SPAWN: "1"
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-home
+        run: |
+          agent-mem setup claude --write --no-models
+          command=$(grep -o '"command": "[^"]*hook claude"' "$CLAUDE_CONFIG_DIR/settings.json" | head -1 | sed 's/^"command": "//; s/"$//')
+          echo "$command"
+          echo '{"hook_event_name":"UserPromptSubmit","session_id":"setup","cwd":"'"$PWD"'","prompt":"setup smoke"}' | bash -c "$command"
+          agent-mem status --json | grep -q '"turns": 1,'
 
   sdist:
     runs-on: ubuntu-latest

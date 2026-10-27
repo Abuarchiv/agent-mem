@@ -352,6 +352,21 @@ def test_a_binary_path_with_a_space_is_quoted_and_read_back(homes: Path) -> None
     assert powershell[0]["powershell"] == f"& '{exe}' hook copilot agentStop"
 
 
+def test_claude_hooks_on_windows_survive_git_bash(homes: Path, monkeypatch) -> None:
+    """Claude Code runs hooks in Git Bash on Windows, which turns `C:\\Users\\a\\agent-mem.exe` into `C:Usersaagent-mem.exe`.
+    Forward slashes work there and in PowerShell; Codex runs cmd.exe, which wants the path as Windows writes it."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    for exe, claude in (
+        ("C:\\Users\\a\\.local\\bin\\agent-mem.exe", "C:/Users/a/.local/bin/agent-mem.exe hook claude"),
+        ("C:\\Users\\a b\\agent-mem.exe", '"C:/Users/a b/agent-mem.exe" hook claude'),
+    ):
+        install.write("claude", PLUGINS, exe)
+        assert install.hook_commands("claude") == [claude]
+        assert not install.stale("claude")
+        install.write("codex", PLUGINS, exe)
+        assert install.hook_binary(install.hook_commands("codex")[0]) == exe
+
+
 def test_uninstall_leaves_no_copy_of_agent_mems_own_copilot_hooks(homes: Path) -> None:
     """A second `setup --write` keeps the previous hooks file as `agent-mem.json.agent-mem-backup`; uninstall removes
     it from ~/.copilot/hooks. The user's own files keep their backups."""

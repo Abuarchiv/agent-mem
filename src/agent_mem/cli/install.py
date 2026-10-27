@@ -132,8 +132,12 @@ def _strip_hooks(existing: dict[str, Any]) -> dict[str, Any]:
     return kept
 
 
-def _shell(exe: str, key: str) -> str:
+def _shell(exe: str, key: str, harness: str = "") -> str:
     """``exe`` as the first word of a hook command: quoted when it holds a space or another shell character."""
+    if sys.platform == "win32" and harness == "claude":
+        # Claude Code runs hooks in Git Bash, which drops every backslash; forward slashes work there and in
+        # PowerShell. Codex runs cmd.exe and keeps the path as Windows writes it.
+        exe = exe.replace("\\", "/")
     if not re.search(r"[^\w@%+=:,./\\-]", exe):
         return exe
     if key == "powershell":
@@ -158,7 +162,7 @@ def _plugin_hooks(plugins: Path, harness: str, exe: str) -> dict[str, Any]:
             for hook in entry.get("hooks", [entry]):
                 for key in ("command", "bash", "powershell"):
                     if str(hook.get(key, "")).startswith(f"{MARK} hook"):
-                        hook[key] = _shell(exe, key) + hook[key][len(MARK) :]
+                        hook[key] = _shell(exe, key, harness) + hook[key][len(MARK) :]
     return data
 
 
