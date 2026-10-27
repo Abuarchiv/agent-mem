@@ -1,6 +1,6 @@
 [project]
 name = "agent-mem"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Shared, local memory for Claude Code, Codex, Copilot CLI and OpenCode. Facts are extracted in the background through the harness you already use (no API key); no cloud, no telemetry."
 readme = "README.md"
 license = "MIT"
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Semantic search with the multilingual E5 model (ONNX, no PyTorch). ONNX Runtime publishes no
+# Search by meaning with a multilingual MiniLM model (ONNX, no PyTorch). ONNX Runtime publishes no
 # wheels for Intel Macs; there the extra installs nothing and search stays lexical + graph.
 semantic = ["fastembed>=0.8; sys_platform != 'darwin' or platform_machine != 'x86_64'"]
 # Background observer: mem0 does extraction and dedup, Qdrant is the local
@@ -42,11 +42,15 @@ agent-mem = "agent_mem.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Abuarchiv/agent-mem"
+Documentation = "https://abuarchiv.github.io/agent-mem-docs/"
 Issues = "https://github.com/Abuarchiv/agent-mem/issues"
 
 [build-system]
 requires = ["hatchling>=1.32"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/agent_mem/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_mem"]

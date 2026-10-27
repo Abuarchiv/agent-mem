@@ -10,7 +10,6 @@ resolution-markers = [
 
 [[package]]
 name = "agent-mem"
-version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "dateparser" },
@@ -51,7 +50,7 @@ requires-dist = [
     { name = "ollama", marker = "extra == 'observer'", specifier = ">=0.4" },
     { name = "qdrant-client", marker = "extra == 'observer'", specifier = ">=1.12" },
 ]
-provides-extras = ["semantic", "observer"]
+provides-extras = ["observer", "semantic"]
 
 [package.metadata.requires-dev]
 dev = [

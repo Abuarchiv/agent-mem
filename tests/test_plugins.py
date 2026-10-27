@@ -33,8 +33,9 @@ def test_versions_match_package():
         assert entry["version"] == __version__, path
         location = entry["source"]["path"] if isinstance(entry["source"], dict) else entry["source"]
         assert location == source and (ROOT / location).is_dir(), path
+    # One version in the source: the package build reads it from agent_mem/__init__.py.
     pyproject = (ROOT / "pyproject.toml").read_text()
-    assert f'version = "{__version__}"' in pyproject
+    assert 'dynamic = ["version"]' in pyproject and 'path = "src/agent_mem/__init__.py"' in pyproject
 
 
 def test_claude_hooks_cover_supported_events():
