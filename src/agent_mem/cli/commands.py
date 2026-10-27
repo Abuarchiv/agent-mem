@@ -667,6 +667,7 @@ def _upgrade_after_exit(command: list[str], exe: str, steps: list[list[str]], co
     log, script = config.log_dir / "upgrade.log", config.log_dir / "upgrade.ps1"
     lines = [
         f"Start-Transcript -Path {quote(str(log))} | Out-Null",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8",  # agent-mem prints UTF-8; the console default is OEM
         f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue",
         f"$prefix = {quote(sys.prefix.lower())}",
         "$running = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and "
@@ -675,10 +676,10 @@ def _upgrade_after_exit(command: list[str], exe: str, steps: list[list[str]], co
         "Start-Sleep 1",
         call(command),
         "if ($LASTEXITCODE -ne 0) { 'Upgrade failed; uv names the cause above.' } else {",
-        *(call([exe, *step]) for step in steps),
-        call([exe, "--version"]),
         "if ($running | Where-Object { $_.CommandLine -match ' serve' }) {",
         f"Start-Process {quote(exe)} -ArgumentList 'serve','--quiet' -WindowStyle Hidden }}",
+        *(call([exe, *step]) for step in steps),
+        call([exe, "--version"]),
         "}",
         "Stop-Transcript | Out-Null",
     ]
