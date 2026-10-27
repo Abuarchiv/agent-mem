@@ -20,7 +20,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 BASELINE = REPO / "bench" / "baseline.json"
-DATA = Path.home() / "Library/Application Support/agent-mem"
+sys.path.insert(0, str(REPO / "src"))
+from agent_mem.core.paths import default_data_dir  # noqa: E402
+
+DATA = default_data_dir()
 # The live database grows with every request: measured on it, a baseline drifts without a code change (20 -> 19 on
 # 2026-10-26). `--update` freezes a copy next to the eval data; every check after measures that same copy. One copy
 # per checkout like the baseline it belongs to: a shared one was refrozen by `--update` in another worktree.

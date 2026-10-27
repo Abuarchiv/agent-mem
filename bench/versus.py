@@ -21,7 +21,10 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-DATA = Path.home() / "Library/Application Support/agent-mem"
+sys.path.insert(0, str(REPO / "src"))
+from agent_mem.core.paths import default_data_dir  # noqa: E402
+
+DATA = default_data_dir()
 LIVE = Path(os.environ.get("AM_DB") or DATA / "memory.db")
 MODELS = Path(os.environ.get("AM_MODELS") or DATA / "models")
 CWD = os.environ.get("AM_CWD") or str(Path.home() / "Lernen/agent-mem")
@@ -112,7 +115,6 @@ def am_hook(payload: dict[str, str]) -> str:
         return ""
 
 
-sys.path.insert(0, str(REPO / "src"))
 from agent_mem.core import config as config_module  # noqa: E402
 from agent_mem.core import db, identity  # noqa: E402
 from agent_mem.memory import semantic  # noqa: E402
