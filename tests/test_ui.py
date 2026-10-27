@@ -111,10 +111,10 @@ def test_view_command_writes_a_private_page_and_purge_removes_it(
         assert stat.S_IMODE(page.stat().st_mode) == 0o600
         assert stat.S_IMODE(page.parent.stat().st_mode) == 0o700
     assert cli.main([*base, "view", "--no-open", "--project", str(project)]) == 0
-    assert cli.main([*base, "view", "--no-open", "--project", str(tmp_path / "nowhere")]) == 2
+    assert cli.main([*base, "view", "--no-open", "--project", str(tmp_path / "nowhere")]) == 1  # not found
     uncaptured = tmp_path / "uncaptured"
     uncaptured.mkdir()
-    assert cli.main([*base, "view", "--no-open", "--project", str(uncaptured)]) == 2
+    assert cli.main([*base, "view", "--no-open", "--project", str(uncaptured)]) == 1  # not found
     conn = db.connect(config)
     try:
         assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1

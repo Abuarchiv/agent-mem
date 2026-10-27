@@ -250,6 +250,8 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
             (owner_id,),
         )
         conn.execute("DELETE FROM events WHERE turn_id = ?", (owner_id,))
+        # A fix learned from this turn holds its error text.
+        conn.execute("DELETE FROM recipes WHERE last_turn_id = ?", (owner_id,))
         cursor = conn.execute("DELETE FROM turns WHERE id = ?", (owner_id,))
         # mem0 keeps the latest bundle messages and reads them into the next extraction: the worker clears them.
         conn.execute(

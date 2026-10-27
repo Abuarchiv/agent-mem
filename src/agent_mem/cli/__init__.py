@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
+    from pathlib import Path
 
 
 def _rule_id(text: str) -> int:
@@ -16,6 +17,23 @@ def _rule_id(text: str) -> int:
     if not (digits.isascii() and digits.isdigit()) or int(digits) >= 2**63:
         raise argparse.ArgumentTypeError(f"invalid rule id: {text}")
     return int(digits)
+
+
+def _folder(text: str) -> Path:
+    import argparse
+    from pathlib import Path
+
+    if not text.strip():  # Path("") is the current folder: the database landed wherever the command ran
+        raise argparse.ArgumentTypeError("needs a folder")
+    return Path(text)
+
+
+def _positive(text: str) -> int:
+    import argparse
+
+    if not (text.isascii() and text.isdigit() and len(text) <= 3 and 1 <= int(text) <= 100):
+        raise argparse.ArgumentTypeError(f"expected a number from 1 to 100, got {text}")
+    return int(text)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         from agent_mem.core import paths
 
         raw = None
-        if args[1:2] not in ([], ["-h"], ["--help"]):  # typed by a person: the hook explains itself, no stdin
+        if not {"-h", "--help"} & set(args[1:]) and args[1:2]:  # typed by a person: it explains itself, no stdin
             raw = sys.stdin.buffer.read(paths.STDIN_CAP + 1) if sys.stdin is not None else b""
             # Before the hook module loads: most Bash and Edit calls have nothing to check.
             if paths.pre_tool_has_nothing_to_check(args[2] if len(args) > 2 else None, raw):
@@ -39,9 +57,16 @@ def main(argv: list[str] | None = None) -> int:
 
         return hook_main(args[1:], raw)
     try:
-        return _main(args)
+        code = _main(args)
+        sys.stdout.flush()  # here, not at exit: a closed pipe (`| head`) printed an exception and exited 120
+        return code
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        import os
+
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
     except Exception as error:
         import os
 
@@ -93,7 +118,7 @@ def _parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(prog="agent-mem", description="Shared, local memory for coding agents.")
     parser.add_argument(
-        "--data-dir", type=Path, help="data folder (default: the usual one for this system, or AGENT_MEM_DATA_DIR)"
+        "--data-dir", type=_folder, help="data folder (default: the usual one for this system, or AGENT_MEM_DATA_DIR)"
     )
     parser.add_argument("--version", action="version", version=f"agent-mem {version()}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -107,7 +132,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("query", help="words, a file or a function name (for ids like T12 use `show`)")
     p.add_argument("--project", help="project directory (default: current directory)")
     p.add_argument("--all-projects", action="store_true", help="search every project, not just this one")
-    p.add_argument("--limit", type=int, default=8, help="most results to show (default: 8)")
+    p.add_argument("--limit", type=_positive, default=8, help="most results to show (default: 8, at most 100)")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = sub.add_parser("show", help="show entries by id, e.g. T12 (a request) or M3 (a memory)")
     p.add_argument("ids", nargs="+", help="ids such as T12 M3")
@@ -121,7 +146,9 @@ def _parser() -> argparse.ArgumentParser:
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--id", help="one entry, e.g. T12 or M3")
     group.add_argument("--project", help="project directory")
-    group.add_argument("--before", help="date like 2026-01-31; delete sessions that ended before it")
+    group.add_argument(
+        "--before", help="date like 2026-01-31; delete everything recorded or learned before it, notes included"
+    )
     group.add_argument("--all", action="store_true", help="everything agent-mem has stored")
     p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     p = sub.add_parser("observe", help="write facts from recorded requests now (runs by itself after each request)")

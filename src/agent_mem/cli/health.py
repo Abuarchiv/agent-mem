@@ -108,7 +108,9 @@ def _install_checks(config: Config, fix: bool) -> list[Check]:
     free_mb = shutil.disk_usage(config.data_dir).free / 1_000_000
     checks.append(Check("disk space", free_mb > 200, f"{free_mb:.0f} MB free", "Free disk space."))
     for warning in config.warnings:
-        checks.append(Check("config", False, warning, f"Edit {config.config_path}.", warn_only=True))
+        checks.append(
+            Check("config", False, warning.removeprefix("config: "), f"Edit {config.config_path}.", warn_only=True)
+        )
     return checks
 
 
@@ -124,6 +126,33 @@ def _database_checks(conn: sqlite3.Connection, config: Config) -> list[Check]:
             "Run `agent-mem index`: it keeps the damaged file as memory.db.corrupt-<time> and starts a new one.",
         )
     )
+    # A damaged database is moved aside, not deleted: it may hold what the new one lacks.
+    kept = sorted(
+        path
+        for path in config.db_path.parent.glob(f"{config.db_path.name}.corrupt-*")
+        if not path.name.endswith(("-wal", "-shm"))
+    )
+    if kept:
+        checks.append(
+            Check(
+                "damaged database set aside",
+                False,
+                f"{len(kept)} file(s), newest {kept[-1]}; the current database started empty then",
+                "Keep it if you want to recover from it with sqlite3 `.recover`; delete it otherwise.",
+                warn_only=True,
+            )
+        )
+    unread = len(list(config.quarantine_dir.glob("*.json"))) if config.quarantine_dir.exists() else 0
+    if unread:
+        checks.append(
+            Check(
+                "hook messages that could not be read",
+                False,
+                f"{unread} in {config.quarantine_dir}; everything else was saved",
+                "An agent sent something agent-mem does not understand. They are deleted with old payloads.",
+                warn_only=True,
+            )
+        )
     try:
         conn.execute("SELECT count(*) FROM search_fts").fetchone()
         checks.append(Check("word search", True, "available"))
@@ -334,7 +363,7 @@ def _provider_check(conn: sqlite3.Connection, config: Config) -> Check:
             kind = db.get_meta(conn, f"observe.pause_kind.{name}")
             login = kind == "login"
             reason = {"login": "not logged in, retry at", "timeout": "no answer twice, paused until"}
-            paused = f", {reason.get(kind or '', 'usage limit, paused until')} {until}"
+            paused = f", {reason.get(kind or '', 'usage limit, paused until')} {timeutil.local(until)}"
             logged_out += [name] if login else []
         # A pause runs out and an error that is no limit (Codex: "workspace routing discovery failed") never pauses:
         # a CLI that failed its last calls stayed green while every turn fell through to the next stage.

@@ -49,10 +49,15 @@ def prime_anchor_states(conn: sqlite3.Connection, hits: list[search.Hit]) -> Non
         _ANCHOR_CACHE[hit.owner] = consolidate.anchor_status(conn, hit.owner)
 
 
+MAX_IDS = 10
+
+
 def details(conn: sqlite3.Connection, ids: list[str], session_id: str | None = None) -> str:
+    if not ids:
+        return "No ids given."
     blocks: list[str] = []
     owners: list[tuple[str, int]] = []
-    for raw in ids[:10]:
+    for raw in ids[:MAX_IDS]:
         owner = parse_owner(raw)
         if owner is None:
             blocks.append(f"{raw}: invalid id (expected T<number> or M<number>)")
@@ -68,6 +73,8 @@ def details(conn: sqlite3.Connection, ids: list[str], session_id: str | None = N
         owners.append(owner)
     if owners:
         learn.record_access(conn, owners, "get", session_id)
+    if len(ids) > MAX_IDS:
+        blocks.append(f"Only the first {MAX_IDS} of {len(ids)} ids are shown; ask again for the rest.")
     return "\n\n---\n\n".join(blocks)
 
 

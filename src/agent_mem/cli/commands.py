@@ -63,7 +63,7 @@ def _project(conn: sqlite3.Connection, directory: str | None) -> identity.Projec
 
 def _unknown_project(directory: str) -> int:
     print(f"No recorded project at {os.path.abspath(directory)}.", file=sys.stderr)
-    return 2
+    return 1  # not found, like `show` and `rules`; 2 stays for wrong usage
 
 
 def _times(n: int, word: str) -> str:
@@ -110,7 +110,8 @@ def cmd_status(ns: argparse.Namespace, config: Config) -> int:
         print(f"Your savings: ~{saved:,} tokens ({injected['saved_percent']}% reduction from reuse)")
     print(f"Last cleanup: {timeutil.local(data['consolidated_at'])}")
     if data["paused_until"]:
-        print(f"Recording paused until {timeutil.local(data['paused_until'])}")
+        until = data["paused_until"]
+        print(f"Recording paused until {'you run `agent-mem resume`' if until == 'forever' else timeutil.local(until)}")
     print("Background jobs:")
     for component, info in sorted(data["components"].items()):
         failing = info["last_error_at"] and (not info["last_ok_at"] or info["last_error_at"] > info["last_ok_at"])
@@ -164,12 +165,15 @@ def cmd_show(ns: argparse.Namespace, config: Config) -> int:
 
     with _conn(config) as conn:
         print(views.details(conn, ns.ids))
-        owners = [owner for owner in map(parse_owner, ns.ids[:10]) if owner is not None]
-        found = any(
-            conn.execute(f"SELECT 1 FROM {'turns' if kind == 't' else 'memories'} WHERE id = ?", (number,)).fetchone()
-            for kind, number in owners
+        owners = [parse_owner(raw) for raw in ns.ids[: views.MAX_IDS]]
+        found = all(
+            owner is not None
+            and conn.execute(
+                f"SELECT 1 FROM {'turns' if owner[0] == 't' else 'memories'} WHERE id = ?", (owner[1],)
+            ).fetchone()
+            for owner in owners
         )
-    return 0 if found else 1  # like grep: a script sees that nothing was found
+    return 0 if found else 1  # like `ls a b`: a script sees that one of them was not found
 
 
 def _duration(text: str) -> timedelta:
@@ -253,6 +257,8 @@ def _confirm(ns: argparse.Namespace, what: str) -> bool:
 def _delete_owners(conn: sqlite3.Connection, owners: list[tuple[str, int]]) -> None:
     for owner in owners:
         store.delete_owner(conn, *owner)
+    # Names of files, commands and errors that only the deleted items mentioned (their edges cascade).
+    conn.execute("DELETE FROM entities WHERE NOT EXISTS (SELECT 1 FROM links WHERE links.entity_id = entities.id)")
 
 
 def _purge_spooled(config: Config, matches: Callable[[dict[str, Any]], bool]) -> int:
@@ -294,7 +300,7 @@ def _purge_all(ns: argparse.Namespace, config: Config) -> int:
     ):
         if path.exists():
             path.unlink()
-    for folder in (config.backup_dir, config.spool_dir, config.quarantine_dir, config.log_dir):
+    for folder in (config.backup_dir, config.spool_dir, config.quarantine_dir, config.log_dir, config.mem0_dir):
         shutil.rmtree(folder, ignore_errors=True)
     print("All data deleted (config and models kept).")
     return 0
@@ -307,7 +313,13 @@ def _purge_id(ns: argparse.Namespace, config: Config, conn: sqlite3.Connection) 
         return 2
     ui.discard(config)
     with db.transaction(conn):
-        deleted = store.delete_owner(conn, *owner)
+        deleted = (
+            conn.execute(
+                f"SELECT 1 FROM {'turns' if owner[0] == 't' else 'memories'} WHERE id = ?", (owner[1],)
+            ).fetchone()
+            is not None
+        )
+        _delete_owners(conn, [owner])
     print(f"Deleted {ns.id}." if deleted else f"{ns.id} not found.")
     return 0 if deleted else 1
 
@@ -358,15 +370,29 @@ def _purge_before(ns: argparse.Namespace, config: Config, conn: sqlite3.Connecti
         _delete_owners(conn, owners)
         conn.execute("DELETE FROM events WHERE ts < ?", (stamp,))
         conn.execute("DELETE FROM sessions WHERE last_event_at < ?", (stamp,))
+        # What was learned from that time: fixes for errors, command rules, preferences. They held its text.
+        conn.execute("DELETE FROM recipes WHERE updated_at < ?", (stamp,))
+        conn.execute("DELETE FROM rules WHERE created_at < ? AND COALESCE(last_hit_at, '') < ?", (stamp, stamp))
+        conn.execute("DELETE FROM profile WHERE updated_at < ?", (stamp,))
     removed = _purge_spooled(config, lambda r: str((r.get("event") or {}).get("ts") or "9999") < stamp)
     print(f"Deleted {len(owners)} items and {removed} unsaved events from before {ns.before}.")
     return 0
+
+
+def _tell_recovered(stats: dict[str, Any], config: Config) -> None:
+    if stats.get("recovered"):
+        print(
+            f"The database was damaged. It was moved aside as {config.db_path.name}.corrupt-<time> in "
+            f"{config.db_path.parent}, and a new one started.",
+            file=sys.stderr,
+        )
 
 
 def cmd_consolidate(ns: argparse.Namespace, config: Config) -> int:
     from agent_mem.memory.indexer import run
 
     stats = run(config, force_consolidate=True, allow_download=False)
+    _tell_recovered(stats, config)
     if ns.json:
         print(json.dumps(stats, indent=2, default=str))
     else:
@@ -393,7 +419,9 @@ def cmd_rules(ns: argparse.Namespace, config: Config) -> int:
                 )
             return 0
         if ns.rule_id is None:
-            print("rule id required", file=sys.stderr)
+            print(
+                f"agent-mem: rules {ns.action} needs a rule id, e.g. `agent-mem rules {ns.action} R3`", file=sys.stderr
+            )
             return 2
         with db.transaction(conn):
             if ns.action == "delete":
@@ -436,8 +464,13 @@ def cmd_lessons(ns: argparse.Namespace, config: Config) -> int:
     if not lines:
         print("Nothing repeated often enough yet.")
         return 0
+    # A rule and the preference written from the same correction read alike ("Use `pnpm` instead of `npm`").
+    unique: dict[str, str] = {}
+    for line in lines:
+        core = re.sub(r"\s*\((?:you )?corrected[^)]*\)$", "", line.replace("`", "")).strip().lower()
+        unique.setdefault(core, line)
     print("Suggested lines for AGENTS.md / CLAUDE.md (review before adding):\n")
-    print("\n".join(dict.fromkeys(lines)))
+    print("\n".join(unique.values()))
     return 0
 
 
@@ -573,6 +606,7 @@ def cmd_index(ns: argparse.Namespace, config: Config) -> int:
 
     stats = run(config, allow_download=not ns.no_download)
     record_setup_health(config)
+    _tell_recovered(stats, config)
     if ns.json:
         print(json.dumps(stats, indent=2, default=str))
     elif not ns.quiet:
@@ -593,6 +627,18 @@ def cmd_eval(ns: argparse.Namespace, config: Config) -> int:
     for path in (ns.fixture, ns.dataset, ns.custom_prompt):
         if path and not path.exists():  # before Runner loads, maybe downloads, the embedding model
             raise FileNotFoundError(2, "No such file", str(path))
+    for path, key, kind in ((ns.fixture, "cases", "fixture"), (ns.dataset, None, "LongMemEval-S file")):
+        if path is None:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            print(f"agent-mem eval: {path} is not valid JSON", file=sys.stderr)
+            return 2
+        items = data.get(key or "items") if isinstance(data, dict) else (data if key is None else None)
+        if not isinstance(items, list):
+            print(f"agent-mem eval: {path} is not a {kind}", file=sys.stderr)
+            return 2
     runner = Runner(
         ns.backend,
         semantic_search=not ns.no_semantic,

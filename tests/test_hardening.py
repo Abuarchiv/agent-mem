@@ -5,7 +5,8 @@ import json
 import os
 import sqlite3
 import subprocess
-from datetime import UTC, datetime
+import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -283,7 +284,7 @@ def test_odd_ids_and_durations_are_rejected(config: Config, capsys):
 
 def test_export_of_an_unknown_project_fails(config: Config, tmp_path: Path, capsys):
     base = ["--data-dir", str(config.data_dir)]
-    assert cli.main([*base, "export", "--project", str(tmp_path / "missing")]) == 2
+    assert cli.main([*base, "export", "--project", str(tmp_path / "missing")]) == 1  # not found
     assert "No recorded project" in capsys.readouterr().err
 
 
@@ -404,3 +405,99 @@ def test_a_fresh_windows_without_the_vc_runtime_is_told_what_to_install(config: 
     embedder, reason = semantic.load_embedder_verbose(config)
     assert embedder is None and reason is not None
     assert "Visual C++" in reason and semantic.VC_RUNTIME in reason and "--extras" not in reason
+
+
+def test_purge_takes_what_was_learned_from_the_deleted_requests(driver: Driver, conn, config: Config, project: Path):
+    """`purge --id` and `--before` left fixes with the error text, command rules, preferences and names behind;
+    `--all` left the fact index."""
+    base = ["--data-dir", str(config.data_dir)]
+
+    def learn(session: str) -> int:
+        driver.prompt(session, "Wir nutzen pnpm, nicht npm. Fix the failing tests")
+        driver.bash(session, "pytest -q", "E   ModuleNotFoundError: No module named 'zebrapkg'", failed=True)
+        driver.edit(session, "requirements.txt")
+        driver.bash(session, "pytest -q", "5 passed")
+        driver.stop(session, "Added zebrapkg")
+        return conn.execute("SELECT MAX(id) FROM turns").fetchone()[0]
+
+    turn = learn("s1")
+    assert conn.execute("SELECT COUNT(*) FROM recipes").fetchone()[0] == 1
+    assert cli.main([*base, "purge", "--id", f"T{turn}", "--yes"]) == 0
+    assert conn.execute("SELECT COUNT(*) FROM recipes WHERE error_text LIKE '%zebrapkg%'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM entities WHERE key LIKE '%requirements%'").fetchone()[0] == 0
+
+    learn("s2")
+    tomorrow = timeutil.iso(timeutil.now() + timedelta(days=1))[:10]
+    assert cli.main([*base, "purge", "--before", tomorrow, "--yes"]) == 0
+    for table in ("recipes", "rules", "profile", "entities", "turns", "memories"):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
+
+    index = config.mem0_dir / "qdrant" / "storage.sqlite"
+    index.parent.mkdir(parents=True)
+    index.write_bytes(b"facts")
+    conn.close()
+    assert cli.main([*base, "purge", "--all", "--yes"]) == 0
+    assert not config.mem0_dir.exists()
+
+
+def test_cli_answers_odd_input_plainly(driver: Driver, config: Config, project: Path, tmp_path: Path, capsys):
+    """Found by a bug hunt over every command."""
+    base = ["--data-dir", str(config.data_dir)]
+    driver.prompt("s1", "hello")
+    # One id of several missing is "not found" for a script; more than ten are named, not dropped silently.
+    assert cli.main([*base, "show", "T1", "T999"]) == 1
+    assert cli.main([*base, "show", "T1", "bogus"]) == 1
+    assert cli.main([*base, "show", *["T1"] * 12]) == 0
+    assert "Only the first 10 of 12 ids" in capsys.readouterr().out
+    # An unknown project is "not found" (1), not wrong usage (2).
+    assert cli.main([*base, "search", "x", "--project", str(tmp_path / "nowhere")]) == 1
+    for bad in ("0", "-1", "99999999999999999999"):
+        with pytest.raises(SystemExit):
+            cli.main([*base, "search", "x", "--limit", bad])
+    with pytest.raises(SystemExit):
+        cli.main(["--data-dir", "", "status"])
+    capsys.readouterr()
+    # A plain pause reads like the pause command says it.
+    cli.main([*base, "pause"])
+    cli.main([*base, "status"])
+    assert "until forever" not in capsys.readouterr().out
+    cli.main([*base, "resume"])
+    bad = tmp_path / "bad.json"
+    bad.write_text("{nope")
+    empty = tmp_path / "empty.json"
+    empty.write_text("{}")
+    for args in (["eval", str(bad)], ["eval", "--fixture", str(empty)], ["eval", str(empty)]):
+        assert cli.main([*base, *args]) == 2
+        assert "unexpected" not in capsys.readouterr().err
+
+
+def test_a_closed_pipe_ends_a_command_quietly(config: Config):
+    env = {**os.environ, "AGENT_MEM_DATA_DIR": str(config.data_dir), "AGENT_MEM_NO_SPAWN": "1"}
+    code = "import os, subprocess, sys; p = subprocess.Popen([sys.executable, '-m', 'agent_mem', 'paths', '--json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE); p.stdout.close(); print(p.wait(), p.stderr.read().decode())"
+    done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+    assert "Exception" not in done.stdout and "120" not in done.stdout.split()[0]
+
+
+def test_hook_help_after_the_agent_name_does_not_wait_for_input(config: Config):
+    env = {**os.environ, "AGENT_MEM_DATA_DIR": str(config.data_dir)}
+    # stdin stays open, as in a terminal: the hook read it and waited forever.
+    with subprocess.Popen(
+        [sys.executable, "-m", "agent_mem", "hook", "claude", "-h"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+    ) as process:  # fmt: skip
+        try:
+            assert process.wait(timeout=20) == 0
+        finally:
+            process.kill()
+
+
+def test_doctor_names_a_set_aside_database_and_unread_hook_messages(config: Config, monkeypatch):
+    from agent_mem.cli import health
+
+    monkeypatch.setattr(health, "_hook_checks", lambda fix: [])
+    monkeypatch.setattr(health, "_viewer_checks", lambda config, fix: [])
+    db.connect(config).close()
+    Path(f"{config.db_path}.corrupt-2026-10-27T10-00-00Z").write_bytes(b"old")
+    spool.quarantine_record(config.quarantine_dir, {"type": "invalid_payload", "reason": "x"})
+    names = {c.name for c in health.doctor(config) if not c.ok}
+    assert {"damaged database set aside", "hook messages that could not be read"} <= names
