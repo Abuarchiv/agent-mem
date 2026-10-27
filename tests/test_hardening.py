@@ -24,7 +24,7 @@ from tests.conftest import Driver
 
 
 def test_plain_parent_directory_does_not_swallow_nested_repositories(conn, tmp_path: Path):
-    parent = tmp_path / "home"
+    parent = tmp_path / "work"
     repo = parent / "repo"
     repo.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -36,6 +36,19 @@ def test_plain_parent_directory_does_not_swallow_nested_repositories(conn, tmp_p
     plain = parent / "notes"
     plain.mkdir()
     assert identity.resolve(conn, plain).id == outer.id  # type: ignore[union-attr]
+
+
+def test_the_home_folder_does_not_swallow_the_folders_below_it(conn):
+    """One session started in ~ made every later plain folder below it part of a project called "home"."""
+    home_dir = Path.home()  # the tests' own home folder (conftest)
+    home_dir.mkdir(parents=True, exist_ok=True)
+    home = identity.resolve(conn, home_dir)
+    work_a, work_c = home_dir / "work" / "a", home_dir / "work" / "c"
+    work_a.mkdir(parents=True)
+    work_c.mkdir()
+    a, c = identity.resolve(conn, work_a), identity.resolve(conn, work_c)
+    assert home is not None and a is not None and c is not None
+    assert len({home.id, a.id, c.id}) == 3
 
 
 def test_excluded_project_leaves_no_trace(conn, config: Config, project: Path):

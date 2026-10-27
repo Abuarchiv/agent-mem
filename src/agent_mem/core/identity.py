@@ -88,6 +88,12 @@ def _git_backed(project: Project) -> bool:
     return project.remote is not None or (project.root / ".git").exists()
 
 
+def _too_wide(root: Path) -> bool:
+    """A session in the home folder or a drive root is no project around everything below it: ~/work/a and
+    ~/work/c each got the home folder's memory."""
+    return _canonical(root) in {_canonical(Path.home()), _canonical(Path(root.anchor or "/"))}
+
+
 def _nested_repo(path: Path, root: Path) -> bool:
     """True when a ``.git`` lies between ``path`` and ``root`` (exclusive): its own repository. No git spawn."""
     base = _canonical(root)
@@ -116,7 +122,7 @@ def resolve(conn: sqlite3.Connection, cwd: str | Path | None, *, register: bool 
     if not path.is_dir():  # gone, or a file sent as the working folder: no new project for it
         return found
     toplevel = _git(path, "rev-parse", "--show-toplevel")
-    if not toplevel and found is not None:
+    if not toplevel and found is not None and not _too_wide(found.root):
         if register:
             _register_path(conn, path, found.id)
         return found
