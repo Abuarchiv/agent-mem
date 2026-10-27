@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -424,3 +425,32 @@ def test_every_install_line_with_the_model_extra_picks_a_python_it_has_wheels_fo
     ]
     assert len(lines) >= 3
     assert all("--python 3.1" in line for line in lines), lines
+
+
+def test_upgrade_on_windows_stops_what_runs_from_the_install_first(config, monkeypatch) -> None:
+    """Windows cannot replace Scripts\\ while the viewer runs from it: uv failed half way and agent-mem lost its
+    package. The upgrade stops those processes before uv and starts the viewer again after it."""
+    import argparse
+    import subprocess
+
+    from agent_mem.cli import commands
+    from agent_mem.hooks import hook
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["uv", "tool", "install", "x"])
+    monkeypatch.setattr(install, "extras", lambda: {"semantic": False, "observer": True})
+    monkeypatch.setattr(install, "version", lambda: "1.0.0")
+    started = []
+    monkeypatch.setattr(hook, "spawn_viewer", lambda config, force=False: started.append(force))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs.get("env") or {}))
+        return subprocess.CompletedProcess(argv, 0, stdout="5952\n" if argv[0] == "powershell" else "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
+    (stop, env), (uv, _) = calls[0], calls[1]
+    assert stop[0] == "powershell" and env["AM_PREFIX"] == sys.prefix and env["AM_SELF"] == str(os.getpid())
+    assert uv == ["uv", "tool", "install", "x"]
+    assert started == [True]

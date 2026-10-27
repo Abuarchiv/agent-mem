@@ -32,6 +32,13 @@ if (-not ((Test-Path "$system\msvcp140.dll") -and (Test-Path "$system\vcruntime1
   }
 }
 $before = if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem --version } else { "" }
+# Windows cannot replace the folder the viewer and background jobs run from: uv failed half way and left agent-mem
+# without its package (then `agent-mem --version` above prints nothing, so this runs either way). Open sessions'
+# MCP servers run through ~/.local/bin and keep running.
+$tools = (Join-Path (uv tool dir) "agent-mem").ToLower()
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($tools) } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 # 3.13: uv would take the newest Python, and onnxruntime (search by meaning) has no wheels for it yet (3.15).
 uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
 if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem. The error above names the cause." }

@@ -650,6 +650,37 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def _stop_background() -> bool:
+    """Windows cannot replace a folder a running program was started from. The viewer and background jobs run
+    Scripts\\python.exe of this install, so uv failed half way and left agent-mem without its package. Stop them
+    (the viewer starts again after the upgrade). MCP servers of open sessions run through the launcher in
+    ~/.local/bin and keep running."""
+    import subprocess
+
+    from agent_mem.core import proc
+
+    script = (
+        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
+        "$_.CommandLine.ToLower().Contains($env:AM_PREFIX.ToLower()) -and "
+        "$_.ProcessId -ne [int]$env:AM_SELF -and $_.ProcessId -ne [int]$env:AM_PARENT } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+    )
+    env = {**os.environ, "AM_PREFIX": sys.prefix, "AM_SELF": str(os.getpid()), "AM_PARENT": str(os.getppid())}
+    try:
+        done = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+            check=False,
+            **proc.hidden(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(done.stdout.strip())
+
+
 def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
     import shlex
     import subprocess
@@ -666,10 +697,15 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
         return 1
     before = install.version()
     exe = str(Path(sys.executable).with_name("agent-mem.exe" if sys.platform == "win32" else "agent-mem"))
+    stopped = _stop_background() if sys.platform == "win32" else False
     print("$ " + shlex.join(command), flush=True)
     if subprocess.run(command, check=False).returncode != 0:
         print("Upgrade failed; uv names the cause above.", file=sys.stderr)
         return 1
+    if stopped:
+        from agent_mem.hooks.hook import spawn_viewer
+
+        spawn_viewer(config, force=True)
     after = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout.strip()
     after = after.removeprefix("agent-mem ") or "?"
     if after == before:
