@@ -483,9 +483,9 @@ def test_a_session_in_the_folder_gets_the_rules_of_the_project_its_sessions_work
     _memory(conn, app_project.id, "In app.py never print, log instead")
     start = driver.start("s2").context or ""
     assert "never print" in start
-    assert conn.execute("SELECT root FROM projects p JOIN sessions s ON s.project_id = p.id").fetchone()[0] == str(
-        home.resolve()
-    )  # the session keeps the folder it started in; the next one from there starts where the work went
+    root = conn.execute("SELECT root FROM projects p JOIN sessions s ON s.project_id = p.id").fetchone()[0]
+    # the session keeps the folder it started in; the next one from there starts where the work went
+    assert root == identity._canonical(home)
 
 
 def test_turns_filed_under_the_start_folder_move_once_to_where_all_their_work_was(conn, config: Config, tmp_path):

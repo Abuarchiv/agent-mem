@@ -227,7 +227,8 @@ def test_hooks_of_an_older_release_are_found_and_doctor_fix_rewrites_them(homes:
         copilot_line.ok and copilot_line.detail.startswith(f"{exe} hook copilot (") and "events)" in copilot_line.detail
     )
     assert not any(install.stale(harness) for harness in HARNESSES)
-    assert install.hook_commands("claude") == [f"{exe} hook claude"]  # the path they used, not this test's binary
+    # the path they used, not this test's binary; Claude hooks hold forward slashes on Windows
+    assert install.hook_commands("claude") == [f"{Path(exe).as_posix()} hook claude"]
     assert "other-tool notify" in _hooks_commands(json.loads(settings.read_text())["hooks"])
 
 
@@ -386,7 +387,7 @@ def test_docker_install_points_hooks_at_its_launcher(homes: Path, monkeypatch) -
     monkeypatch.setenv("AGENT_MEM_EXE", str(launcher))
     assert install.binary() == str(launcher)
     install.write("claude", PLUGINS)
-    assert install.hook_commands("claude") == [f"{launcher} hook claude"]
+    assert install.hook_commands("claude") == [f"{launcher.as_posix()} hook claude"]
 
 
 def test_docker_setup_says_only_what_holds_on_the_host(homes: Path, config, monkeypatch, capsys) -> None:
