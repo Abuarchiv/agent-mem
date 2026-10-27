@@ -72,8 +72,16 @@ def test_opencode_plugin_events_match_normalizer():
     source = (PLUGINS / "opencode" / "agent-mem.ts").read_text()
     used = set(re.findall(r'callHook\("([a-z.]+)"', source))
     assert used <= set(opencode._KINDS)
-    # v2 has no pre-tool hook, so tool.before cannot be forwarded from the OpenCode plugin.
+    # v2 has no pre-tool hook, so tool.before cannot be forwarded from the OpenCode 2 stream.
     assert {"session.start", "chat.message", "tool.after", "session.idle"} <= used
+    # OpenCode 1.x (npm, 1.19) loads only a default export with server(); it also forwards tool.before.
+    asked = set(re.findall(r'askHook\("([a-z.]+)"', source))
+    assert (
+        {"session.start", "chat.message", "tool.before", "tool.after", "session.idle"} <= asked <= set(opencode._KINDS)
+    )
+    assert "export default { ...AgentMemPlugin, server }" in source
+    # A fresh OpenCode 2 has no @opencode-ai/plugin package to import at runtime: types only.
+    assert not re.search(r"^import (?!type )[^\n]*@opencode-ai/", source, re.M)
 
 
 def test_mcp_configs_start_the_server():

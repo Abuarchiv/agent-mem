@@ -7,10 +7,13 @@
 // Events are forwarded to `agent-mem hook opencode <event>` as JSON on stdin; memory failures
 // never surface. OpenCode 2's promise context has no pre-tool or system-transform hook: there
 // agent-mem records only, 1.x also gets context and the deny of an enabled rule.
-import { define } from "@opencode-ai/plugin/v2/promise"
+// Types only: a fresh OpenCode 2 has no @opencode-ai/plugin package next to this file, and a runtime import of it
+// made the plugin fail to load.
 import type { Plugin, PluginContext } from "@opencode-ai/plugin/v2/promise"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { spawn } from "node:child_process"
+
+const define = (plugin: Plugin): Plugin => plugin // what @opencode-ai/plugin's define() does
 
 const TIMEOUT_MS = 2000
 
