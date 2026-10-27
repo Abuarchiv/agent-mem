@@ -20,13 +20,13 @@ body:
     id: log
     attributes:
       label: Last 50 lines of the log
-      description: "`tail -n 50 \"$(agent-mem paths --json | python -c 'import json,sys;print(json.load(sys.stdin)[\"logs\"])')\"/hook.log`. Logs never contain prompt contents."
+      description: "`agent-mem paths` names the log folder; paste the end of `hook.log` there. Logs never contain what you typed."
       render: text
   - type: input
     id: harness
     attributes:
-      label: Harness and version
-      placeholder: Claude Code 2.x / Codex CLI 0.x / Copilot CLI 1.x / OpenCode 1.x
+      label: Agent and version
+      placeholder: Claude Code 2.x / Codex CLI 0.x / Copilot CLI 1.x / OpenCode 1.19 or 2.2
     validations:
       required: true
   - type: input
