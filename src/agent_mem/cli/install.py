@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_mem.core import logutil
-from agent_mem.core.harness import HARNESSES
+from agent_mem.core.harness import HARNESSES, claude_home, codex_home, copilot_home, opencode_home
 
 PROVIDERS = ("claude", "codex", "copilot", "ollama")
 MARK = "agent-mem"
@@ -42,26 +42,6 @@ def plugins_dir() -> Path:
     if packaged.is_dir():
         return packaged
     return package.parents[1] / "plugins"
-
-
-def claude_home() -> Path:
-    override = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(override).expanduser() if override else Path.home() / ".claude"
-
-
-def codex_home() -> Path:
-    override = os.environ.get("CODEX_HOME")
-    return Path(override).expanduser() if override else Path.home() / ".codex"
-
-
-def copilot_home() -> Path:
-    override = os.environ.get("COPILOT_HOME")
-    return Path(override).expanduser() if override else Path.home() / ".copilot"
-
-
-def opencode_home() -> Path:
-    override = os.environ.get("XDG_CONFIG_HOME")
-    return (Path(override) if override else Path.home() / ".config") / "opencode"
 
 
 def _read_json(path: Path) -> dict[str, Any]:

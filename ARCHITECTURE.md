@@ -52,8 +52,8 @@ src/agent_mem/
              the background fact worker; the only place that imports mem0 and qdrant
   mcp/       server: the stdio MCP server used by the plugins
   cli/       argument parsing, commands (data, servers, jobs), lifecycle (models, setup, uninstall, upgrade),
-             install (hook files, detection), health (status, doctor)
-  ui/        the self-contained HTML page, the loopback server that serves it, its login item
+             install (hook files, detection), health (doctor)
+  ui/        what status and the page show, the self-contained HTML page, its loopback server, its login item
   bench/     evaluate: fixture and LongMemEval-S runner (not used at runtime)
 ```
 
@@ -81,7 +81,8 @@ Dependency direction: `core` ← `hooks`, `memory` ← `observe`, `mcp`, `ui`, `
 | `observe/worker.py` | The loop, stats, `observe_calls`, forget propagation, reindex on embedder change |
 | `cli/lifecycle.py` | `models`, `setup`, `uninstall`, `upgrade` (on Windows through a script that runs after the command ends) |
 | `cli/install.py` | `setup --write` and `uninstall`: hook files with the absolute binary path, MCP entries, detection |
-| `cli/health.py` | `status`, `doctor` (observer queue, providers, index size, hook binary paths) |
+| `ui/status.py` | `status` and the viewer's agent rows (connected, fact model, runs today) |
+| `cli/health.py` | `doctor` (observer queue, providers, index size, hook binary paths) |
 
 ## Data model
 

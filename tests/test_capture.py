@@ -109,7 +109,7 @@ def test_prompt_hints_oldest_first_best_kept(driver: Driver, conn, config, proje
     other = Driver(conn, config, project, harness="codex")
     context = other.prompt("c1", "Which Postgres version runs the staging database?").context or ""
     assert "oldest first" in context and context.index("Postgres 14") < context.index("Postgres 16")
-    from agent_mem.cli.health import status
+    from agent_mem.ui.status import status
 
     injected = status(conn, config)["injected"]
     assert injected["blocks"] >= 1 and injected["today_tokens"] > 0 and injected["tokens_per_session"]

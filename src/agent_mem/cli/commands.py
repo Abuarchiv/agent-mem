@@ -71,7 +71,7 @@ def _times(n: int, word: str) -> str:
 
 
 def cmd_status(ns: argparse.Namespace, config: Config) -> int:
-    from agent_mem.cli.health import status
+    from agent_mem.ui.status import status
 
     with _conn(config) as conn:
         data = status(conn, config)

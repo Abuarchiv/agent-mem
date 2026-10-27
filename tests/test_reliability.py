@@ -110,8 +110,8 @@ def test_invalid_payload_is_quarantined_and_silent(config: Config):
 
 
 def test_quarantine_latest_says_what_was_set_aside(config: Config):
-    from agent_mem.cli.health import quarantine_latest
     from agent_mem.core import spool
+    from agent_mem.ui.status import quarantine_latest
 
     assert quarantine_latest(config) is None
     hook.run("claude", None, "{not json", config)

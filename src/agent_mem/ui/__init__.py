@@ -282,7 +282,7 @@ def _counts(conn: sqlite3.Connection, scope: _Scope) -> dict[str, Any]:
 
 def build_snapshot(conn: sqlite3.Connection, config: Config, project_id: str | None = None) -> dict[str, Any]:
     """Bounded, JSON-safe snapshot of the database. ``project_id`` limits every list to one project."""
-    from agent_mem.cli.health import agents, quarantine_latest, status
+    from agent_mem.ui.status import agents, quarantine_latest, status
 
     scope = _scope(project_id)
     where, params = scope.where, scope.params

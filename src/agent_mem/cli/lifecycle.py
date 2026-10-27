@@ -163,7 +163,7 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
                 print(f"  {path}")
         elif ns.harness != "all":
             print(f"{name}: nothing written by `setup --write` was found.")
-    from agent_mem.cli.health import harness_installed
+    from agent_mem.ui.status import harness_installed
 
     if not any(harness_installed(name) for name in HARNESSES):
         removed = autostart.remove_autostart()

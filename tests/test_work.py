@@ -7,10 +7,10 @@ import os
 import sqlite3
 from pathlib import Path
 
-from agent_mem.cli.health import _injected
 from agent_mem.core import db
 from agent_mem.hooks import capture, inject
 from agent_mem.memory import learn, store, work
+from agent_mem.ui.status import _injected
 
 
 def _lines(path: Path, entries: list[dict]) -> None:

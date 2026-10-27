@@ -27,6 +27,17 @@ def test_core_hooks_and_memory_do_not_import_upper_layers() -> None:
     assert violations == []
 
 
+def test_only_cli_imports_cli() -> None:
+    """The viewer, the MCP server and the observer run without the command line; cli sits on top of them."""
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in ROOT.rglob("*.py")
+        if _package(path) not in {"cli", "(root)"}
+        and re.search(r"from agent_mem\.cli\b", path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
 def test_no_relative_imports() -> None:
     offenders = [
         str(p.relative_to(ROOT))
