@@ -140,10 +140,6 @@ class Observe:
             if (self.cross_vendor or name in {"ollama", harness}) and shutil.which(name)
         ]
 
-    def stage_for(self, harness: str) -> tuple[str, str] | None:
-        """The stage turns from ``harness`` go to first (pauses live in the database and are not applied)."""
-        return next(iter(self.stages_for(harness)), None)
-
 
 @dataclass
 class Viewer:
