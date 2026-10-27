@@ -115,15 +115,18 @@ mem0 side: Qdrant collection `agent_mem` (one namespace per project, `user_id = 
 ## Ranking
 
 ```
+rrf = Σ over lists weight / (k + rank + 1)     (weight 0.5 for vector, else 1; k = 60)
 score = rrf_norm × (0.5 + 0.5·σ(B)) × (0.7 + 0.3·importance) × (0.5 + usefulness) × trust × project_boost
 B = ln Σ t_j^-0.5            (ACT-R, hours since each access)
 usefulness = (used + 1) / (shown + 2)
-order = score × (0.5 + 0.5·coverage) × (1 + 0.3·tie)
+order = score × (0.5 + 0.5·(coverage + weighted coverage) / 2) × (1 + 0.3·tie)
 ```
 
-`score` is what the abstention gate compares; `order` only sorts. `coverage` is the share of the question's words in a hit (a turn's request and the start of its answer, a memory's first 800 characters). `tie` (0 to 1) is how strongly the graph ties a hit to the files, commands and packages the question names: seeds by exact name 1.0, by a word inside a path 0.3. The graph reorders what text and vectors found and adds no candidates of its own; as a separate list in the fusion it would outvote exact matches with whatever touched such a file last. A project's search includes the projects nested in it and the projects around it (`~/work` around `~/work/app`), never the home folder.
+Candidate lists: FTS5 (bm25), rare file and code names of the question (`name`), for `mem_search` and the CLI also tool outputs naming them (`output`), vectors, and turns in a named time window. `name` and `output` add to a hit's fusion score but do not count in `rrf_norm`'s denominator, so a name some tool printed cannot push every other hit below the gate.
 
-Automatic injection (prompt hook) is lexical and also requires a minimum score and term coverage; question words and filler verbs are not terms, hyphenated words are searched as their parts, and one inflection ending is dropped. Vector candidates (MCP server, CLI) count only above `retrieval.min_vector_score` (0.3 for MiniLM, calibrated on the retrieval fixture). `mem_search` applies the same gate; a hit with vector support needs a third of the content words. Without a confident hit it lists three weak candidates under "No confident match". `agent-mem eval --fixture` reports both paths (`hit@1`, `abstention` and `injected_*`).
+`score` is what the abstention gate compares; `order` only sorts. `coverage` is the share of the question's words in a hit (a turn's request and the start of its answer, a memory's first 800 characters); `weighted coverage` counts each word by its rarity among the candidates, so an entry that names only the project's name does not tie with the one naming the rare word asked for. `tie` (0 to 1) is how strongly the graph ties a hit to the files, commands and packages the question names: seeds by exact name 1.0, by a word inside a path 0.3. The graph reorders what text and vectors found and adds no candidates of its own; as a separate list in the fusion it would outvote exact matches with whatever touched such a file last. A project's search includes the projects nested in it and the projects around it (`~/work` around `~/work/app`), never the home folder.
+
+Automatic injection (prompt hook) is lexical and also requires a minimum score and term coverage; question words and filler verbs are not terms, hyphenated words are searched as their parts, and one inflection ending is dropped. Vector candidates (MCP server, CLI) count only above `retrieval.min_vector_score` (0.45 for MiniLM) and at half weight: at full weight loosely related facts pushed the turn naming the asked file out of the top five. `mem_search` applies the same gate; a hit with vector support needs a third of the content words, and a hit that names at least three of the question's words and 60% of them passes whatever its score. Without a confident hit it lists three weak candidates under "No confident match". `agent-mem eval --fixture` reports both paths (`hit@1`, `abstention` and `injected_*`).
 
 ## Why mem0 search is not the retrieval path
 
