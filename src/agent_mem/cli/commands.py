@@ -650,35 +650,48 @@ def cmd_uninstall(ns: argparse.Namespace, config: Config) -> int:
     return 0
 
 
-def _stop_background() -> bool:
-    """Windows cannot replace a folder a running program was started from. The viewer and background jobs run
-    Scripts\\python.exe of this install, so uv failed half way and left agent-mem without its package. Stop them
-    (the viewer starts again after the upgrade). MCP servers of open sessions run through the launcher in
-    ~/.local/bin and keep running."""
-    import subprocess
+def _upgrade_after_exit(command: list[str], exe: str, steps: list[list[str]], config: Config) -> int:
+    """Windows cannot replace an install a program runs from, and this command runs from it: ~/.local/bin/agent-mem.exe
+    starts Scripts\\python.exe of the install, as do the viewer, background jobs and every open session's MCP server.
+    uv then stopped half way and left agent-mem without its package. A PowerShell script takes over: it waits for this
+    command to end, stops the rest, upgrades and runs the follow-up steps with the new code."""
+    from agent_mem.hooks.hook import _spawn
 
-    from agent_mem.core import proc
+    def quote(text: str) -> str:
+        return "'" + text.replace("'", "''") + "'"
 
-    script = (
-        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
-        "$_.CommandLine.ToLower().Contains($env:AM_PREFIX.ToLower()) -and "
-        "$_.ProcessId -ne [int]$env:AM_SELF -and $_.ProcessId -ne [int]$env:AM_PARENT } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+    def call(argv: list[str]) -> str:  # piped so the transcript gets the output
+        return "& " + " ".join(quote(arg) for arg in argv) + ' 2>&1 | ForEach-Object { "$_" }'
+
+    config.log_dir.mkdir(parents=True, exist_ok=True)
+    log, script = config.log_dir / "upgrade.log", config.log_dir / "upgrade.ps1"
+    lines = [
+        f"Start-Transcript -Path {quote(str(log))} | Out-Null",
+        f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue",
+        f"$prefix = {quote(sys.prefix.lower())}",
+        "$running = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and "
+        "($_.Name -eq 'agent-mem.exe' -or $_.CommandLine.ToLower().Contains($prefix)) })",
+        "$running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+        "Start-Sleep 1",
+        call(command),
+        "if ($LASTEXITCODE -ne 0) { 'Upgrade failed; uv names the cause above.' } else {",
+        *(call([exe, *step]) for step in steps),
+        call([exe, "--version"]),
+        "if ($running | Where-Object { $_.CommandLine -match ' serve' }) {",
+        f"Start-Process {quote(exe)} -ArgumentList 'serve','--quiet' -WindowStyle Hidden }}",
+        "}",
+        "Stop-Transcript | Out-Null",
+    ]
+    script.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")  # the BOM makes PowerShell 5.1 read UTF-8
+    if not _spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], config):
+        print("Could not start PowerShell for the upgrade.", file=sys.stderr)
+        return 1
+    print(
+        "Windows cannot replace a running program, so the upgrade starts when this command ends. It stops the "
+        "viewer, background jobs and the agent-mem connection of open sessions (restart those sessions), upgrades "
+        f"and checks the setup. Progress: {log}"
     )
-    env = {**os.environ, "AM_PREFIX": sys.prefix, "AM_SELF": str(os.getpid()), "AM_PARENT": str(os.getppid())}
-    try:
-        done = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=60,
-            check=False,
-            **proc.hidden(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return bool(done.stdout.strip())
+    return 0
 
 
 def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
@@ -697,15 +710,16 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
         return 1
     before = install.version()
     exe = str(Path(sys.executable).with_name("agent-mem.exe" if sys.platform == "win32" else "agent-mem"))
-    stopped = _stop_background() if sys.platform == "win32" else False
+    # Run by the new code: models a new default or extra needs (a no-op when cached), the database migration, and
+    # hooks an older release wrote.
+    steps = [["models", "install"]] if install.extras()["semantic"] or "semantic" in ns.extras else []
+    steps.append(["doctor", "--fix"])
+    if sys.platform == "win32":
+        return _upgrade_after_exit(command, exe, steps, config)
     print("$ " + shlex.join(command), flush=True)
     if subprocess.run(command, check=False).returncode != 0:
         print("Upgrade failed; uv names the cause above.", file=sys.stderr)
         return 1
-    if stopped:
-        from agent_mem.hooks.hook import spawn_viewer
-
-        spawn_viewer(config, force=True)
     after = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout.strip()
     after = after.removeprefix("agent-mem ") or "?"
     if after == before:
@@ -716,11 +730,8 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
             f"agent-mem {before} -> {after}. Hooks use it now; running sessions keep their MCP server until restart.",
             flush=True,
         )
-    # Run by the new code: models a new default or extra needs (a no-op when cached), the database migration, and
-    # hooks an older release wrote.
-    steps = [["models", "install"]] if install.extras()["semantic"] or "semantic" in ns.extras else []
     code = 0
-    for step in [*steps, ["doctor", "--fix"]]:
+    for step in steps:
         print(f"$ agent-mem {' '.join(step)}", flush=True)
         code = subprocess.run([exe, "--data-dir", str(config.data_dir), *step], check=False).returncode
     return code

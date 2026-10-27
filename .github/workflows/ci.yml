@@ -69,6 +69,11 @@ jobs:
           sed -i.bak 's/^version = "1.0.0"/version = "1.0.1"/' pyproject.toml
           sed -i.bak 's/^__version__ = "1.0.0"/__version__ = "1.0.1"/' src/agent_mem/__init__.py
           agent-mem upgrade || true  # doctor --fix at its end finds no agent on the runner
+          if [ "$RUNNER_OS" = Windows ]; then  # upgrades from a script that starts once the command has ended
+            log="$AGENT_MEM_DATA_DIR/logs/upgrade.log"
+            for _ in $(seq 60); do grep -qs "transcript end" "$log" && break; sleep 5; done
+            cat "$log"
+          fi
           agent-mem --version | grep -q 1.0.1
 
   sdist:

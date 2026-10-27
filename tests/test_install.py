@@ -287,6 +287,7 @@ def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch,
 
     from agent_mem.cli import commands
 
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["/bin/uv", "tool", "install", "x"])
     monkeypatch.setattr(install, "extras", lambda: {"semantic": True, "observer": True})
     versions = iter(["1.0.0 (aaaaaaa)"])
@@ -427,9 +428,10 @@ def test_every_install_line_with_the_model_extra_picks_a_python_it_has_wheels_fo
     assert all("--python 3.1" in line for line in lines), lines
 
 
-def test_upgrade_on_windows_stops_what_runs_from_the_install_first(config, monkeypatch) -> None:
-    """Windows cannot replace Scripts\\ while the viewer runs from it: uv failed half way and agent-mem lost its
-    package. The upgrade stops those processes before uv and starts the viewer again after it."""
+def test_upgrade_on_windows_hands_over_to_a_script_that_waits_for_it(config, monkeypatch, capsys) -> None:
+    """Windows cannot replace Scripts\\ while anything runs from it, this command included: uv stopped half way and
+    agent-mem lost its package. The upgrade hands uv to a PowerShell script that waits for this process to end and
+    stops the viewer, background jobs and MCP servers first."""
     import argparse
     import subprocess
 
@@ -440,17 +442,16 @@ def test_upgrade_on_windows_stops_what_runs_from_the_install_first(config, monke
     monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["uv", "tool", "install", "x"])
     monkeypatch.setattr(install, "extras", lambda: {"semantic": False, "observer": True})
     monkeypatch.setattr(install, "version", lambda: "1.0.0")
-    started = []
-    monkeypatch.setattr(hook, "spawn_viewer", lambda config, force=False: started.append(force))
-    calls = []
-
-    def run(argv, **kwargs):
-        calls.append((argv, kwargs.get("env") or {}))
-        return subprocess.CompletedProcess(argv, 0, stdout="5952\n" if argv[0] == "powershell" else "")
-
-    monkeypatch.setattr(subprocess, "run", run)
+    spawned = []
+    monkeypatch.setattr(hook, "_spawn", lambda argv, config: spawned.append(argv) or True)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("uv must not run inside this process"))
     assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
-    (stop, env), (uv, _) = calls[0], calls[1]
-    assert stop[0] == "powershell" and env["AM_PREFIX"] == sys.prefix and env["AM_SELF"] == str(os.getpid())
-    assert uv == ["uv", "tool", "install", "x"]
-    assert started == [True]
+    assert spawned[0][0] == "powershell" and spawned[0][-1].endswith("upgrade.ps1")
+    script = (config.log_dir / "upgrade.ps1").read_text(encoding="utf-8-sig").splitlines()
+    wait = next(i for i, line in enumerate(script) if line.startswith(f"Wait-Process -Id {os.getpid()} "))
+    stop = next(i for i, line in enumerate(script) if "Stop-Process" in line)
+    uv = next(i for i, line in enumerate(script) if line.startswith("& 'uv' 'tool' 'install' 'x'"))
+    doctor = next(i for i, line in enumerate(script) if "'doctor' '--fix'" in line)
+    assert wait < stop < uv < doctor
+    assert not any("'models'" in line for line in script)
+    assert "upgrade.log" in capsys.readouterr().out

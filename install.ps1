@@ -31,14 +31,16 @@ if (-not ((Test-Path "$system\msvcp140.dll") -and (Test-Path "$system\vcruntime1
     Write-Host "Skipped ($_). Search by words works; for search by meaning install https://aka.ms/vs/17/release/vc_redist.x64.exe"
   }
 }
-$before = if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem --version } else { "" }
-# Windows cannot replace the folder the viewer and background jobs run from: uv failed half way and left agent-mem
-# without its package (then `agent-mem --version` above prints nothing, so this runs either way). Open sessions'
-# MCP servers run through ~/.local/bin and keep running.
+# A half-removed install fails here with a traceback on stderr, which "Stop" turns into an error: then it is new.
+$before = try { if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem --version 2>$null } } catch { "" }
+# Windows cannot replace an install a program runs from: uv failed half way and left agent-mem without its package.
+# The viewer, background jobs and open sessions' MCP servers all run its Scripts\python.exe (MCP servers through
+# agent-mem.exe in ~/.local/bin), so they stop; sessions reconnect when restarted.
 $tools = (Join-Path (uv tool dir) "agent-mem").ToLower()
 Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($tools) } |
+  Where-Object { $_.CommandLine -and ($_.Name -eq "agent-mem.exe" -or $_.CommandLine.ToLower().Contains($tools)) } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep 1
 # 3.13: uv would take the newest Python, and onnxruntime (search by meaning) has no wheels for it yet (3.15).
 uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"
 if ($LASTEXITCODE -ne 0) { Fail "uv could not install agent-mem. The error above names the cause." }
