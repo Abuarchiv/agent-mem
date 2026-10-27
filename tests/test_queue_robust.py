@@ -541,3 +541,21 @@ def test_doctor_names_a_cli_whose_last_calls_all_failed(config: Config, monkeypa
     )
     assert health._provider_check(conn, config).ok
     conn.close()
+
+
+def test_the_viewer_names_the_stage_writing_facts_while_the_first_is_paused(config: Config, monkeypatch):
+    from agent_mem.cli import health
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/bin/{name}")
+    config.observe.providers = ["opencode", "claude"]
+    config.observe.cross_vendor = True
+    conn = db.connect(config)
+    later = timeutil.iso(timeutil.now() + timedelta(minutes=30))
+    db.set_meta(conn, "observe.pause.opencode", later)
+    # Facts go on through claude: "paused, requests wait" in the viewer was wrong.
+    stage = health.fact_stage(conn, config, "codex")
+    assert (stage["stage"], stage["paused_until"]) == ("claude", None)
+    db.set_meta(conn, "observe.pause.claude", later)
+    stage = health.fact_stage(conn, config, "codex")
+    assert stage["stage"] == "opencode" and stage["paused_until"] == later
+    conn.close()

@@ -71,13 +71,16 @@ def harness_installed(harness: str) -> bool:
 
 
 def fact_stage(conn: sqlite3.Connection, config: Config, harness: str) -> dict[str, Any]:
-    """Which model turns from ``harness`` go to for facts, and whether it is paused."""
-    found = config.observe.stage_for(harness)
-    paused = db.get_meta(conn, f"observe.pause.{found[0]}") if found else None
+    """Which model turns from ``harness`` go to for facts now: the first stage not paused. Paused only when all are."""
+    from agent_mem.observe import providers
+
+    stages = dict(config.observe.stages_for(harness))
+    running = next((name for name in providers.chain(config, harness, conn) if name in stages), None)
+    name = running or next(iter(stages), None)
     return {
-        "stage": found[0] if found else None,
-        "model": found[1] if found else None,
-        "paused_until": paused if paused and paused > timeutil.iso() else None,
+        "stage": name,
+        "model": stages.get(name) if name else None,
+        "paused_until": providers.resumes_at(config, harness, conn) if stages and not running else None,
         "enabled": config.observe.enabled,
     }
 
