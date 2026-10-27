@@ -64,7 +64,7 @@ dependencies = ["nodejs-wheel-binaries==24.19.0"]
 "plugins" = "agent_mem/plugins"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_mem", "tests", "plugins", "hatch_build.py", "install.sh", "install.ps1", ".claude-plugin", ".agents", ".github/plugin", ".githooks", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+include = ["src/agent_mem", "tests", "plugins", "hatch_build.py", "install.sh", "install.ps1", ".claude-plugin", ".agents", ".github/plugin", ".githooks", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md"]
 
 [tool.uv]
 # Installed from a folder (`uv tool install ./agent-mem`), uv rebuilds only when a cache key changes; its default

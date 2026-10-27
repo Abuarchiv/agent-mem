@@ -336,8 +336,10 @@ Notes per agent:
 ```sh
 uv sync --all-extras
 uv run pytest -m "not local"
-uv run ruff check src tests && uv run ruff format --check src tests && uv run pyright
+uv run ruff check && uv run ruff format --check && uv run pyright
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commits, tests and the retrieval measurement.
 
 ## License
 
