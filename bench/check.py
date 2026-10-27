@@ -7,9 +7,11 @@ The git hook: `ln -s ../../bench/pre-push .git/hooks/pre-push` (skip once with `
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -50,6 +52,7 @@ def _eval(work: Path, *args: str) -> dict:
 
 def measure() -> dict[str, dict[str, float]]:
     work = Path(tempfile.mkdtemp())
+    atexit.register(shutil.rmtree, work, ignore_errors=True)
     numbers = {"fixture": _eval(work, "--fixture", str(REPO / "tests/fixtures/memory_cases.json"))}
     if LME.exists():
         subset = str(REPO / "tests/fixtures/longmemeval_subset.json")

@@ -7,6 +7,7 @@ Env: AM_DB (database to copy), AM_CWD (project folder the questions are about), 
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
@@ -53,6 +54,7 @@ def cm_search(q: str) -> str:
 
 
 work = Path(tempfile.mkdtemp())
+atexit.register(shutil.rmtree, work, ignore_errors=True)  # a database copy per question, 10 GB a run
 master = work / "master.db"
 source, target = sqlite3.connect(LIVE), sqlite3.connect(master)
 source.backup(target)
