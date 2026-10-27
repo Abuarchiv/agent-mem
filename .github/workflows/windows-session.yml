@@ -50,9 +50,32 @@ jobs:
       - name: OpenCode sessions (plugin, MCP search)
         working-directory: demo
         run: |
+          $probe = @'
+          import { define } from "@opencode-ai/plugin/v2/promise"
+          import { appendFileSync } from "node:fs"
+          export default define({
+            id: "probe",
+            setup: ((context: any) => {
+              const log = (line: string) => appendFileSync(process.env.USERPROFILE + "/probe.txt", line + "\n")
+              log("setup " + JSON.stringify(context.location))
+              void (async () => {
+                let n = 0
+                for await (const event of context.event.subscribe({ signal: new AbortController().signal })) {
+                  const e = event as any
+                  if (n++ < 40) log(e.type + " " + JSON.stringify(e.data?.location ?? null) + " " + (e.data?.sessionID ?? ""))
+                }
+              })()
+            }) as any,
+          })
+          '@
+          $probe | Out-File -Encoding utf8 "$env:USERPROFILE\.config\opencode\plugins\probe.ts"
           opencode run -m opencode/big-pickle "Merke dir: der Build läuft mit 'pnpm tsup --minify'. Antworte nur mit OK."
           Start-Sleep 5
           opencode run -m opencode/big-pickle "Suche mit dem Werkzeug agent-mem mem_search nach 'tsup' und nenne den Build-Befehl."
+          Get-Content "$env:USERPROFILE\probe.txt" -ErrorAction SilentlyContinue | Select-Object -First 60
+          Get-ChildItem "$env:USERPROFILE\.local\share\opencode\log" -ErrorAction SilentlyContinue | ForEach-Object {
+            Select-String -Path $_.FullName -Pattern "agent-mem|plugin" | Select-Object -First 30 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) }
+          }
           exit 0
       - name: What agent-mem recorded
         run: |
