@@ -29,9 +29,15 @@ Binding rules for every agent and contributor.
   observer extra and a cached embedding model; run them by hand before a release. `uv.lock` is
   committed so pins are reproducible. Never run `uv sync` while a measurement is running against the
   same venv. A change to what is found or injected runs `uv run python bench/check.py` (fixture,
-  LongMemEval-40, versus questions on a fresh copy of the live database; `bench/pre-push` runs it
+  LongMemEval-40, versus questions on a fresh copy of the live database; `.githooks/pre-push` runs it
   before every push). Before a release: CI green on Linux, macOS (arm64, x64) and Windows, plus one real
   session per harness by hand (capture, recall in a new session, compaction, uninstall).
 - **R10 Git.** Local commits only, no push, no releases, until the user explicitly allows it. No AI
   attributions in commits, PRs, tags or files. Never commit the user's own uncommitted deletions or
-  edits in the working tree; stage explicit paths.
+  edits in the working tree; stage explicit paths. Enable the hooks once per clone with
+  `git config core.hooksPath .githooks`.
+- **R11 Commits.** One change per commit, tests and checks green before it. Subject in English,
+  `<area>: <what changed>` in the imperative, at most 72 characters, no final period; area is the
+  package or topic (`cli`, `hooks`, `search`, `observe`, `ui`, `docs`, `ci`, `bench`, `tests`). The
+  body, after a blank line, says why: the symptom or measurement that called for it. `.githooks/commit-msg`
+  checks the form.

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Commit message rules (AGENTS.md R10). Enable once per clone: git config core.hooksPath .githooks
+msg="$1"
+subject=$(sed -n 1p "$msg")
+fail() { printf 'commit-msg: %s\n  %s\n' "$1" "$subject" >&2; exit 1; }
+
+case "$subject" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+printf '%s' "$subject" | grep -Eq '^[a-z][a-z0-9/.-]*: [^ ]' ||
+  fail 'subject must read "<area>: <what changed>", area in lower case (cli, hooks, search, docs, ci, ...)'
+[ "$(printf '%s' "$subject" | wc -m)" -le 72 ] || fail 'subject longer than 72 characters; put the reason in the body'
+case "$subject" in *.) fail 'subject ends with a period' ;; esac
+[ -z "$(sed -n 2p "$msg")" ] || fail 'leave the second line empty before the body'
+grep -Eiq '^(co-authored-by|generated with)' "$msg" && fail 'no attribution lines'
+exit 0

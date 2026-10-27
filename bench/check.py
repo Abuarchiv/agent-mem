@@ -2,7 +2,7 @@
 bench/baseline.json. Exit 1 when a number drops. `--update` freezes a new copy of the live database and writes its
 numbers as the new baseline.
 
-The git hook: `ln -s ../../bench/pre-push .git/hooks/pre-push` (skip once with `git push --no-verify`).
+The git hook: `.githooks/pre-push`, enabled with `git config core.hooksPath .githooks` (skip once with `git push --no-verify`).
 """
 
 from __future__ import annotations

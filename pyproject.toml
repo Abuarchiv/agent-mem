@@ -60,7 +60,7 @@ dependencies = ["nodejs-wheel-binaries==24.19.0"]
 "plugins" = "agent_mem/plugins"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_mem", "tests", "plugins", "hatch_build.py", "install.sh", "install.ps1", ".claude-plugin", ".agents", ".github/plugin", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+include = ["src/agent_mem", "tests", "plugins", "hatch_build.py", "install.sh", "install.ps1", ".claude-plugin", ".agents", ".github/plugin", ".githooks", "README.md", "ARCHITECTURE.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
 
 [tool.uv]
 # Installed from a folder (`uv tool install ./agent-mem`), uv rebuilds only when a cache key changes; its default
@@ -95,7 +95,7 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PL"]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PL", "C90"]
 ignore = [
   "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917", "PLR2004",
   "PLC0415",  # lazy imports keep the hook path free of heavy dependencies
@@ -104,6 +104,10 @@ ignore = [
   "S603", "S607", "S608", "S101", "S310",
   "RUF001", "RUF002", "RUF003",
 ]
+
+[tool.ruff.lint.mccabe]
+# The most complex function today; lower it when one of them is split, never raise it.
+max-complexity = 17
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "PLR", "PLC0415"]
