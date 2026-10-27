@@ -37,6 +37,21 @@ SQLite (WAL)       the truth: sessions, turns, events, memories (facts), queue, 
 - A turn only goes to the vendor that already saw it (Claude turn to Claude, Codex turn to Codex, Copilot turn to Copilot). `observe.cross_vendor` opens the full chain. Ollama is an opt-in stage.
 - SQLite is the truth. Everything in `mem0/` can be rebuilt from valid facts without a model call. A changed embedder triggers that rebuild on the next worker run and a full re-embedding on the next indexer run.
 
+## Repository layout
+
+```
+src/agent_mem/        the package (below)
+plugins/              per agent: hook definitions, MCP entry, OpenCode plugin; shipped inside the wheel
+.claude-plugin/       marketplace entries that point at plugins/ (Claude Code, Codex, Copilot CLI)
+.agents/plugins/
+.github/plugin/
+tests/                pytest; `-m "not local"` runs everything that needs no cached model
+bench/                retrieval measurement before a push (check.py), agent-mem vs claude-mem (versus.py)
+.githooks/            commit-msg (AGENTS.md R11) and pre-push (bench/check.py); `git config core.hooksPath .githooks`
+install.sh, install.ps1, install-docker.sh, Dockerfile   the install lines from the README
+hatch_build.py        build hook: compiles ui/app.ts to app.js for the wheel
+```
+
 ## Package layout
 
 ```

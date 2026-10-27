@@ -1,7 +1,7 @@
 [project]
 name = "agent-mem"
 dynamic = ["version"]
-description = "Shared, local memory for Claude Code, Codex, Copilot CLI and OpenCode. Facts are extracted in the background through the harness you already use (no API key); no cloud, no telemetry."
+description = "Local memory shared by Claude Code, Codex, Copilot CLI and OpenCode. No API key, no cloud."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
