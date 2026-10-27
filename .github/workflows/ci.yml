@@ -57,6 +57,16 @@ jobs:
           echo "$command"
           echo '{"hook_event_name":"UserPromptSubmit","session_id":"setup","cwd":"'"$PWD"'","prompt":"setup smoke"}' | bash -c "$command"
           agent-mem status --json | grep -q '"turns": 1,'
+      - name: Upgrade while an open session's MCP server runs (Windows locks a running .exe)
+        shell: bash
+        env:
+          AGENT_MEM_DATA_DIR: ${{ runner.temp }}/agent-mem-setup
+          AGENT_MEM_NO_SPAWN: "1"
+        run: |
+          sleep 300 | agent-mem mcp > /dev/null &
+          sleep 5
+          uv tool install --reinstall-package agent-mem dist/*.whl
+          agent-mem --version
 
   sdist:
     runs-on: ubuntu-latest
