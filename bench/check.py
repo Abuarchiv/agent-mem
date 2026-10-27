@@ -7,6 +7,7 @@ The git hook: `ln -s ../../bench/pre-push .git/hooks/pre-push` (skip once with `
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -19,8 +20,12 @@ REPO = Path(__file__).resolve().parents[1]
 BASELINE = REPO / "bench" / "baseline.json"
 DATA = Path.home() / "Library/Application Support/agent-mem"
 # The live database grows with every request: measured on it, a baseline drifts without a code change (20 -> 19 on
-# 2026-10-26). `--update` freezes a copy next to the eval data; every check after measures that same copy.
-SNAPSHOT = Path(os.environ.get("AM_SNAPSHOT") or Path.home() / ".cache/agent-mem/eval/bench-snapshot.db")
+# 2026-10-26). `--update` freezes a copy next to the eval data; every check after measures that same copy. One copy
+# per checkout like the baseline it belongs to: a shared one was refrozen by `--update` in another worktree.
+SNAPSHOT = Path(
+    os.environ.get("AM_SNAPSHOT")
+    or Path.home() / f".cache/agent-mem/eval/bench-snapshot-{hashlib.sha256(bytes(REPO)).hexdigest()[:8]}.db"
+)
 LME = Path(os.environ.get("AM_LME") or Path.home() / ".cache/agent-mem/eval/longmemeval_s.json")
 # Higher is better for all of them; prompt_chars only reported (fewer tokens for the same hits is the goal).
 TRACKED = {
