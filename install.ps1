@@ -24,6 +24,7 @@ if (-not ((Test-Path "$system\msvcp140.dll") -and (Test-Path "$system\vcruntime1
   Write-Host "Installing the Microsoft Visual C++ runtime (search by meaning needs it)..."
   try {
     $redist = Join-Path $env:TEMP "vc_redist.x64.exe"
+    $ProgressPreference = "SilentlyContinue"  # PowerShell 5.1 downloads many times slower while it draws progress
     Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile $redist -UseBasicParsing
     Start-Process $redist -ArgumentList "/install", "/quiet", "/norestart" -Verb RunAs -Wait
   } catch {
