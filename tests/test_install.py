@@ -442,6 +442,7 @@ def test_upgrade_on_windows_hands_over_to_a_script_that_waits_for_it(config, mon
     monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["uv", "tool", "install", "x"])
     monkeypatch.setattr(install, "extras", lambda: {"semantic": False, "observer": True})
     monkeypatch.setattr(install, "version", lambda: "1.0.0")
+    monkeypatch.setattr(install, "source_is_current", lambda: False)
     spawned = []
     monkeypatch.setattr(hook, "_spawn", lambda argv, config: spawned.append(argv) or True)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("uv must not run inside this process"))
@@ -455,3 +456,49 @@ def test_upgrade_on_windows_hands_over_to_a_script_that_waits_for_it(config, mon
     assert wait < stop < uv < doctor
     assert not any("'models'" in line for line in script)
     assert "upgrade.log" in capsys.readouterr().out
+
+
+def test_upgrade_on_windows_leaves_sessions_alone_when_already_newest(config, monkeypatch, capsys) -> None:
+    """The hand-over stops every open session's MCP server; with nothing new to install that cost buys nothing."""
+    import argparse
+    import subprocess
+
+    from agent_mem.cli import commands
+    from agent_mem.hooks import hook
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["uv", "tool", "install", "x"])
+    monkeypatch.setattr(install, "extras", lambda: {"semantic": False, "observer": True})
+    monkeypatch.setattr(install, "version", lambda: "1.0.0 (aaaaaaa)")
+    monkeypatch.setattr(install, "source_is_current", lambda: True)
+    monkeypatch.setattr(hook, "_spawn", lambda argv, config: pytest.fail("nothing to hand over"))
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **k: calls.append(argv) or subprocess.CompletedProcess(argv, 0))
+    assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
+    assert [c[-2:] for c in calls] == [["doctor", "--fix"]]
+    assert "1.0.0 (aaaaaaa) is the newest version" in capsys.readouterr().out
+    # An extra not installed yet still needs uv, so the hand-over.
+    monkeypatch.setattr(hook, "_spawn", lambda argv, config: True)
+    assert commands.cmd_upgrade(argparse.Namespace(extras=["semantic"]), config) == 0
+    assert "starts when this command ends" in capsys.readouterr().out
+
+
+def test_source_is_current_compares_the_remote_head(monkeypatch) -> None:
+    import subprocess
+
+    vcs = {"vcs": "git", "commit_id": "abc123", "requested_revision": "main"}
+    monkeypatch.setattr(install, "origin", lambda: {"url": "https://example.invalid/x", "vcs_info": vcs})
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{head}\trefs/heads/main\n")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    head = "abc123"
+    assert install.source_is_current()
+    head = "def456"
+    assert not install.source_is_current()
+    assert seen[0] == ["git", "ls-remote", "https://example.invalid/x", "main"]
+    monkeypatch.setattr(install, "origin", lambda: {"url": "file:///x", "dir_info": {}})
+    assert not install.source_is_current()

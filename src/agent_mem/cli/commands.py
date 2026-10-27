@@ -716,21 +716,27 @@ def cmd_upgrade(ns: argparse.Namespace, config: Config) -> int:
     steps = [["models", "install"]] if install.extras()["semantic"] or "semantic" in ns.extras else []
     steps.append(["doctor", "--fix"])
     if sys.platform == "win32":
-        return _upgrade_after_exit(command, exe, steps, config)
-    print("$ " + shlex.join(command), flush=True)
-    if subprocess.run(command, check=False).returncode != 0:
-        print("Upgrade failed; uv names the cause above.", file=sys.stderr)
-        return 1
-    after = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout.strip()
-    after = after.removeprefix("agent-mem ") or "?"
-    if after == before:
-        added = f", now with {' and '.join(ns.extras)}" if ns.extras else ""
-        print(f"agent-mem {after} is the newest version{added}.")
+        # Already the newest commit: nothing to replace, so the viewer and open sessions keep running.
+        wanted = [name for name in ns.extras if not install.extras().get(name)]
+        if wanted or not install.source_is_current():
+            return _upgrade_after_exit(command, exe, steps, config)
+        print(f"agent-mem {before} is the newest version.")
     else:
-        print(
-            f"agent-mem {before} -> {after}. Hooks use it now; running sessions keep their MCP server until restart.",
-            flush=True,
-        )
+        print("$ " + shlex.join(command), flush=True)
+        if subprocess.run(command, check=False).returncode != 0:
+            print("Upgrade failed; uv names the cause above.", file=sys.stderr)
+            return 1
+        after = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout.strip()
+        after = after.removeprefix("agent-mem ") or "?"
+        if after == before:
+            added = f", now with {' and '.join(ns.extras)}" if ns.extras else ""
+            print(f"agent-mem {after} is the newest version{added}.")
+        else:
+            print(
+                f"agent-mem {before} -> {after}. Hooks use it now; running sessions keep their MCP server until "
+                "restart.",
+                flush=True,
+            )
     code = 0
     for step in steps:
         print(f"$ agent-mem {' '.join(step)}", flush=True)

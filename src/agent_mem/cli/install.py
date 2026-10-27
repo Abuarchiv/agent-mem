@@ -403,6 +403,30 @@ def upgrade_command(add: list[str] | tuple[str, ...] = ()) -> list[str] | None:
     return [uv, "tool", "install", "--upgrade", f"{spec} @ git+{url}"]
 
 
+def source_is_current() -> bool:
+    """True when a git install already has the newest commit of the branch or tag it follows (``git ls-remote``,
+    no clone). False when that is unknown: no git install, no git, no network."""
+    import subprocess
+
+    vcs = origin().get("vcs_info", {})
+    if vcs.get("vcs") != "git" or not vcs.get("commit_id"):
+        return False
+    ref = vcs.get("requested_revision")
+    if ref == vcs["commit_id"]:
+        return True  # pinned to a commit
+    try:
+        out = subprocess.run(
+            ["git", "ls-remote", origin()["url"], ref or "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.split("\t", 1)[0] == vcs["commit_id"]
+
+
 def extras() -> dict[str, bool]:
     import importlib.util
 
