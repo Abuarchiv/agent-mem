@@ -1,8 +1,9 @@
 name: Agent sessions
 
 # A user's first day: the install line from the README, then real agent CLIs run their hooks in their own shells
-# (Claude Code on Windows: Git Bash, Codex: cmd.exe, OpenCode: its plugin). Claude and Codex get a key that cannot
-# work, so their hooks run and the model call fails; OpenCode answers with its free model and recalls the first session.
+# (Claude Code on Windows: Git Bash, Codex: cmd.exe, Copilot CLI: PowerShell, OpenCode: its plugin). Claude and Codex
+# get a key that cannot work, so their hooks run and the model call fails; OpenCode answers with its free model and
+# recalls the first session; Copilot (only with the COPILOT_TOKEN secret) must name what OpenCode was told.
 # Windows gets OpenCode 1.x from npm, Linux OpenCode 2 from its GitHub release: the plugin serves both.
 on:
   workflow_dispatch:
@@ -24,7 +25,7 @@ jobs:
         with:
           node-version: 24
       - name: Agent CLIs
-        run: npm install -g --no-audit --no-fund @anthropic-ai/claude-code @openai/codex opencode-ai
+        run: npm install -g --no-audit --no-fund @anthropic-ai/claude-code @openai/codex opencode-ai @github/copilot
       - name: Install line from the README, then this commit
         run: |
           irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/${{ github.sha }}/install.ps1 | iex
@@ -60,17 +61,33 @@ jobs:
           Get-ChildItem "$env:USERPROFILE\.local\share\opencode\log" -ErrorAction SilentlyContinue |
             Select-String -Pattern "failed to load plugin" | ForEach-Object { $_.Line }
           exit 0
+      - name: Copilot CLI session (hooks in PowerShell; needs the COPILOT_TOKEN secret)
+        working-directory: demo
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+        run: |
+          if (-not $env:COPILOT_GITHUB_TOKEN) { "no COPILOT_TOKEN secret: Copilot skipped"; exit 0 }
+          copilot -p "Welchen Build-Befehl nutzen wir laut agent-mem? Ein Satz, keine Werkzeuge." --allow-all-tools 2>&1 | Select-Object -Last 8
+          exit 0
       - name: What agent-mem recorded
+        env:
+          COPILOT: ${{ secrets.COPILOT_TOKEN != '' }}
         run: |
           agent-mem doctor
           agent-mem export --output export.json
           $data = Get-Content export.json -Raw | ConvertFrom-Json
           $data.sessions | ForEach-Object { "{0,-9} {1}" -f $_.harness, $_.started_at }
           $data.turns | ForEach-Object { "T{0} {1} | {2}" -f $_.id, $_.prompt, "$($_.answer)".Substring(0, [Math]::Min(120, "$($_.answer)".Length)) }
-          $missing = @("claude", "codex", "opencode") | Where-Object { $_ -notin $data.sessions.harness }
+          $agents = @("claude", "codex", "opencode") + @(if ($env:COPILOT -eq "true") { "copilot" })
+          $missing = $agents | Where-Object { $_ -notin $data.sessions.harness }
           if ($missing) { throw "no session recorded for: $missing" }
           $prompts = @($data.turns | Where-Object { $_.prompt }).Count
-          if ($prompts -ne 4) { throw "expected 4 requests, got $prompts" }
+          $expected = 4 + [int]($env:COPILOT -eq "true")
+          if ($prompts -ne $expected) { throw "expected $expected requests, got $prompts" }
+          if ($env:COPILOT -eq "true") {
+            $copilot = $data.turns | Where-Object { "$($_.prompt)" -like "*Build-Befehl nutzen wir*" }
+            if ("$($copilot.answer)" -notmatch "tsup") { throw "Copilot did not get the build command: $($copilot.answer)" }
+          }
       - name: Start block a second Claude Code session gets
         working-directory: demo
         shell: bash
