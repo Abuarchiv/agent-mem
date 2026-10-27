@@ -382,3 +382,23 @@ def test_doctor_fix_reports_a_failing_index_run(config, monkeypatch):
     monkeypatch.setattr(indexer, "run", broken)
     failed = [c for c in health.doctor(config, fix=True) if c.name == "index after fix"]
     assert failed and not failed[0].ok and "model file damaged" in failed[0].detail
+
+
+def test_a_fresh_windows_without_the_vc_runtime_is_told_what_to_install(config: Config, monkeypatch):
+    """fastembed is installed, but onnxruntime cannot load its DLLs: that is not a missing extra (seen on Windows Server)."""
+    import builtins
+
+    real = builtins.__import__
+
+    def failing(name, *args, **kwargs):
+        if name == "fastembed":
+            raise ImportError(
+                "DLL load failed while importing onnxruntime_pybind11_state: The specified module could not be found."
+            )
+        return real(name, *args, **kwargs)
+
+    config.semantic.enabled = True
+    monkeypatch.setattr(builtins, "__import__", failing)
+    embedder, reason = semantic.load_embedder_verbose(config)
+    assert embedder is None and reason is not None
+    assert "Visual C++" in reason and semantic.VC_RUNTIME in reason and "--extras" not in reason

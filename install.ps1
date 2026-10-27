@@ -17,6 +17,19 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   Fail "git is missing; uv needs it to fetch agent-mem. Install Git for Windows (winget install Git.Git) and run this again."
 }
+# Search by meaning (onnxruntime) needs the Visual C++ runtime; a fresh Windows often lacks it and the import fails
+# with "DLL load failed". Its installer asks for administrator rights once.
+$system = Join-Path $env:SystemRoot "System32"
+if (-not ((Test-Path "$system\msvcp140.dll") -and (Test-Path "$system\vcruntime140_1.dll"))) {
+  Write-Host "Installing the Microsoft Visual C++ runtime (search by meaning needs it)..."
+  try {
+    $redist = Join-Path $env:TEMP "vc_redist.x64.exe"
+    Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile $redist -UseBasicParsing
+    Start-Process $redist -ArgumentList "/install", "/quiet", "/norestart" -Verb RunAs -Wait
+  } catch {
+    Write-Host "Skipped ($_). Search by words works; for search by meaning install https://aka.ms/vs/17/release/vc_redist.x64.exe"
+  }
+}
 $before = if (Get-Command agent-mem -ErrorAction SilentlyContinue) { agent-mem --version } else { "" }
 # 3.13: uv would take the newest Python, and onnxruntime (search by meaning) has no wheels for it yet (3.15).
 uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/Abuarchiv/agent-mem"

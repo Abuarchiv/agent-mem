@@ -30,6 +30,9 @@ class Embedder(Protocol):
     def query(self, text: str) -> np.ndarray: ...
 
 
+# onnxruntime on Windows loads msvcp140.dll and vcruntime140_1.dll; a fresh Windows (Server) has neither.
+VC_RUNTIME = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
 # Models fastembed does not ship: (Hugging Face repository, ONNX file, dimension).
 # The int8-quantized export keeps the download small (~120 MB) and runs fast on CPU.
 CUSTOM_MODELS = {
@@ -105,8 +108,14 @@ def load_embedder_verbose(config: Config, *, allow_download: bool = False) -> tu
         return None, "semantic search is disabled in config.json"
     try:
         import fastembed  # noqa: F401
-    except ImportError:
-        return None, "the optional dependency is missing: run `agent-mem upgrade --extras semantic`"
+    except ImportError as error:
+        import importlib.util
+
+        if importlib.util.find_spec("fastembed") is None:
+            return None, "the optional dependency is missing: run `agent-mem upgrade --extras semantic`"
+        if "DLL load failed" in str(error):  # a fresh Windows lacks msvcp140.dll / vcruntime140_1.dll
+            return None, f"Windows lacks the Microsoft Visual C++ runtime: install {VC_RUNTIME}, then run this again"
+        return None, f"fastembed does not load: {logutil.describe(error)[:200]}"
     if not allow_download and not model_cached(config):
         return None, "the model is not downloaded yet: run `agent-mem models install`"
     with contextlib.suppress(Exception):
