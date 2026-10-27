@@ -58,29 +58,59 @@ def _load_for_update(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text) if text.strip() else {}  # an empty file holds no settings to lose
     except (OSError, ValueError) as error:
         raise SystemExit(
             f"agent-mem: {path} cannot be read as JSON ({error}). Nothing was changed; fix the file and run this again."
         ) from error
     if not isinstance(data, dict):
         raise SystemExit(f"agent-mem: {path} does not hold a JSON object. Nothing was changed.")
+    if "hooks" in data and data["hooks"] is not None and not isinstance(data["hooks"], dict):
+        raise SystemExit(f'agent-mem: "hooks" in {path} is not an object. Nothing was changed; fix the file first.')
     return data
 
 
-def _write_text(path: Path, text: str) -> None:
-    """Atomic, with the previous version kept next to it and the file's permissions unchanged."""
+def _load_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"agent-mem: {path} cannot be read ({error}). Nothing was changed.") from error
+
+
+def _write_text(path: Path, text: str, *, backup: bool = True) -> None:
+    """Atomic, with the previous version kept next to it and the file's permissions unchanged. A symlinked config
+    (a dotfiles repository) is written where it points, so the link stays."""
+    if path.is_symlink():
+        path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".agent-mem-tmp")
-    tmp.write_text(text, encoding="utf-8")
-    if path.exists():
-        shutil.copy2(path, path.with_name(path.name + ".agent-mem-backup"))
-        shutil.copymode(path, tmp)
-    os.replace(tmp, path)
+    saved = path.with_name(path.name + ".agent-mem-backup")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        if path.exists():
+            saved.unlink(missing_ok=True)  # a read-only file's copy is read-only too and cannot be overwritten
+            if backup:
+                shutil.copy2(path, saved)
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    _write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+def _write_json(path: Path, data: dict[str, Any], *, backup: bool = True) -> None:
+    _write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", backup=backup)
+
+
+def _drop_if_empty(path: Path, data: dict[str, Any], *keys: str) -> bool:
+    """After uninstall: a file that holds nothing but what setup created goes, instead of `{"hooks": {}}`."""
+    rest = {key: value for key, value in data.items() if key not in keys or value not in ({}, [], None)}
+    rest.pop("$schema", None)
+    if rest:
+        return False
+    path.unlink(missing_ok=True)
+    path.with_name(path.name + ".agent-mem-backup").unlink(missing_ok=True)
+    return True
 
 
 # ``<exe> hook <harness>`` with ``agent-mem`` as the program's name: a user's ``~/agent-memory/x.sh`` or a script in a
@@ -92,24 +122,48 @@ def _is_ours(hook: dict[str, Any]) -> bool:
     return any(_OUR_COMMAND.search(str(hook.get(key, ""))) for key in ("command", "bash", "powershell"))
 
 
-def _merge_hooks(existing: dict[str, Any], ours: dict[str, Any]) -> dict[str, Any]:
-    """Claude/Codex layout: ``{event: [{matcher?, hooks: [...]}, ...]}``. Ours replace earlier ours."""
-    merged = {
-        event: [g for g in groups if not all(_is_ours(h) for h in g.get("hooks", []))]
-        for event, groups in existing.items()
-    }
-    for event, groups in ours.items():
-        merged.setdefault(event, []).extend(groups)
-    return {event: groups for event, groups in merged.items() if groups}
-
-
-def _strip_hooks(existing: dict[str, Any]) -> dict[str, Any]:
-    kept = {}
-    for event, groups in existing.items():
-        rest = [g for g in groups if not all(_is_ours(h) for h in g.get("hooks", []))]
+def _strip_hooks(existing: Any) -> dict[str, Any]:
+    """Claude/Codex layout ``{event: [{matcher?, hooks: [...]}, ...]}`` without our hooks. A group that also holds a
+    foreign hook keeps it; anything not in this layout stays as it is."""
+    kept: dict[str, Any] = {}
+    for event, groups in (existing if isinstance(existing, dict) else {}).items():
+        if not isinstance(groups, list):
+            if groups is not None:
+                kept[event] = groups
+            continue
+        rest = []
+        for group in groups:
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(hooks, list) or not any(isinstance(h, dict) and _is_ours(h) for h in hooks):
+                rest.append(group)
+                continue
+            foreign = [h for h in hooks if not (isinstance(h, dict) and _is_ours(h))]
+            if foreign:
+                rest.append({**group, "hooks": foreign})
         if rest:
             kept[event] = rest
     return kept
+
+
+def _merge_hooks(existing: Any, ours: dict[str, Any]) -> dict[str, Any]:
+    """Ours replace earlier ours, wherever they were."""
+    merged = _strip_hooks(existing)
+    for event, groups in ours.items():
+        current = merged.get(event)
+        merged[event] = [*(current if isinstance(current, list) else []), *groups]
+    return merged
+
+
+def _our_groups(existing: Any) -> dict[str, list[dict[str, Any]]]:
+    """Our hooks per event, read leniently: `doctor` must not fail on a file a person edited."""
+    found: dict[str, list[dict[str, Any]]] = {}
+    for event, groups in (existing if isinstance(existing, dict) else {}).items():
+        for group in groups if isinstance(groups, list) else []:
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            ours = [h for h in hooks if isinstance(h, dict) and _is_ours(h)] if isinstance(hooks, list) else []
+            if ours:
+                found.setdefault(event, []).append({**group, "hooks": ours})
+    return found
 
 
 def _shell(exe: str, key: str, harness: str = "") -> str:
@@ -149,104 +203,113 @@ def _plugin_hooks(plugins: Path, harness: str, exe: str) -> dict[str, Any]:
 # --- write -----------------------------------------------------------------------------------------
 
 
+def _section(data: dict[str, Any], key: str, path: Path) -> dict[str, Any]:
+    value = data.setdefault(key, {})
+    if not isinstance(value, dict):
+        raise SystemExit(f'agent-mem: "{key}" in {path} is not an object. Nothing was changed; fix the file first.')
+    return value
+
+
 def write(harness: str, plugins: Path, exe: str | None = None) -> list[Path]:
-    """Register hooks and the MCP server for one harness. Returns the files touched."""
+    """Register hooks and the MCP server for one harness. Returns the files touched. Every file is read and checked
+    before the first is written: a broken second file stopped setup after the first was already changed."""
     exe = exe or binary()
     if harness == "claude":
         settings = claude_home() / "settings.json"
         data = _load_for_update(settings)
-        data["hooks"] = _merge_hooks(data.get("hooks", {}), _plugin_hooks(plugins, "claude", exe)["hooks"])
+        data["hooks"] = _merge_hooks(data.get("hooks"), _plugin_hooks(plugins, "claude", exe)["hooks"])
         _write_json(settings, data)
         _claude_mcp(exe, add=True)
         return [settings]
     if harness == "codex":
-        hooks = codex_home() / "hooks.json"
+        hooks, toml = codex_home() / "hooks.json", codex_home() / "config.toml"
         data = _load_for_update(hooks)
-        data["hooks"] = _merge_hooks(data.get("hooks", {}), _plugin_hooks(plugins, "codex", exe)["hooks"])
-        _write_json(hooks, data)
-        toml = codex_home() / "config.toml"
-        text = toml.read_text(encoding="utf-8") if toml.exists() else ""
-        text = _strip_toml(text)
+        text = _strip_toml(_load_text(toml))
         text = text.rstrip("\n") + ("\n\n" if text.strip() else "") + _toml_block(exe)
+        _check_toml(toml, text)
+        data["hooks"] = _merge_hooks(data.get("hooks"), _plugin_hooks(plugins, "codex", exe)["hooks"])
+        _write_json(hooks, data)
         _write_text(toml, text)
         return [hooks, toml]
     if harness == "copilot":
-        hooks = copilot_home() / "hooks" / "agent-mem.json"
-        _write_json(hooks, _plugin_hooks(plugins, "copilot", exe))
-        mcp = copilot_home() / "mcp-config.json"
+        hooks, mcp = copilot_home() / "hooks" / "agent-mem.json", copilot_home() / "mcp-config.json"
         data = _load_for_update(mcp)
-        servers = data.setdefault("mcpServers", {})
-        servers[MARK] = {"type": "local", "command": exe, "args": ["mcp"], "tools": ["*"]}
+        _section(data, "mcpServers", mcp)[MARK] = {"type": "local", "command": exe, "args": ["mcp"], "tools": ["*"]}
+        _write_json(hooks, _plugin_hooks(plugins, "copilot", exe))
         _write_json(mcp, data)
         return [hooks, mcp]
     if harness == "opencode":
-        target = opencode_home() / "plugins" / "agent-mem.ts"
-        source = (plugins / "opencode" / "agent-mem.ts").read_text(encoding="utf-8")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(source.replace('spawn("agent-mem"', f"spawn({json.dumps(exe)}"), encoding="utf-8")
-        cfg = opencode_home() / "opencode.json"
+        target, cfg = opencode_home() / "plugins" / "agent-mem.ts", opencode_home() / "opencode.json"
         data = _load_for_update(cfg)
         data.setdefault("$schema", "https://opencode.ai/config.json")
-        data.setdefault("mcp", {})[MARK] = {"type": "local", "command": [exe, "mcp"], "enabled": True}
+        _section(data, "mcp", cfg)[MARK] = {"type": "local", "command": [exe, "mcp"], "enabled": True}
+        source = (plugins / "opencode" / "agent-mem.ts").read_text(encoding="utf-8")
+        _write_text(target, source.replace('spawn("agent-mem"', f"spawn({json.dumps(exe)}"), backup=False)
         _write_json(cfg, data)
         return [target, cfg]
     raise ValueError(f"unknown harness {harness!r}")
 
 
 def remove(harness: str) -> list[Path]:
-    """Undo :func:`write`. Data, config and models stay."""
+    """Undo :func:`write`, leaving no backup of ours behind and no file that held only what setup put there. Data,
+    config and models stay."""
     touched: list[Path] = []
-    if harness == "claude":
-        settings = claude_home() / "settings.json"
-        data = _load_for_update(settings)
-        if "hooks" in data:
+    if harness in {"claude", "codex"}:
+        path = claude_home() / "settings.json" if harness == "claude" else codex_home() / "hooks.json"
+        data = _load_for_update(path)
+        if _our_groups(data.get("hooks")):  # untouched otherwise: "removed from" a file without ours was untrue
             data["hooks"] = _strip_hooks(data["hooks"])
             if not data["hooks"]:
                 del data["hooks"]
-            _write_json(settings, data)
-            touched.append(settings)
-        _claude_mcp(None, add=False)
-    elif harness == "codex":
-        hooks = codex_home() / "hooks.json"
-        data = _load_for_update(hooks)
-        if "hooks" in data:
-            data["hooks"] = _strip_hooks(data["hooks"])
-            _write_json(hooks, data)
-            touched.append(hooks)
-        toml = codex_home() / "config.toml"
-        if toml.exists():
-            _write_text(toml, _strip_toml(toml.read_text(encoding="utf-8")))
-            touched.append(toml)
-    elif harness == "copilot":
-        hooks = copilot_home() / "hooks" / "agent-mem.json"
-        if hooks.exists():
-            hooks.unlink()
-            touched.append(hooks)
-        # The file is agent-mem's own; a second `setup --write` keeps the previous one next to it.
-        hooks.with_name(hooks.name + ".agent-mem-backup").unlink(missing_ok=True)
-        mcp = copilot_home() / "mcp-config.json"
-        data = _load_for_update(mcp)
-        if MARK in data.get("mcpServers", {}):
-            del data["mcpServers"][MARK]
-            _write_json(mcp, data)
-            touched.append(mcp)
-    elif harness == "opencode":
-        plugin = opencode_home() / "plugins" / "agent-mem.ts"
-        if plugin.exists():
-            plugin.unlink()
-            touched.append(plugin)
-        cfg = opencode_home() / "opencode.json"
-        data = _load_for_update(cfg)
-        if MARK in data.get("mcp", {}):
-            del data["mcp"][MARK]
-            _write_json(cfg, data)
-            touched.append(cfg)
+            if harness == "claude" or not _drop_if_empty(path, data):
+                _write_json(path, data, backup=False)
+            touched.append(path)
+        if harness == "claude":
+            _claude_mcp(None, add=False)
+        else:
+            toml = codex_home() / "config.toml"
+            original = _load_text(toml)
+            if any(_TOML_HEADER.match(line) for line in original.splitlines()):
+                text = _strip_toml(original)
+                _check_toml(toml, text)
+                if text.strip():
+                    _write_text(toml, text, backup=False)
+                else:
+                    toml.unlink()
+                touched.append(toml)
+    elif harness in {"copilot", "opencode"}:
+        if harness == "copilot":
+            own, path, key = (
+                copilot_home() / "hooks" / "agent-mem.json",
+                copilot_home() / "mcp-config.json",
+                "mcpServers",
+            )
+        else:
+            own, path, key = opencode_home() / "plugins" / "agent-mem.ts", opencode_home() / "opencode.json", "mcp"
+        data = _load_for_update(path)
+        if own.exists():
+            own.unlink()
+            touched.append(own)
+        with contextlib.suppress(OSError):  # the folder setup created, if nothing else is in it
+            own.parent.rmdir()
+        section = data.get(key)
+        if isinstance(section, dict) and MARK in section:
+            del section[MARK]
+            if not _drop_if_empty(path, data, key):
+                _write_json(path, data, backup=False)
+            touched.append(path)
     else:
         raise ValueError(f"unknown harness {harness!r}")
+    for path in touched:  # the copies setup kept of the user's files
+        path.with_name(path.name + ".agent-mem-backup").unlink(missing_ok=True)
     return touched
 
 
-_TOML_BLOCK = re.compile(r"\n?\[mcp_servers\.agent-mem\]\n(?:[^\[\n][^\n]*\n?)*", re.M)
+# Our table, also with a quoted name or a sub-table (`[mcp_servers.agent-mem.env]`), up to the next table or blank line.
+_TOML_HEADER = re.compile(
+    r"""^\s*\[\s*mcp_servers\s*\.\s*(?:agent-mem|"agent-mem"|'agent-mem')\s*(?:\.[^\]\n]*)?\]\s*(?:#.*)?$"""
+)
+_ANY_HEADER = re.compile(r"^\s*\[\[?[^\]\n]+\]\]?\s*(?:#.*)?$")
 
 
 def _toml_block(exe: str) -> str:
@@ -254,7 +317,27 @@ def _toml_block(exe: str) -> str:
 
 
 def _strip_toml(text: str) -> str:
-    return _TOML_BLOCK.sub("\n", text).strip("\n") + ("\n" if text.strip() else "")
+    kept: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if _TOML_HEADER.match(line):
+            inside = True
+            continue
+        if inside and (not line.strip() or _ANY_HEADER.match(line)):
+            inside = False
+        if not inside:
+            kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip("\n") + ("\n" if text.strip() else "")
+
+
+def _check_toml(path: Path, text: str) -> None:
+    """Codex refuses to start on invalid TOML: never write one."""
+    import tomllib
+
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"agent-mem: {path} would not be valid TOML ({error}). Nothing was changed.") from error
 
 
 def _claude_mcp(exe: str | None, *, add: bool) -> None:
@@ -295,26 +378,27 @@ def hook_commands(harness: str) -> list[str]:
     """Commands our hooks would run for this harness as currently installed (for ``doctor``)."""
     found: list[str] = []
     if harness == "claude":
-        groups = _read_json(claude_home() / "settings.json").get("hooks", {})
+        groups = _our_groups(_read_json(claude_home() / "settings.json").get("hooks"))
     elif harness == "codex":
-        groups = _read_json(codex_home() / "hooks.json").get("hooks", {})
+        groups = _our_groups(_read_json(codex_home() / "hooks.json").get("hooks"))
     elif harness == "copilot":
-        groups = _read_json(copilot_home() / "hooks" / "agent-mem.json").get("hooks", {})
-        return sorted({str(h.get("bash", "")) for entries in groups.values() for h in entries if _is_ours(h)})
+        entries = _read_json(copilot_home() / "hooks" / "agent-mem.json").get("hooks")
+        hooks = [h for e in (entries.values() if isinstance(entries, dict) else []) if isinstance(e, list) for h in e]
+        return sorted({str(h.get("bash", "")) for h in hooks if isinstance(h, dict) and _is_ours(h)})
     else:
         plugin = opencode_home() / "plugins" / "agent-mem.ts"
         match = re.search(r'spawn\(("[^"]+")', plugin.read_text(encoding="utf-8")) if plugin.exists() else None
         return [json.loads(match.group(1)) + " hook opencode"] if match else []
     for entries in groups.values():
         for group in entries:
-            found.extend(str(h["command"]) for h in group.get("hooks", []) if _is_ours(h))
+            found.extend(str(h.get("command", "")) for h in group["hooks"])
     return sorted(set(found))
 
 
 def claude_plugin_enabled() -> bool:
     """The marketplace plugin is on as well: then it and ``setup --write`` both run every hook."""
-    enabled = _read_json(claude_home() / "settings.json").get("enabledPlugins", {})
-    return any(name.split("@")[0] == MARK and on for name, on in enabled.items())
+    enabled = _read_json(claude_home() / "settings.json").get("enabledPlugins")
+    return isinstance(enabled, dict) and any(name.split("@")[0] == MARK and on for name, on in enabled.items())
 
 
 def stale(harness: str) -> bool:
@@ -333,11 +417,7 @@ def stale(harness: str) -> bool:
     if harness == "copilot":
         return _read_json(copilot_home() / "hooks" / "agent-mem.json") != want
     path = claude_home() / "settings.json" if harness == "claude" else codex_home() / "hooks.json"
-    ours = {
-        event: [g for g in groups if all(_is_ours(h) for h in g.get("hooks", []))]
-        for event, groups in _read_json(path).get("hooks", {}).items()
-    }
-    return {event: groups for event, groups in ours.items() if groups} != want["hooks"]
+    return _our_groups(_read_json(path).get("hooks")) != want["hooks"]
 
 
 # --- version and upgrade ---------------------------------------------------------------------------

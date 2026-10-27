@@ -89,7 +89,7 @@ def test_codex_hooks_and_toml_block(homes: Path) -> None:
 
     install.remove("codex")
     assert "agent-mem" not in toml.read_text() and "[mcp_servers.other]" in toml.read_text()
-    assert json.loads((homes / ".codex" / "hooks.json").read_text())["hooks"] == {}
+    assert not (homes / ".codex" / "hooks.json").exists()  # it held only our hooks: setup created it
 
 
 def test_copilot_and_opencode_files(homes: Path) -> None:
@@ -111,7 +111,9 @@ def test_copilot_and_opencode_files(homes: Path) -> None:
         install.remove(harness)
         assert install.hook_commands(harness) == []
     assert not (homes / ".copilot" / "hooks" / "agent-mem.json").exists()
-    assert "agent-mem" not in json.loads((homes / ".config" / "opencode" / "opencode.json").read_text())["mcp"]
+    assert not (homes / ".config" / "opencode" / "opencode.json").exists()
+    assert not (homes / ".config" / "opencode" / "plugins").exists()
+    assert not list(homes.rglob("*.agent-mem-*"))
 
 
 def test_detect_reports_binary_and_extras(homes: Path) -> None:
@@ -514,3 +516,95 @@ def test_source_is_current_compares_the_remote_head(monkeypatch) -> None:
     assert seen[0] == ["git", "ls-remote", "https://example.invalid/x", "main"]
     monkeypatch.setattr(install, "origin", lambda: {"url": "file:///x", "dir_info": {}})
     assert not install.source_is_current()
+
+
+def test_setup_and_uninstall_leave_the_users_files_as_they_were(homes: Path) -> None:
+    """Found by a bug hunt: each of these broke a config, crashed, or left files behind."""
+    from agent_mem.cli.health import _hook_checks
+
+    settings = homes / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    # A group with a foreign hook next to one of ours, a matcher-only group, a null event.
+    mixed = {
+        "hooks": [{"type": "command", "command": "other-tool"}, {"type": "command", "command": f"{EXE} hook claude"}]
+    }
+    original = {"hooks": {"Stop": [mixed, {"matcher": "x"}], "Notification": None}, "theme": "dark"}
+    settings.write_text(json.dumps(original))
+    install.write("claude", PLUGINS, EXE)
+    install.write("claude", PLUGINS, EXE)
+    stop = json.loads(settings.read_text())["hooks"]["Stop"]
+    assert sum(h.get("command") == f"{EXE} hook claude" for g in stop for h in g.get("hooks", [])) == 1
+    assert {"matcher": "x"} in stop and any(h.get("command") == "other-tool" for g in stop for h in g.get("hooks", []))
+    _hook_checks(fix=False)  # reads the file without failing on the null event
+
+    # Read-only: the second run failed on the read-only backup and left a temporary file.
+    settings.chmod(0o444)
+    install.write("claude", PLUGINS, EXE)
+    install.remove("claude")
+    assert json.loads(settings.read_text())["theme"] == "dark" and not list(homes.rglob("*.agent-mem-*"))
+    settings.chmod(0o644)
+
+    # "hooks": null and an empty file are no settings to lose; "hooks" as a list is refused untouched.
+    for text in ('{"hooks": null}', ""):
+        settings.write_text(text)
+        install.write("claude", PLUGINS, EXE)
+        assert install.hook_commands("claude") == [f"{EXE} hook claude"]
+    settings.write_text('{"hooks": ["x"]}')
+    with pytest.raises(SystemExit):
+        install.write("claude", PLUGINS, EXE)
+    assert settings.read_text() == '{"hooks": ["x"]}'
+
+
+def test_a_broken_second_file_stops_setup_before_the_first_is_written(homes: Path) -> None:
+    mcp = homes / ".copilot" / "mcp-config.json"
+    mcp.parent.mkdir()
+    mcp.write_text("{bad")
+    with pytest.raises(SystemExit, match="Nothing was changed"):
+        install.write("copilot", PLUGINS, EXE)
+    assert not (homes / ".copilot" / "hooks").exists()
+    toml = homes / ".codex" / "config.toml"
+    toml.parent.mkdir()
+    toml.write_bytes(b"\xff\xfe not utf-8")
+    with pytest.raises(SystemExit, match="Nothing was changed"):
+        install.write("codex", PLUGINS, EXE)
+    assert not (homes / ".codex" / "hooks.json").exists()
+
+
+def test_codex_toml_with_a_quoted_name_or_sub_table_stays_valid(homes: Path) -> None:
+    import tomllib
+
+    toml = homes / ".codex" / "config.toml"
+    toml.parent.mkdir()
+    toml.write_text(
+        'model = "o4"\n\n[mcp_servers."agent-mem"]\ncommand = "old"\n\n[mcp_servers.agent-mem.env]\nX = "1"\n\n'
+        '# my servers\n[mcp_servers.other]\ncommand = "other"\nargs = [\n  "a",\n]\n'
+    )
+    install.write("codex", PLUGINS, EXE)
+    data = tomllib.loads(toml.read_text())
+    assert data["mcp_servers"]["agent-mem"]["command"] == EXE and data["mcp_servers"]["other"]["args"] == ["a"]
+    assert "# my servers" in toml.read_text()
+    install.remove("codex")
+    data = tomllib.loads(toml.read_text())
+    assert "agent-mem" not in data["mcp_servers"] and data["model"] == "o4"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+def test_a_symlinked_config_is_written_where_it_points(homes: Path) -> None:
+    dotfiles = homes / "dotfiles" / "claude-settings.json"
+    dotfiles.parent.mkdir()
+    dotfiles.write_text('{"theme": "dark"}')
+    (homes / ".claude").mkdir()
+    (homes / ".claude" / "settings.json").symlink_to(dotfiles)
+    install.write("claude", PLUGINS, EXE)
+    assert (homes / ".claude" / "settings.json").is_symlink()
+    assert install.hook_commands("claude") == [f"{EXE} hook claude"] and "hooks" in json.loads(dotfiles.read_text())
+
+
+def test_uninstall_names_only_files_it_changed(homes: Path) -> None:
+    hooks = homes / ".codex" / "hooks.json"
+    hooks.parent.mkdir()
+    own = '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "other-tool"}]}]}}'
+    hooks.write_text(own)
+    (homes / ".codex" / "config.toml").write_text('model = "o4"\n')
+    assert install.remove("codex") == []
+    assert hooks.read_text() == own and not list(homes.rglob("*.agent-mem-*"))
