@@ -44,6 +44,9 @@ def test_claude_hooks_cover_supported_events():
         for group in groups:
             for hook in group["hooks"]:
                 assert hook["command"] == "agent-mem hook claude"
+    # `claude -p` exits right after the answer and cancels a Stop hook still running in the background (2.1.311):
+    # the turn lost its answer and was saved as "(unfinished)".
+    assert not any(hook.get("async") for group in hooks["Stop"] for hook in group["hooks"])
 
 
 def test_codex_hooks_use_codex_normalizer():

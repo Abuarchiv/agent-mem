@@ -77,8 +77,7 @@
           {
             "type": "command",
             "command": "agent-mem hook claude",
-            "timeout": 10,
-            "async": true
+            "timeout": 10
           }
         ]
       }
