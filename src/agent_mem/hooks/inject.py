@@ -545,6 +545,9 @@ def _changed(conn: sqlite3.Connection, owner: tuple[str, int]) -> str:
 
 PROMPT_HITS = 10
 PARALLEL_MINUTES = 20  # a session with no event for longer is not running now
+# Working now: a request without an answer yet. A session that answered and stayed open, or was closed without
+# SessionEnd (a closed terminal window), counted as running for 20 minutes and warned the next session of the day.
+_WORKING = "EXISTS (SELECT 1 FROM turns w WHERE w.session_id = s.id AND w.outcome = 'open')"
 PARALLEL_FILES = 6
 
 
@@ -557,10 +560,12 @@ def parallel(conn: sqlite3.Connection, project_id: str, session_id: str, now: st
     rows = conn.execute(
         "SELECT s.id, s.harness, s.last_event_at, "
         "(SELECT prompt FROM turns WHERE session_id = s.id ORDER BY id DESC LIMIT 1) AS prompt "
-        "FROM sessions s WHERE s.id != ? AND s.ended_at IS NULL AND s.last_event_at >= ? "
+        f"FROM sessions s WHERE s.id != ? AND {_WORKING} AND s.last_event_at >= ? "
         "AND (s.project_id = ? OR EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.id AND t.project_id = ?))",
         (session_id, since, project_id, project_id),
     ).fetchall()
+    found = conn.execute("SELECT root FROM projects WHERE id = ?", (project_id,)).fetchone()
+    root = str(found[0]) if found else "/"  # an absolute path stays itself under it
     key = f"parallel.{session_id}"
     told: dict[str, int] = json.loads(db.get_meta(conn, key) or "{}")
     lines: list[str] = []
@@ -570,7 +575,8 @@ def parallel(conn: sqlite3.Connection, project_id: str, session_id: str, now: st
             "SELECT files_json FROM turns WHERE session_id = ? AND started_at >= ? ORDER BY id DESC",
             (row["id"], timeutil.iso(moment - timedelta(hours=3))),
         ):
-            files += [f for f in json.loads(files_json or "[]") if f not in files]
+            # A removed worktree's files clash with nothing.
+            files += [f for f in json.loads(files_json or "[]") if f not in files and (Path(root) / f).exists()]
         if not files or told.get(row["id"], 0) >= len(files):
             continue
         told[row["id"]] = len(files)
@@ -603,7 +609,7 @@ def editing_elsewhere(
     lines: list[tuple[str, tuple[str, int] | None]] = []
     for row in conn.execute(
         "SELECT s.id, s.harness, s.last_event_at, t.files_json FROM sessions s JOIN turns t ON t.session_id = s.id "
-        "WHERE s.id != ? AND s.ended_at IS NULL AND s.last_event_at >= ? AND t.project_id = ? AND t.started_at >= ?",
+        f"WHERE s.id != ? AND {_WORKING} AND s.last_event_at >= ? AND t.project_id = ? AND t.started_at >= ?",
         (
             session_id,
             timeutil.iso(moment - timedelta(minutes=PARALLEL_MINUTES)),

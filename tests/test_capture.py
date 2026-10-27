@@ -407,7 +407,7 @@ def test_a_turn_cut_off_by_the_usage_limit_continues_after_the_reset(driver, con
     assert [tuple(r) for r in rows] == [(turn, "refactor the parser", "Parser refactored, tests pass.", "ok")]
 
 
-def test_a_request_names_the_files_another_running_agent_changes_here(driver: Driver, conn):
+def test_a_request_names_the_files_another_running_agent_changes_here(driver: Driver, conn, project):
     """On 2026-10-26 five sessions worked on the same agent-mem request at once, unaware of each other, and changed
     the same files twice over."""
     driver.prompt("s1", "improve the search")
@@ -415,12 +415,27 @@ def test_a_request_names_the_files_another_running_agent_changes_here(driver: Dr
     told = driver.prompt("s2", "improve everything").context or ""
     assert "Another agent" in told and "app.py" in told
     assert "Another agent" not in (driver.prompt("s2", "go on").context or "")  # told once
+    (project / "db.py").write_text("x = 1\n")
     driver.edit("s1", "db.py")
-    assert "db.py" in (driver.prompt("s2", "and now?").context or "")  # until it changes another file
-    driver.send("s1", "session_end")
-    driver.edit("s1", "cli.py")
-    assert "Another agent" not in (driver.prompt("s2", "next").context or "")  # an ended session is not running
+    (project / "gone.py").write_text("x = 1\n")
+    driver.edit("s1", "gone.py")
+    (project / "gone.py").unlink()  # a removed worktree's file clashes with nothing
+    told = driver.prompt("s2", "and now?").context or ""
+    assert "db.py" in told and "gone.py" not in told  # again once it changed another file
+    driver.stop("s1", "Done.")
+    assert "Another agent" not in (driver.prompt("s2", "next").context or "")  # its request is answered: not working
     assert "Another agent" not in (driver.start("s3").context or "")
+
+
+def test_sessions_closed_without_session_end_are_not_running(driver: Driver, conn):
+    """After an upgrade a new session was warned about three earlier ones that had answered and were closed without
+    SessionEnd (a closed terminal window, an agent that sends none): the usual one-session-after-another day."""
+    for session in ("a", "b"):
+        driver.prompt(session, "edit the app")
+        driver.edit(session, "app.py")
+        driver.stop(session, "Done.")
+    assert "Another agent" not in (driver.prompt("c", "how does the app work?").context or "")
+    assert "Another agent" not in (driver.pre_edit("c", "app.py").context or "")
 
 
 def test_one_request_reported_by_several_opencode_processes_is_one_turn(conn, config, project):
