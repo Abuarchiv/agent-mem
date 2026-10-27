@@ -1,8 +1,9 @@
-name: Windows session
+name: Agent sessions
 
-# A user's first day on Windows: the install line from the README, then real agent CLIs run their hooks in their own
-# shells (Claude Code: Git Bash, Codex: cmd.exe, OpenCode: its plugin). Claude and Codex get a key that cannot work,
-# so their hooks run and the model call fails; OpenCode answers with its free model and recalls the first session.
+# A user's first day: the install line from the README, then real agent CLIs run their hooks in their own shells
+# (Claude Code on Windows: Git Bash, Codex: cmd.exe, OpenCode: its plugin). Claude and Codex get a key that cannot
+# work, so their hooks run and the model call fails; OpenCode answers with its free model and recalls the first session.
+# Windows gets OpenCode 1.x from npm, Linux OpenCode 2 from its install script: the plugin serves both.
 on:
   workflow_dispatch:
   schedule:
@@ -12,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  session:
+  windows:
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -24,10 +25,12 @@ jobs:
           node-version: 24
       - name: Agent CLIs
         run: npm install -g --no-audit --no-fund @anthropic-ai/claude-code @openai/codex opencode-ai
-      - name: Install line from the README
+      - name: Install line from the README, then this commit
         run: |
           irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/${{ github.sha }}/install.ps1 | iex
           "$env:USERPROFILE\.local\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
+          & "$env:USERPROFILE\.local\bin\agent-mem.exe" setup all --write --no-models | Select-Object -Last 2
       - name: Project
         run: |
           New-Item -ItemType Directory demo | Out-Null
@@ -45,37 +48,17 @@ jobs:
         env:
           OPENAI_API_KEY: sk-not-a-key
         run: |
-          codex exec --skip-git-repo-check --dangerously-bypass-hook-trust "Tests laufen mit pnpm vitest run." 2>&1 | Select-Object -Last 3
+          codex exec --skip-git-repo-check --dangerously-bypass-hook-trust "Tests laufen mit pnpm vitest run." 2>&1 | Select-Object -Last 1
           exit 0
-      - name: OpenCode sessions (plugin, MCP search)
+      - name: OpenCode 1.x sessions (plugin server(), MCP search)
         working-directory: demo
         run: |
-          $probe = @'
-          import { define } from "@opencode-ai/plugin/v2/promise"
-          import { appendFileSync } from "node:fs"
-          export default define({
-            id: "probe",
-            setup: ((context: any) => {
-              const log = (line: string) => appendFileSync(process.env.USERPROFILE + "/probe.txt", line + "\n")
-              log("setup " + JSON.stringify(context.location))
-              void (async () => {
-                let n = 0
-                for await (const event of context.event.subscribe({ signal: new AbortController().signal })) {
-                  const e = event as any
-                  if (n++ < 40) log(e.type + " " + JSON.stringify(e.data?.location ?? null) + " " + (e.data?.sessionID ?? ""))
-                }
-              })()
-            }) as any,
-          })
-          '@
-          $probe | Out-File -Encoding utf8 "$env:USERPROFILE\.config\opencode\plugins\probe.ts"
+          opencode --version
           opencode run -m opencode/big-pickle "Merke dir: der Build läuft mit 'pnpm tsup --minify'. Antworte nur mit OK."
           Start-Sleep 5
           opencode run -m opencode/big-pickle "Suche mit dem Werkzeug agent-mem mem_search nach 'tsup' und nenne den Build-Befehl."
-          Get-Content "$env:USERPROFILE\probe.txt" -ErrorAction SilentlyContinue | Select-Object -First 60
-          Get-ChildItem "$env:USERPROFILE\.local\share\opencode\log" -ErrorAction SilentlyContinue | ForEach-Object {
-            Select-String -Path $_.FullName -Pattern "agent-mem|plugin" | Select-Object -First 30 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) }
-          }
+          Get-ChildItem "$env:USERPROFILE\.local\share\opencode\log" -ErrorAction SilentlyContinue |
+            Select-String -Pattern "failed to load plugin" | ForEach-Object { $_.Line }
           exit 0
       - name: What agent-mem recorded
         run: |
@@ -83,13 +66,11 @@ jobs:
           agent-mem export --output export.json
           $data = Get-Content export.json -Raw | ConvertFrom-Json
           $data.sessions | ForEach-Object { "{0,-9} {1}" -f $_.harness, $_.started_at }
-          $data.turns | ForEach-Object { "T{0} {1} | {2}" -f $_.id, $_.prompt, ("$($_.answer)" -replace '\s+', ' ').Substring(0, [Math]::Min(120, "$($_.answer)".Length)) }
+          $data.turns | ForEach-Object { "T{0} {1} | {2}" -f $_.id, $_.prompt, "$($_.answer)".Substring(0, [Math]::Min(120, "$($_.answer)".Length)) }
           $missing = @("claude", "codex", "opencode") | Where-Object { $_ -notin $data.sessions.harness }
           if ($missing) { throw "no session recorded for: $missing" }
           $prompts = @($data.turns | Where-Object { $_.prompt }).Count
-          if ($prompts -lt 4) { throw "expected 4 requests, got $prompts" }
-          $recall = $data.turns | Where-Object { "$($_.prompt)" -like "*mem_search*" }
-          if ("$($recall.answer)" -notmatch "tsup") { Write-Warning "OpenCode did not recall the build command: $($recall.answer)" }
+          if ($prompts -ne 4) { throw "expected 4 requests, got $prompts" }
       - name: Start block a second Claude Code session gets
         working-directory: demo
         shell: bash
@@ -99,3 +80,37 @@ jobs:
           out=$(echo '{"hook_event_name":"SessionStart","session_id":"second","cwd":"'"$(pwd -W)"'","source":"startup"}' | bash -c "$command")
           echo "$out" | head -c 3000
           echo "$out" | grep -q "pnpm"
+
+  opencode-2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install line from the README, then this commit
+        run: |
+          curl -LsSf https://raw.githubusercontent.com/Abuarchiv/agent-mem/${{ github.sha }}/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ~/.local/bin/uv tool install --upgrade --python 3.13 "agent-mem[semantic,observer] @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
+      - name: OpenCode 2
+        run: |
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      - name: Sessions (plugin setup(), MCP search)
+        run: |
+          agent-mem setup opencode --write --no-models
+          mkdir demo && cd demo && git init -q
+          opencode --version
+          opencode run -m opencode/big-pickle "Merke dir: der Build läuft mit 'pnpm tsup --minify'. Antworte nur mit OK." || true
+          sleep 5
+          opencode run -m opencode/big-pickle "Suche mit dem Werkzeug agent-mem mem_search nach 'tsup' und nenne den Build-Befehl." || true
+          grep -rh "failed to load plugin" ~/.local/share/opencode/log 2>/dev/null || true
+      - name: Each request recorded once
+        run: |
+          agent-mem export --output export.json
+          python3 - <<'EOF'
+          import json
+          data = json.load(open("export.json"))
+          prompts = [t["prompt"] for t in data["turns"] if t["prompt"]]
+          for t in data["turns"]:
+              print(t["id"], t["prompt"][:60], "|", (t.get("answer") or "")[:100])
+          assert len(prompts) == 2, prompts
+          EOF
