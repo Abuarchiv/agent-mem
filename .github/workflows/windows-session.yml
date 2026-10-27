@@ -1,0 +1,78 @@
+name: Windows session
+
+# A user's first day on Windows: the install line from the README, then real agent CLIs run their hooks in their own
+# shells (Claude Code: Git Bash, Codex: cmd.exe, OpenCode: its plugin). Claude and Codex get a key that cannot work,
+# so their hooks run and the model call fails; OpenCode answers with its free model and recalls the first session.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  session:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Agent CLIs
+        run: npm install -g --no-audit --no-fund @anthropic-ai/claude-code @openai/codex opencode-ai
+      - name: Install line from the README
+        run: |
+          irm https://raw.githubusercontent.com/Abuarchiv/agent-mem/${{ github.sha }}/install.ps1 | iex
+          "$env:USERPROFILE\.local\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Project
+        run: |
+          New-Item -ItemType Directory demo | Out-Null
+          git -C demo init -q
+          '{"name":"demo","scripts":{"test":"vitest"}}' | Out-File -Encoding utf8 demo/package.json
+      - name: Claude Code session (hooks in Git Bash)
+        working-directory: demo
+        env:
+          ANTHROPIC_API_KEY: sk-ant-not-a-key
+        run: |
+          claude -p "Wir nutzen pnpm, nicht npm." --max-turns 1 2>&1 | Select-Object -First 3
+          exit 0
+      - name: Codex session (hooks in cmd.exe)
+        working-directory: demo
+        env:
+          OPENAI_API_KEY: sk-not-a-key
+        run: |
+          codex exec --skip-git-repo-check --dangerously-bypass-hook-trust "Tests laufen mit pnpm vitest run." 2>&1 | Select-Object -Last 3
+          exit 0
+      - name: OpenCode sessions (plugin, MCP search)
+        working-directory: demo
+        run: |
+          opencode run -m opencode/big-pickle "Merke dir: der Build läuft mit 'pnpm tsup --minify'. Antworte nur mit OK."
+          Start-Sleep 5
+          opencode run -m opencode/big-pickle "Suche mit dem Werkzeug agent-mem mem_search nach 'tsup' und nenne den Build-Befehl."
+          exit 0
+      - name: What agent-mem recorded
+        run: |
+          agent-mem doctor
+          agent-mem export --output export.json
+          $data = Get-Content export.json -Raw | ConvertFrom-Json
+          $data.sessions | ForEach-Object { "{0,-9} {1}" -f $_.harness, $_.started_at }
+          $data.turns | ForEach-Object { "T{0} {1} | {2}" -f $_.id, $_.prompt, ("$($_.answer)" -replace '\s+', ' ').Substring(0, [Math]::Min(120, "$($_.answer)".Length)) }
+          $missing = @("claude", "codex", "opencode") | Where-Object { $_ -notin $data.sessions.harness }
+          if ($missing) { throw "no session recorded for: $missing" }
+          $prompts = @($data.turns | Where-Object { $_.prompt }).Count
+          if ($prompts -lt 4) { throw "expected 4 requests, got $prompts" }
+          $recall = $data.turns | Where-Object { "$($_.prompt)" -like "*mem_search*" }
+          if ("$($recall.answer)" -notmatch "tsup") { Write-Warning "OpenCode did not recall the build command: $($recall.answer)" }
+      - name: Start block a second Claude Code session gets
+        working-directory: demo
+        shell: bash
+        run: |
+          command=$(grep -o '"command": "[^"]*hook claude"' ~/.claude/settings.json | head -1 | sed 's/^"command": "//; s/"$//')
+          echo "$command"
+          out=$(echo '{"hook_event_name":"SessionStart","session_id":"second","cwd":"'"$(pwd -W)"'","source":"startup"}' | bash -c "$command")
+          echo "$out" | head -c 3000
+          echo "$out" | grep -q "pnpm"
