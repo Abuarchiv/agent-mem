@@ -66,8 +66,8 @@ jobs:
           uv tool install .
           sleep 300 | agent-mem mcp > /dev/null &
           sleep 5
-          sed -i 's/^version = "1.0.0"/version = "1.0.1"/' pyproject.toml
-          sed -i 's/^__version__ = "1.0.0"/__version__ = "1.0.1"/' src/agent_mem/__init__.py
+          sed -i.bak 's/^version = "1.0.0"/version = "1.0.1"/' pyproject.toml
+          sed -i.bak 's/^__version__ = "1.0.0"/__version__ = "1.0.1"/' src/agent_mem/__init__.py
           agent-mem upgrade || true  # doctor --fix at its end finds no agent on the runner
           agent-mem --version | grep -q 1.0.1
 
