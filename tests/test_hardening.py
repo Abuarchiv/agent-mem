@@ -387,6 +387,7 @@ def test_doctor_fix_reports_a_failing_index_run(config, monkeypatch):
 def test_a_fresh_windows_without_the_vc_runtime_is_told_what_to_install(config: Config, monkeypatch):
     """fastembed is installed, but onnxruntime cannot load its DLLs: that is not a missing extra (seen on Windows Server)."""
     import builtins
+    import importlib.util
 
     real = builtins.__import__
 
@@ -398,6 +399,7 @@ def test_a_fresh_windows_without_the_vc_runtime_is_told_what_to_install(config: 
         return real(name, *args, **kwargs)
 
     config.semantic.enabled = True
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args: object())  # macOS Intel ships no fastembed
     monkeypatch.setattr(builtins, "__import__", failing)
     embedder, reason = semantic.load_embedder_verbose(config)
     assert embedder is None and reason is not None
