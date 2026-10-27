@@ -124,20 +124,20 @@ def test_detect_reports_binary_and_extras(homes: Path) -> None:
 def test_setup_all_writes_only_harnesses_on_path(homes: Path, config, monkeypatch, capsys) -> None:
     import argparse
 
-    from agent_mem.cli import commands
+    from agent_mem.cli import lifecycle
 
     monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/codex" if name == "codex" else None)
     config.viewer.enabled = False
     ns = argparse.Namespace(harness="all", write=True, no_models=True)
-    assert commands.cmd_setup(ns, config) == 0
+    assert lifecycle.cmd_setup(ns, config) == 0
     assert (homes / ".codex" / "hooks.json").exists()
     assert not (homes / ".claude" / "settings.json").exists() and not (homes / ".copilot").exists()
 
-    commands.cmd_uninstall(argparse.Namespace(harness="all"), config)
+    lifecycle.cmd_uninstall(argparse.Namespace(harness="all"), config)
     assert install.hook_commands("codex") == []
 
     monkeypatch.setattr(install.shutil, "which", lambda name: None)
-    assert commands.cmd_setup(ns, config) == 1
+    assert lifecycle.cmd_setup(ns, config) == 1
     assert "No agent installed here" in capsys.readouterr().out
 
 
@@ -285,7 +285,7 @@ def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch,
     import argparse
     import subprocess
 
-    from agent_mem.cli import commands
+    from agent_mem.cli import lifecycle
 
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(install, "upgrade_command", lambda add=(): ["/bin/uv", "tool", "install", "x"])
@@ -300,7 +300,7 @@ def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch,
         return subprocess.CompletedProcess(argv, 0, stdout=out)
 
     monkeypatch.setattr(subprocess, "run", run)
-    assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
+    assert lifecycle.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
     assert calls[0] == ["/bin/uv", "tool", "install", "x"]
     assert [c[-2:] for c in calls[2:]] == [["models", "install"], ["doctor", "--fix"]]
     assert all(c[0].endswith(("agent-mem", "agent-mem.exe")) for c in calls[1:])
@@ -396,11 +396,11 @@ def test_docker_setup_says_only_what_holds_on_the_host(homes: Path, config, monk
     """Inside the container no agent is installed and there is no login item; setup must not claim either."""
     import argparse
 
-    from agent_mem.cli import commands
+    from agent_mem.cli import lifecycle
 
     monkeypatch.setenv("AGENT_MEM_EXE", str(homes / "agent-mem"))
     ns = argparse.Namespace(harness="codex", write=True, no_models=False)
-    assert commands.cmd_setup(ns, config) == 0
+    assert lifecycle.cmd_setup(ns, config) == 0
     out = capsys.readouterr().out
     assert f"registered with {homes / 'agent-mem'}" in out
     assert "Detected" not in out and "not installed" not in out and "autostart" not in out
@@ -435,7 +435,7 @@ def test_upgrade_on_windows_hands_over_to_a_script_that_waits_for_it(config, mon
     import argparse
     import subprocess
 
-    from agent_mem.cli import commands
+    from agent_mem.cli import lifecycle
     from agent_mem.hooks import hook
 
     monkeypatch.setattr(sys, "platform", "win32")
@@ -446,7 +446,7 @@ def test_upgrade_on_windows_hands_over_to_a_script_that_waits_for_it(config, mon
     spawned = []
     monkeypatch.setattr(hook, "_spawn", lambda argv, config: spawned.append(argv) or True)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("uv must not run inside this process"))
-    assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
+    assert lifecycle.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
     assert spawned[0][0] == "powershell" and spawned[0][-1].endswith("upgrade.ps1")
     script = (config.log_dir / "upgrade.ps1").read_text(encoding="utf-8-sig").splitlines()
     wait = next(i for i, line in enumerate(script) if line.startswith(f"Wait-Process -Id {os.getpid()} "))
@@ -463,7 +463,7 @@ def test_upgrade_on_windows_leaves_sessions_alone_when_already_newest(config, mo
     import argparse
     import subprocess
 
-    from agent_mem.cli import commands
+    from agent_mem.cli import lifecycle
     from agent_mem.hooks import hook
 
     monkeypatch.setattr(sys, "platform", "win32")
@@ -474,12 +474,12 @@ def test_upgrade_on_windows_leaves_sessions_alone_when_already_newest(config, mo
     monkeypatch.setattr(hook, "_spawn", lambda argv, config: pytest.fail("nothing to hand over"))
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **k: calls.append(argv) or subprocess.CompletedProcess(argv, 0))
-    assert commands.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
+    assert lifecycle.cmd_upgrade(argparse.Namespace(extras=[]), config) == 0
     assert [c[-2:] for c in calls] == [["doctor", "--fix"]]
     assert "1.0.0 (aaaaaaa) is the newest version" in capsys.readouterr().out
     # An extra not installed yet still needs uv, so the hand-over.
     monkeypatch.setattr(hook, "_spawn", lambda argv, config: True)
-    assert commands.cmd_upgrade(argparse.Namespace(extras=["semantic"]), config) == 0
+    assert lifecycle.cmd_upgrade(argparse.Namespace(extras=["semantic"]), config) == 0
     assert "starts when this command ends" in capsys.readouterr().out
 
 
