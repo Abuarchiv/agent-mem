@@ -15,7 +15,9 @@ import { spawn } from "node:child_process"
 
 const define = (plugin: Plugin): Plugin => plugin // what @opencode-ai/plugin's define() does
 
-const TIMEOUT_MS = 2000
+// Same limit as the other harnesses' hooks (10 s). A killed hook records nothing; on Windows a Python start under
+// virus scanning took 2.3 to 3.2 s, and with 2 s here no request was recorded at all.
+const TIMEOUT_MS = 10_000
 
 // Hooks run one after another: a session.start child must have written its row before the
 // chat.message child looks the session up, and both are separate processes.
