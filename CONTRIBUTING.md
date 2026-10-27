@@ -20,7 +20,8 @@ uv run ruff check && uv run ruff format --check && uv run pyright
 
 - A bug fix comes with a test that fails without the fix.
 - A change to what is found or given to agents runs `uv run python bench/check.py`; the pre-push
-  hook does it for you. It needs a local agent-mem database to measure on.
+  hook does it for you. It measures on a frozen copy of your local agent-mem database and skips
+  without one.
 - Tests marked `local` need the observer extra and a cached embedding model; they run by hand
   before a release.
 
