@@ -329,6 +329,9 @@ def tools_run(command: str) -> set[str]:
     return names
 
 
+_JS_MANAGERS = {"npm", "pnpm", "yarn", "bun"}
+
+
 def same_tool(a: str | None, b: str | None) -> bool:
     """Two command keys run the same tool: `python -m pytest`, `uv run pytest` and `pytest` all run pytest."""
 
@@ -338,6 +341,8 @@ def same_tool(a: str | None, b: str | None) -> bool:
         parts = key.split()
         if parts[:1] in (["python"], ["uv"], ["poetry"], ["pdm"], ["hatch"]) and len(parts) == 3:
             return parts[2]  # "python -m pytest", "uv run pytest"
+        if parts[0] in _JS_MANAGERS and len(parts) > 1:
+            return "js " + " ".join(parts[1:])  # `npm install` failing, then `pnpm install` working: one job
         return key
 
     return tool(a) is not None and tool(a) == tool(b)

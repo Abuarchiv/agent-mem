@@ -186,6 +186,9 @@ def test_a_runner_and_its_options_do_not_hide_the_command():
     # the same tool, however it is started: a failure of one is fixed by a pass of the other
     assert signals.same_tool("python -m pytest", "uv run pytest") and signals.same_tool("pytest", "uv run pytest")
     assert not signals.same_tool("uv run ruff", "uv run pytest") and not signals.same_tool("npm test", "pytest")
+    # Switching the package manager is the same job: "Still failing: npm install" after `pnpm install` worked.
+    assert signals.same_tool("npm install", "pnpm install") and signals.same_tool("yarn test", "npm test")
+    assert not signals.same_tool("npm install", "pnpm test")
 
 
 def test_a_chain_is_keyed_by_the_command_that_does_the_work():
