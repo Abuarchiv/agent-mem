@@ -21,6 +21,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
         python: ["3.11", "3.14"]
+        # 3.12 and 3.13 are supported too (classifiers); install.ps1 puts 3.13 on Windows.
+        include:
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
