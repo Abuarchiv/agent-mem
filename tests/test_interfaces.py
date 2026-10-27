@@ -64,6 +64,47 @@ def test_mcp_tools(conn, config: Config, project: Path, driver: Driver, monkeypa
     assert conn.execute("SELECT COUNT(*) FROM accesses WHERE kind = 'get'").fetchone()[0] >= 1
 
 
+def test_mcp_tools_survive_hostile_input(conn, config: Config, project: Path, monkeypatch: pytest.MonkeyPatch):
+    """Found by a bug hunt: each of these lost a reply, crashed or deleted more than it should."""
+    from agent_mem.mcp import server as mcp_server
+
+    monkeypatch.chdir(project)
+    server = mcp_server.build(config)
+
+    def call(name: str, args: dict) -> str:
+        return asyncio.run(server.call_tool(name, args)).content[0].text
+
+    # A lone surrogate is valid JSON but not UTF-8: the call failed and no reply reached the agent.
+    assert call("mem_remember", {"text": "lone \ud800 surrogate"}).startswith("Stored M")
+    assert "Error" not in call("mem_search", {"query": "lone \ud800"})
+    # More than 4300 digits: int() raised ValueError instead of "invalid id".
+    assert call("mem_forget", {"id": "T" + "9" * 5000}).endswith("invalid id")
+    assert "Error executing tool" not in call("mem_get", {"ids": ["M" + "9" * 5000]})
+
+    # Forgetting a replacement brings back what it replaced; both were gone before.
+    old = call("mem_remember", {"text": "Deploy with make ship"}).split()[-1].rstrip(".")
+    new = call("mem_remember", {"text": "Deploy with make release", "supersedes": old}).split()[-1].rstrip(".")
+    assert call("mem_forget", {"id": new}).startswith("Deleted")
+    assert conn.execute("SELECT invalid_at FROM memories WHERE id = ?", (int(old[1:]),)).fetchone()[0] is None
+    assert old in call("mem_search", {"query": "make ship deploy"})
+
+    # A repository below this folder is in search scope, but its memories are not this project's to delete.
+    nested = project / "pkg"
+    nested.mkdir()
+    conn.execute("INSERT INTO projects(id, name, root, created_at) VALUES ('nested', 'pkg', ?, 't')", (str(nested),))
+    below = conn.execute(
+        "INSERT INTO memories(project_id, kind, title, body, source, trust, valid_from, created_at) "
+        "VALUES ('nested', 'fact', 'Nested project', 'x', 'agent', 'agent', 't', 't')"
+    ).lastrowid
+    assert "belongs to another project" in call("mem_forget", {"id": f"M{below}"})
+
+
+def test_c1_control_characters_never_reach_the_terminal():
+    from agent_mem.core.privacy import clean_text
+
+    assert clean_text("red\x9b2J text\x1b[31m", 100) == "red2J text"
+
+
 def test_config_validation(tmp_path: Path):
     data = tmp_path / "d"
     data.mkdir()

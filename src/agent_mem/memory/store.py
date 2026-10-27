@@ -257,6 +257,13 @@ def delete_owner(conn: sqlite3.Connection, owner_type: str, owner_id: int) -> bo
         )
     else:
         linked = [r[0] for r in conn.execute("SELECT concept_id FROM concept_links WHERE memory_id = ?", (owner_id,))]
+        # What it replaced is current again: deleting the replacement otherwise lost both facts. Vectors follow on
+        # the next index run.
+        for row in conn.execute(
+            "SELECT id, kind, title, body FROM memories WHERE superseded_by = ? AND invalid_at IS NOT NULL", (owner_id,)
+        ).fetchall():
+            conn.execute("UPDATE memories SET invalid_at = NULL, superseded_by = NULL WHERE id = ?", (row["id"],))
+            set_search_key(conn, "m", int(row["id"]), f"{row['kind']}: {row['title']}\n{row['body']}")
         cursor = conn.execute("DELETE FROM memories WHERE id = ?", (owner_id,))
         # A concept is a word from the memory ("Qdrant"); once no memory names it, it goes with them.
         for concept_id in linked:
@@ -271,7 +278,7 @@ def parse_owner(text: str) -> tuple[str, int] | None:
     """Parse visible ids such as ``T12`` or ``M7``."""
     value = text.strip().upper().lstrip("#")
     digits = value[1:]
-    if len(value) < 2 or value[0] not in {"T", "M"} or not (digits.isascii() and digits.isdigit()):
+    if len(value) < 2 or value[0] not in {"T", "M"} or not (digits.isascii() and digits.isdigit()) or len(digits) > 19:
         return None
     number = int(digits)
     return (value[0].lower(), number) if number < 2**63 else None  # SQLite INTEGER range

@@ -74,7 +74,8 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 _PRIVATE_BLOCK = re.compile(r"<private>[\s\S]*?(?:</private>|$)", re.IGNORECASE)
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# C1 too: U+009B is a one-character escape sequence (CSI) in many terminals.
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _ERROR_LINE = re.compile(
     r"(?i)(error|exception|traceback|failed|failure|fatal|panic|denied|not found|cannot|undefined|"
     r"ERR!|assert|✗|✘)"

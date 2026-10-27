@@ -14,7 +14,8 @@ from mcp.server.mcpserver import MCPServer
 from agent_mem import __version__
 from agent_mem.core import db, identity
 from agent_mem.core.config import Config, load
-from agent_mem.memory import search, semantic, store, views
+from agent_mem.core.events import without_lone_surrogates
+from agent_mem.memory import semantic, store, views
 
 INSTRUCTIONS = (
     "Local memory shared across coding sessions and agents. Search first (mem_search returns a compact index), "
@@ -42,6 +43,8 @@ def _serialized(lock: threading.Lock, tool: Callable[..., str]) -> Callable[...,
 
     @functools.wraps(tool)
     def run(*args: object, **kwargs: object) -> str:
+        # A lone surrogate (valid JSON, not valid UTF-8) failed the call so that no reply ever reached the agent.
+        args, kwargs = without_lone_surrogates(list(args)), without_lone_surrogates(kwargs)
         with lock:
             try:
                 return tool(*args, **kwargs)
@@ -145,8 +148,8 @@ def build(config: Config | None = None) -> MCPServer:
         if row is None:
             return f"{id}: not found"
         # Like mem_remember's supersedes: an agent (or text injected into what it read) cannot delete another
-        # project's memory from here.
-        if row[0] is not None and row[0] not in search.scope(state.conn, state.project_id):
+        # project's memory from here, not even one of a repository below this folder that search shows.
+        if row[0] is not None and row[0] != state.project_id:
             return f"{id} belongs to another project; the user can delete it with `agent-mem purge --id {id}`."
         with db.transaction(state.conn):
             deleted = store.delete_owner(state.conn, *owner)
