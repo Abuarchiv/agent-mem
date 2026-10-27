@@ -111,6 +111,8 @@ agent-mem upgrade                     # add an extra with: --extras observer
 
 This installs the newest commit of the source you installed from (extras kept), downloads any model the new version needs, then runs `agent-mem doctor --fix`. That migrates the database and rewrites hooks written by an older version. Codex asks you to trust changed hooks once more with `/hooks`. Running the install script again does the same.
 
+On Windows a running program cannot be replaced, so the update starts once the command has ended: it stops the viewer, background jobs and the agent-mem connection of open sessions (restart those), then updates. `logs\upgrade.log` in the data folder shows how it went. When you already have the newest version nothing is stopped.
+
 Avoid `uv tool install --reinstall`: it deletes the environment first, and hooks firing in those seconds find no program.
 
 ### Uninstall
