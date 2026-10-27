@@ -18,11 +18,14 @@ import sys
 import tempfile
 import urllib.parse
 import urllib.request
+from datetime import timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
+from agent_mem.core import timeutil  # noqa: E402
 from agent_mem.core.paths import default_data_dir  # noqa: E402
+from agent_mem.hooks import inject  # noqa: E402
 
 DATA = default_data_dir()
 LIVE = Path(os.environ.get("AM_DB") or DATA / "memory.db")
@@ -86,6 +89,11 @@ with target:
     )
     target.execute("DELETE FROM events WHERE turn_id IN (SELECT id FROM turns WHERE about_bench("
                    "COALESCE(prompt, '') || ' ' || COALESCE(answer, '') || ' ' || COALESCE(title, '')))")  # fmt: skip
+    # Nobody works in a copy. Sessions running when it was taken (the developer's own) were named as parallel agents
+    # in every answer for 20 minutes after, so a baseline measured right after freezing had 0 of 8 silent off-topic
+    # questions and the same check half an hour later 8 of 8.
+    idle = timeutil.iso(timeutil.now() - timedelta(minutes=inject.PARALLEL_MINUTES + 1))
+    target.execute("UPDATE sessions SET last_event_at = ? WHERE last_event_at > ?", (idle, idle))
     target.execute("UPDATE turns SET prompt = '', answer = '', title = NULL WHERE about_bench("
                    "COALESCE(prompt, '') || ' ' || COALESCE(answer, '') || ' ' || COALESCE(title, ''))")  # fmt: skip
 target.close()
