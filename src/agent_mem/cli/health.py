@@ -394,18 +394,26 @@ def _fact_index_check(conn: sqlite3.Connection, config: Config) -> Check | None:
 
 
 def record_setup_health(config: Config) -> None:
-    """Hooks may not import ``cli``, so the indexer they spawn (and ``doctor``) notes hooks an older release wrote,
-    e.g. after a plain ``uv tool upgrade``; the session-start panel shows failing ``health`` rows."""
+    """Hooks may not import ``cli``, so the indexer they spawn renews hooks an older release wrote, in the agent's
+    config folder it ran from: ``upgrade`` fixes only the folder of its own shell, and a second Claude profile
+    (``CLAUDE_CONFIG_DIR``) kept the old hooks. Codex hooks need trust again after a rewrite, so the session-start
+    panel names them (failing ``health`` rows) instead."""
     from agent_mem.cli import install
 
     with contextlib.suppress(OSError, ValueError, sqlite3.Error):
         conn = db.connect(config)
         try:
             for harness in HARNESSES:
-                if install.hook_commands(harness):
-                    stale = install.stale(harness)
-                    error = "hooks come from an older agent-mem release (`agent-mem doctor --fix` rewrites them)"
-                    db.record_health(conn, f"setup:{harness}", error if stale else None)
+                commands = install.hook_commands(harness)
+                if not commands:
+                    continue
+                exe = install.hook_binary(commands[0])
+                if harness != "codex" and install.stale(harness) and Path(exe).is_file():
+                    with contextlib.suppress(OSError, ValueError):
+                        install.write(harness, install.plugins_dir(), exe)
+                stale = install.stale(harness)
+                error = "hooks come from an older agent-mem release (`agent-mem doctor --fix` rewrites them)"
+                db.record_health(conn, f"setup:{harness}", error if stale else None)
         finally:
             conn.close()
 

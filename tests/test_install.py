@@ -307,7 +307,10 @@ def test_upgrade_runs_models_and_doctor_with_the_new_binary(config, monkeypatch,
     assert "1.0.0 (aaaaaaa) -> 1.0.0 (bbbbbbb)" in capsys.readouterr().out
 
 
-def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Path, config) -> None:
+def test_the_indexer_renews_old_hooks_in_the_profile_it_runs_from(homes: Path, config) -> None:
+    """`upgrade` fixes the Claude profile of its own shell only; a session in another profile (CLAUDE_CONFIG_DIR)
+    kept an older release's hooks. The indexer that session spawns renews them; Codex needs trust after a rewrite,
+    so it is named in the session-start panel instead."""
     from agent_mem.cli import main
     from agent_mem.core import db
     from agent_mem.hooks.hook import problems
@@ -316,24 +319,33 @@ def test_stale_hooks_reach_the_session_start_panel_through_the_indexer(homes: Pa
     exe.parent.mkdir()
     exe.write_text("")
     install.write("claude", PLUGINS, str(exe))
+    install.write("codex", PLUGINS, str(exe))
     settings = homes / ".claude" / "settings.json"
     data = json.loads(settings.read_text())
-    data["hooks"]["Stop"][0]["hooks"][0]["timeout"] = 99  # written by an older release
+    data["hooks"]["Stop"][0]["hooks"][0]["async"] = True  # written by an older release
     settings.write_text(json.dumps(data))
+    codex = homes / ".codex" / "hooks.json"
+    data = json.loads(codex.read_text())
+    del data["hooks"]["PreCompact"]
+    codex.write_text(json.dumps(data))
+    assert install.stale("claude") and install.stale("codex")
 
     data_dir = ["--data-dir", str(config.data_dir)]
     assert main([*data_dir, "index", "--quiet", "--no-download"]) == 0  # what the hooks spawn
+    assert not install.stale("claude") and install.stale("codex")
+    assert install.hook_commands("claude") == [f"{Path(exe).as_posix()} hook claude"]
     conn = db.connect(config)
     try:
         shown = problems(conn)
-        assert any("Claude Code connection" in line and "doctor --fix" in line for line in shown)
+        assert any("Codex connection" in line and "doctor --fix" in line for line in shown)
+        assert not any("Claude Code connection" in line for line in shown)
     finally:
         conn.close()
 
     assert main([*data_dir, "doctor", "--fix"]) in (0, 1)
     conn = db.connect(config)
     try:
-        assert not any("Claude Code connection" in line for line in problems(conn))
+        assert not any("Codex connection" in line for line in problems(conn))
     finally:
         conn.close()
 
