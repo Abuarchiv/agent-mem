@@ -34,7 +34,7 @@ def write(spool_dir: Path, record: dict[str, Any], session: str = "") -> Path:
     name = f"{time.time_ns():020d}-{os.getpid()}-{session or 'x'}-{secrets.token_hex(4)}.json"
     target = spool_dir / name
     temp = spool_dir / f".{name}.tmp"
-    with open(temp, "w", encoding="utf-8") as handle:
+    with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as handle:
         json.dump(record, handle, ensure_ascii=False)
         handle.flush()
         with contextlib.suppress(OSError):

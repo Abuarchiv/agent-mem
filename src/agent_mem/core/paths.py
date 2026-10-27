@@ -41,6 +41,15 @@ def _tool_input(payload: dict[str, object]) -> object:
 
 
 def pre_tool_has_nothing_to_check(event_name: str | None, raw: bytes) -> bool:
+    # Runs before the hook's own error handling: an odd payload (a list as event name, deep nesting) must fall
+    # through to it, not end the hook with a traceback.
+    try:
+        return _nothing_to_check(event_name, raw)
+    except Exception:
+        return False
+
+
+def _nothing_to_check(event_name: str | None, raw: bytes) -> bool:
     """True for a pre-tool event the hook would answer with silence: a command while no rule exists and no
     remembered file is named in it, a read or edit of a file without memories. The hook then exits before loading the database code (about 45 ms per Bash or Edit
     call), and the event is not stored: nothing reads pre-tool events. In doubt it returns False."""
@@ -53,7 +62,7 @@ def pre_tool_has_nothing_to_check(event_name: str | None, raw: bytes) -> bool:
         return False
     name = event_name or payload.get("hook_event_name") or payload.get("hookEventName") or payload.get("event")
     tool_input = _tool_input(payload)
-    if name not in _PRE_TOOL or not isinstance(tool_input, dict):
+    if not isinstance(name, str) or name not in _PRE_TOOL or not isinstance(tool_input, dict):
         return False
     files = [str(f) for f in guards.get("files") or []]
     command = tool_input.get("command", tool_input.get("cmd"))

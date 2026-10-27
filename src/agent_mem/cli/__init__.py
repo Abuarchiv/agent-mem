@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
 
         raw = None
         if args[1:2] not in ([], ["-h"], ["--help"]):  # typed by a person: the hook explains itself, no stdin
-            raw = sys.stdin.buffer.read(paths.STDIN_CAP + 1)
+            raw = sys.stdin.buffer.read(paths.STDIN_CAP + 1) if sys.stdin is not None else b""
             # Before the hook module loads: most Bash and Edit calls have nothing to check.
             if paths.pre_tool_has_nothing_to_check(args[2] if len(args) > 2 else None, raw):
                 os._exit(0)

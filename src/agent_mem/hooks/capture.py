@@ -167,6 +167,19 @@ def context_only(conn: sqlite3.Connection, config: Config, event: Event) -> Resp
     return Response(context=block.text if block else None)
 
 
+def clean_strings(value: Any, depth: int = 0) -> Any:
+    """Every string in a host value cleaned like stored text (secrets, private sections, control characters)."""
+    if isinstance(value, str):
+        return privacy.clean_text(value, len(value))
+    if depth > 20:
+        return value
+    if isinstance(value, dict):
+        return {key: clean_strings(item, depth + 1) for key, item in value.items()}
+    if isinstance(value, list):
+        return [clean_strings(item, depth + 1) for item in value]
+    return value
+
+
 def _bound_host_strings(event: Event) -> None:
     """Short identifiers from the host are stored in columns too; clean and bound them like all text."""
 
@@ -177,6 +190,10 @@ def _bound_host_strings(event: Event) -> None:
     event.tool_use_id = bounded(event.tool_use_id, 128)
     event.source = bounded(event.source, 64)
     event.raw_kind = bounded(event.raw_kind, 64) or ""
+    if event.exit_code is not None and not -(2**31) <= event.exit_code < 2**31:
+        event.exit_code = None  # SQLite INTEGER overflowed and the event was lost
+    if event.cwd and "\0" in event.cwd:
+        event.cwd = None  # no file system takes it; resolving it failed the whole session
 
 
 def _apply(
@@ -266,12 +283,14 @@ def _payload(config: Config, event: Event, project: identity.Project | None) -> 
         globs = exclude_globs(config, project)
         excluded = _excluded(project, tool_signal.files, globs)
         try:
+            # Each string on its own: inside JSON a value's quotes read \" and `API_KEY = "…"` in a written file
+            # no longer matched the secret patterns.
             raw_input = (
                 event.tool_input
                 if isinstance(event.tool_input, str)
-                else json.dumps(event.tool_input, ensure_ascii=False)
+                else json.dumps(clean_strings(event.tool_input), ensure_ascii=False)
             )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
             raw_input = str(event.tool_input)
         if excluded and tool_signal.category == "edit":
             raw_input = json.dumps({"files": list(tool_signal.files), "content": "[excluded by privacy rules]"})

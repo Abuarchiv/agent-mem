@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 
 
@@ -29,18 +30,18 @@ def parse(value: str | None) -> datetime | None:
 
 
 def from_any(value: object) -> str:
-    """Accept epoch seconds/milliseconds or ISO strings from hosts; fall back to now."""
+    """Accept epoch seconds/milliseconds or ISO strings from hosts; fall back to now, also for a time more than a day
+    off (a payload saying 3000-01-01 made that session the newest one forever)."""
+    parsed: datetime | None = None
     if isinstance(value, int | float) and value > 0:
         seconds = value / 1000 if value > 10_000_000_000 else value
-        try:
-            return iso(datetime.fromtimestamp(seconds, UTC))
-        except (OverflowError, OSError, ValueError):
-            return iso()
-    if isinstance(value, str):
+        with contextlib.suppress(OverflowError, OSError, ValueError):
+            parsed = datetime.fromtimestamp(seconds, UTC)
+    elif isinstance(value, str):
         parsed = parse(value)
-        if parsed is not None:
-            return iso(parsed)
-    return iso()
+    if parsed is None or abs((parsed - now()).total_seconds()) > 86_400 * 2:
+        return iso()
+    return iso(parsed)
 
 
 def hours_between(earlier: str, later: datetime | None = None) -> float:

@@ -19,7 +19,7 @@ import threading
 import time
 from typing import Any
 
-from agent_mem.core import db, logutil, proc, spool, timeutil
+from agent_mem.core import db, logutil, privacy, proc, spool, timeutil
 from agent_mem.core.config import Config, env_flag, load
 from agent_mem.core.events import Event, PayloadError, without_lone_surrogates
 from agent_mem.core.harness import HARNESS_NAMES
@@ -36,7 +36,7 @@ def _read_stdin(limit: int, preread: bytes | None = None) -> str:
     data = sys.stdin.buffer.read(limit + 1) if preread is None else preread
     if len(data) > limit:
         raise PayloadError("payload too large")
-    return data.decode("utf-8", errors="replace")
+    return data.decode("utf-8-sig", errors="replace")  # PowerShell pipes may start with a BOM
 
 
 def render(harness: str, event: Event, response: capture.Response) -> dict[str, Any] | None:
@@ -262,7 +262,9 @@ class _Worker(threading.Thread):
                 return
             try:
                 tag = spool.session_tag(self.event.harness, self.event.session_id)
-                spool.write(self.config.spool_dir, {"type": "event", "event": self.event.to_dict()}, tag)
+                # Cleaned like what the database gets: a spool file can wait for days, or end in quarantine.
+                event = capture.clean_strings(self.event.to_dict())
+                spool.write(self.config.spool_dir, {"type": "event", "event": event}, tag)
                 self.spooled = True
             except OSError as error:
                 self.error = f"{self.error}; spool failed: {error}" if self.error else f"spool failed: {error}"
@@ -385,7 +387,7 @@ def _terminal(config: Config, event: Event, worker: _Worker) -> str | None:
         failure = f"agent-mem cannot use its database ({worker.error[:200]}). {lost} Run `agent-mem doctor`."
     # A subagent's start shows no panel: one per session is enough, Copilot would list one per subagent.
     if event.kind == "session_start" and event.source != "subagent":
-        heading = os.path.basename(event.cwd.rstrip("/\\")) if event.cwd else "session start"
+        heading = privacy.strip_control(os.path.basename(event.cwd.rstrip("/\\"))) if event.cwd else "session start"
         if event.source == "compact":
             heading += " · after compaction"
         context = worker.response.context if worker.response is not None else None

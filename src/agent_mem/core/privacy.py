@@ -29,9 +29,16 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("npm_token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
     ("pypi_token", re.compile(r"\bpypi-[A-Za-z0-9_-]{50,}")),
     ("hf_token", re.compile(r"\bhf_[A-Za-z0-9]{30,}")),
+    # Provider keys with a fixed prefix, found without a name in front of them.
+    ("provider_key", re.compile(r"\b(?:gsk|xai|pplx|r8|shpat|shpss|dop_v1|sk_live|rk_live)[_-][A-Za-z0-9_-]{20,}")),
+    ("provider_key", re.compile(r"\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}")),
+    ("provider_key", re.compile(r"\bya29\.[A-Za-z0-9_-]{20,}")),
+    ("provider_key", re.compile(r"\bSK[0-9a-f]{32}\b")),
+    ("webhook", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
     ("bearer", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}")),
-    ("url_credentials", re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s:/@]+:[^\s@/]+@")),
+    # The password may hold "/" and "@": it runs to the last "@" before the host.
+    ("url_credentials", re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s:/@]+:[^\s]*@(?=[^\s@]*(?:\s|$))")),
     # Passwords given as command-line options; group 1 stays, group 2 is the secret. Only for the tools that take
     # them this way: a bare "-p" means something else to mkdir or tar.
     (
@@ -46,6 +53,12 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # Headers that carry credentials: the whole value goes (a cookie line holds several, Basic is user:password).
     ("header", re.compile(r"(?im)(\b(?:set-)?cookie\s*:\s*)([^\r\n]+)")),
     ("header", re.compile(r"(?i)(\bauthorization\s*:\s*(?:basic|digest|token)\s+)(\S+)")),
+    (
+        "header",
+        re.compile(
+            r"(?i)(\b(?:authorization|x-[a-z0-9-]*(?:auth|token|key)[a-z0-9-]*)\s*:\s*)(?!bearer\b|basic\b|digest\b|token\b|\[REDACTED)(?=[^\s\"',;]*\d)([^\s\"',;]{8,})"
+        ),
+    ),
     # An AWS secret access key is 40 characters of base64 with no prefix; only after its name.
     (
         "cli_password",
@@ -64,7 +77,8 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         "assignment",
         re.compile(
             r"(?i)\b([A-Za-z0-9_]*(?:api[_-]?key|secret|token|password|passwd|pwd|passphrase|"
-            r"client[_-]?secret|private[_-]?key|access[_-]?key|account[_-]?key|auth[_-]?token|credential)"
+            r"client[_-]?secret|private[_-]?key|access[_-]?key|account[_-]?key|auth[_-]?token|credential|"
+            r"(?:signing|encryption|master|session|secret)[_-]?key|(?<![a-z])pass(?![a-z]))"
             r"[A-Za-z0-9_]*)"
             # A JSON value runs to its closing quote: "correct horse battery" is one password, not "correct".
             r"(\s*[:=]\s*|\"\s*:\s*\")(\"[^\"\r\n]{4,}\"|'[^'\r\n]{4,}'|(?<=\")[^\"\r\n]{4,}(?=\")|[^\s,;\"'}\]]{6,})"
@@ -72,10 +86,13 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
-_PRIVATE_BLOCK = re.compile(r"<private>[\s\S]*?(?:</private>|$)", re.IGNORECASE)
+# The innermost block first, repeated until none is left: a non-greedy match ended a nested block at its first
+# </private> and stored the rest. An unclosed block runs to the end. Attributes and spaces in the tag count too.
+_PRIVATE_BLOCK = re.compile(r"<private\b[^>]*>(?:(?!<private\b)[\s\S])*?(?:</private\s*>|$)", re.IGNORECASE)
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 # C1 too: U+009B is a one-character escape sequence (CSI) in many terminals.
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+# Zero-width characters too: "<pri\u200bvate>" read like the tag to a person but did not match it.
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u200b-\u200d\u2060\ufeff]")
 _ERROR_LINE = re.compile(
     r"(?i)(error|exception|traceback|failed|failure|fatal|panic|denied|not found|cannot|undefined|"
     r"ERR!|assert|✗|✘)"
@@ -126,7 +143,10 @@ def redact(text: str) -> tuple[str, int]:
 
 
 def strip_private(text: str) -> str:
-    return _PRIVATE_BLOCK.sub("[private]", text)
+    while True:
+        text, n = _PRIVATE_BLOCK.subn("[private]", text)
+        if not n:
+            return text
 
 
 def strip_control(text: str) -> str:
@@ -137,7 +157,7 @@ def clean_text(text: str, limit: int) -> str:
     """Private sections removed, control characters removed, secrets redacted, size bounded."""
     if not text:
         return ""
-    text = strip_control(strip_private(text))
+    text = strip_private(strip_control(text))  # control characters inside a tag hid it
     text, _ = redact(text)
     return truncate(text, limit)
 
