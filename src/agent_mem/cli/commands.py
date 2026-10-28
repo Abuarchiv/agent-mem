@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -52,8 +52,16 @@ def dispatch(ns: argparse.Namespace, config: Config) -> int:
     return handler(ns, config)
 
 
-def _conn(config: Config) -> sqlite3.Connection:
-    return db.connect(config, busy_timeout_ms=5000)
+@contextlib.contextmanager
+def _conn(config: Config) -> Iterator[sqlite3.Connection]:
+    """Commits like ``with conn`` and closes as well: the statement cache keeps an unclosed connection alive until the
+    garbage collector runs, and on Windows an open database cannot be deleted (``purge --all``)."""
+    conn = db.connect(config, busy_timeout_ms=5000)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _project(conn: sqlite3.Connection, directory: str | None) -> identity.Project | None:
@@ -298,8 +306,12 @@ def _purge_all(ns: argparse.Namespace, config: Config) -> int:
         Path(f"{config.db_path}-shm"),
         Path(f"{config.db_path}.replaced"),
     ):
-        if path.exists():
-            path.unlink()
+        try:
+            path.unlink(missing_ok=True)
+        except PermissionError:  # Windows: an agent's MCP server or the viewer has the database open
+            print(f"{path} is open in another program. Close your agents and the viewer, then run this again.",
+                  file=sys.stderr)  # fmt: skip
+            return 1
     for folder in (config.backup_dir, config.spool_dir, config.quarantine_dir, config.log_dir, config.mem0_dir):
         shutil.rmtree(folder, ignore_errors=True)
     print("All data deleted (config and models kept).")

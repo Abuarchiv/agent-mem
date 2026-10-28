@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -89,13 +90,23 @@ def _write_text(path: Path, text: str, *, backup: bool = True) -> None:
     try:
         tmp.write_text(text, encoding="utf-8")
         if path.exists():
-            saved.unlink(missing_ok=True)  # a read-only file's copy is read-only too and cannot be overwritten
+            _unlink(saved)  # a read-only file's copy is read-only too and cannot be overwritten
             if backup:
                 shutil.copy2(path, saved)
             shutil.copymode(path, tmp)
+            if sys.platform == "win32":
+                os.chmod(path, stat.S_IWRITE)  # Windows refuses to replace a read-only file
         os.replace(tmp, path)
     finally:
-        tmp.unlink(missing_ok=True)
+        _unlink(tmp)
+
+
+def _unlink(path: Path) -> None:
+    """Windows refuses to delete a read-only file."""
+    with contextlib.suppress(FileNotFoundError):
+        if sys.platform == "win32":
+            os.chmod(path, stat.S_IWRITE)
+        path.unlink()
 
 
 def _write_json(path: Path, data: dict[str, Any], *, backup: bool = True) -> None:
@@ -108,8 +119,8 @@ def _drop_if_empty(path: Path, data: dict[str, Any], *keys: str) -> bool:
     rest.pop("$schema", None)
     if rest:
         return False
-    path.unlink(missing_ok=True)
-    path.with_name(path.name + ".agent-mem-backup").unlink(missing_ok=True)
+    _unlink(path)
+    _unlink(path.with_name(path.name + ".agent-mem-backup"))
     return True
 
 
@@ -275,7 +286,7 @@ def remove(harness: str) -> list[Path]:
                 if text.strip():
                     _write_text(toml, text, backup=False)
                 else:
-                    toml.unlink()
+                    _unlink(toml)
                 touched.append(toml)
     elif harness in {"copilot", "opencode"}:
         if harness == "copilot":
@@ -288,7 +299,7 @@ def remove(harness: str) -> list[Path]:
             own, path, key = opencode_home() / "plugins" / "agent-mem.ts", opencode_home() / "opencode.json", "mcp"
         data = _load_for_update(path)
         if own.exists():
-            own.unlink()
+            _unlink(own)
             touched.append(own)
         with contextlib.suppress(OSError):  # the folder setup created, if nothing else is in it
             own.parent.rmdir()
@@ -301,7 +312,7 @@ def remove(harness: str) -> list[Path]:
     else:
         raise ValueError(f"unknown harness {harness!r}")
     for path in touched:  # the copies setup kept of the user's files
-        path.with_name(path.name + ".agent-mem-backup").unlink(missing_ok=True)
+        _unlink(path.with_name(path.name + ".agent-mem-backup"))
     return touched
 
 

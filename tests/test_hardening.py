@@ -1,6 +1,8 @@
 """Regression tests for edge cases."""
 
 import asyncio
+import contextlib
+import gc
 import json
 import os
 import sqlite3
@@ -451,6 +453,31 @@ def test_purge_takes_what_was_learned_from_the_deleted_requests(driver: Driver, 
     conn.close()
     assert cli.main([*base, "purge", "--all", "--yes"]) == 0
     assert not config.mem0_dir.exists()
+
+
+def test_commands_close_the_database(driver: Driver, config: Config):
+    """The statement cache keeps an unclosed connection alive until the garbage collector runs; on Windows the open
+    file made `purge --all` fail."""
+
+    def open_connections() -> int:
+        count = 0
+        for item in gc.get_objects():
+            if isinstance(item, sqlite3.Connection):
+                with contextlib.suppress(sqlite3.ProgrammingError):
+                    count += item.total_changes >= 0
+        return count
+
+    driver.prompt("s1", "hello")
+    gc.collect()
+    gc.disable()  # a collection in between would hide the leak
+    try:
+        before = open_connections()
+        base = ["--data-dir", str(config.data_dir)]
+        for args in (["status"], ["show", "T1"], ["search", "hello"], ["purge", "--id", "T1", "--yes"]):
+            cli.main([*base, *args])
+        assert open_connections() == before
+    finally:
+        gc.enable()
 
 
 def test_cli_answers_odd_input_plainly(driver: Driver, config: Config, project: Path, tmp_path: Path, capsys):

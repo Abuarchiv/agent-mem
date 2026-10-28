@@ -62,14 +62,13 @@ def main(argv: list[str] | None = None) -> int:
         return code
     except KeyboardInterrupt:
         return 130
-    except BrokenPipeError:
-        import os
-
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        return 1
     except Exception as error:
         import os
 
+        # Windows reports a closed pipe as EINVAL instead of EPIPE.
+        if isinstance(error, BrokenPipeError) or (sys.platform == "win32" and getattr(error, "errno", None) == 22):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 1
         if os.environ.get("AGENT_MEM_DEBUG"):
             raise
         print(f"agent-mem: {_explain(error)}", file=sys.stderr)
