@@ -25,6 +25,19 @@ def _viewer_script() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _clear_of_utc_midnight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Driver events lie up to 20 minutes back; right after UTC midnight they fell on yesterday and the tests of
+    "today" failed (CI at 00:11). Then the clock runs 40 minutes ahead, for agent-mem and the Driver alike."""
+    from datetime import timedelta
+
+    from agent_mem.core import timeutil
+
+    real = timeutil.now
+    if real().hour == 0 and real().minute < 30:
+        monkeypatch.setattr(timeutil, "now", lambda: real() + timedelta(minutes=40))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AGENT_MEM_NO_SPAWN", "1")
     monkeypatch.delenv("AGENT_MEM_INTERNAL", raising=False)
@@ -88,7 +101,6 @@ class Driver:
         self.counter += 1
         now = timeutil.now()
         # In the past, but on today's UTC date: tests of "today" and "gestern" read the date of these events.
-        # ponytail: within the first 20 minutes after UTC midnight the events still fall on yesterday.
         since_midnight = now - now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=1)
         ago = max(timedelta(minutes=20), min(timedelta(minutes=500), since_midnight))
         return timeutil.iso(now - ago + timedelta(seconds=next(_CLOCK)))

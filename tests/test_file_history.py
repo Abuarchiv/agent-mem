@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 
-from agent_mem.core import signals
+from agent_mem.core import signals, timeutil
 from agent_mem.memory import store
 from tests.conftest import Driver
 
@@ -71,7 +71,7 @@ def test_a_fact_older_than_the_last_change_is_left_out(driver: Driver, conn, pro
     path.write_text(BIG)
     fact = _remember(conn, driver, "fact", "api.py exposes three routes", "api.py")
     decision = _remember(conn, driver, "decision", "Routes stay synchronous", "api.py")
-    later = time.time() + 5
+    later = timeutil.now().timestamp() + 5  # the clock agent-mem stamps memories with
     os.utime(path, (later, later))
     driver.prompt("s1", "read api.py")
     context = _pre(driver, "s1", "Read", {"file_path": str(path)}).context or ""
